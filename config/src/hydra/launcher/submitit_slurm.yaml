@@ -27,4 +27,6 @@ mem_gb: 32
 timeout_min: 1440
 nodes: 1
 stderr_to_stdout: true
-submitit_folder: ${hydra.sweep.dir}/${hydra.sweep.subdir}/.submitit/%j
+submitit_folder: ${hydra.sweep.dir}/.submitit/%j
+setup:
+  - export PYTHONPATH="$SLURM_SUBMIT_DIR/code:$PYTHONPATH"

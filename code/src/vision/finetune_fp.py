@@ -1,13 +1,19 @@
-import logging
-import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+# MUST be the first thing that runs: HF libs (transformers, huggingface_hub,
+# datasets) and our own src.vision.data.common all snapshot env vars at import
+# time. Loading .env after those imports has no effect.
+from dotenv import load_dotenv
+load_dotenv()
+
+import logging
+import os
+
 import hydra
 import torch
-from dotenv import load_dotenv
 from omegaconf import DictConfig, OmegaConf
 from rich.pretty import pprint
 from tqdm import tqdm
@@ -41,7 +47,6 @@ OmegaConf.register_new_resolver(
     version_base=None,
 )
 def main(cfg: DictConfig) -> None:
-    load_dotenv()
     if IS_SLURM:
         log.info("cfg:\n%s", dict(cfg))
     else:

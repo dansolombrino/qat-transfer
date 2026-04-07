@@ -106,3 +106,5 @@ outputs/
 storage/
 
 .claude/
+
+logs/
