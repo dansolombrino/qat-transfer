@@ -1,0 +1,8 @@
+# References
+references/
+
+# Visual Studio Code
+.vscode/
+
+# .env file for constants, tokens, paths, etc.
+.env
