@@ -8,7 +8,26 @@ from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader, Sampler
 from torch.utils.data.dataset import random_split
 
-from ..utils import SPLIT_SEED, VAL_FRACTION, MAX_VAL_SAMPLES
+from ..utils import SPLIT_SEED, VAL_FRACTION, MAX_VAL_SAMPLES, seed_worker
+
+
+def make_seeded_loader(dataset, shuffle, batch_size, num_workers, seed):
+    """Build a DataLoader whose shuffling and worker RNGs are seeded with `seed`.
+
+    `seed` here is the per-run training seed (cfg.seed in finetune_fp.py), NOT
+    SPLIT_SEED. SPLIT_SEED is reserved exclusively for deciding the train/val
+    index split inside make_val_split and must never reach this function.
+    """
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=num_workers,
+        worker_init_fn=seed_worker,
+        generator=generator,
+    )
 
 HF_TOKEN = os.environ.get("HF_TOKEN")
 HF_DATASETS_CACHE = os.environ.get("HF_DATASETS_CACHE")

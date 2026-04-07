@@ -7,6 +7,7 @@ from transformers import CLIPTokenizer
 from .data.registry import get_dataset
 from .data.templates import get_templates
 from .modeling import ClassificationHead, ImageEncoder
+from .utils import SPLIT_SEED
 
 
 def build_classification_head(model, tokenizer, dataset_name, device):
@@ -19,6 +20,7 @@ def build_classification_head(model, tokenizer, dataset_name, device):
         preprocess_inference=None,
         batch_size=1,
         num_workers=0,
+        seed=SPLIT_SEED,
     )
     model.eval()
     model.to(device)

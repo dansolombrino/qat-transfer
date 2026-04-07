@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from src.vision.data.registry import registry, get_dataset
 from src.vision.modeling import ClassificationHead, ImageClassifier, ImageEncoder
-from src.vision.utils import random_tqdm_color
+from src.vision.utils import SPLIT_SEED, random_tqdm_color
 
 
 def test_init(model_name: str, num_classes: int):
@@ -61,6 +61,7 @@ def test_dataset_forward(
         preprocess_inference=classifier.val_preprocess,
         batch_size=batch_size,
         num_workers=num_workers,
+        seed=SPLIT_SEED,
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -110,6 +111,7 @@ def main():
             preprocess_inference=None,
             batch_size=1,
             num_workers=0,
+            seed=SPLIT_SEED,
         )
         num_classes = len(probe.class_names)
 

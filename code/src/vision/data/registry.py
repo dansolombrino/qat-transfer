@@ -48,20 +48,22 @@ class GenericDataset(object):
 
 
 def get_dataset(
-    dataset_name: str, 
+    dataset_name: str,
     preprocess_train,
-    preprocess_inference,  
-    batch_size: int, 
-    num_workers: int
+    preprocess_inference,
+    batch_size: int,
+    num_workers: int,
+    seed: int,
 ):
-    
+
     assert dataset_name in registry, f'Unsupported dataset: {dataset_name}. Supported datasets: {list(registry.keys())}'
-    
+
     dataset_class = registry[dataset_name]
-    
+
     return dataset_class(
-        preprocess_train=preprocess_train, 
+        preprocess_train=preprocess_train,
         preprocess_inference=preprocess_inference,
-        batch_size=batch_size, 
-        num_workers=num_workers
+        batch_size=batch_size,
+        num_workers=num_workers,
+        seed=seed,
     )

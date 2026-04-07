@@ -1,6 +1,6 @@
 import torch
 from datasets import load_dataset
-from .common import HFVisionDataset, HF_TOKEN, HF_DATASETS_CACHE, make_val_split
+from .common import HFVisionDataset, HF_TOKEN, HF_DATASETS_CACHE, make_val_split, make_seeded_loader
 
 
 class FER2013:
@@ -9,7 +9,8 @@ class FER2013:
         preprocess_train,
         preprocess_inference,
         batch_size,
-        num_workers
+        num_workers,
+        seed
     ):
 
         hf_train = load_dataset("clip-benchmark/wds_fer2013", split="train", token=HF_TOKEN, cache_dir=HF_DATASETS_CACHE)
@@ -25,17 +26,19 @@ class FER2013:
             val_transform=preprocess_inference,
         )
 
-        self.train_loader = torch.utils.data.DataLoader(
-            self.train_dataset,
+        self.train_loader = make_seeded_loader(
+            dataset=self.train_dataset,
             shuffle=True,
             batch_size=batch_size,
             num_workers=num_workers,
+            seed=seed,
         )
-        self.val_loader = torch.utils.data.DataLoader(
-            self.val_dataset,
+        self.val_loader = make_seeded_loader(
+            dataset=self.val_dataset,
             shuffle=False,
             batch_size=batch_size,
             num_workers=num_workers,
+            seed=seed,
         )
 
         hf_test = load_dataset("clip-benchmark/wds_fer2013", split="test", token=HF_TOKEN, cache_dir=HF_DATASETS_CACHE)
@@ -43,10 +46,12 @@ class FER2013:
             hf_test, transform=preprocess_inference, image_col="jpg", label_col="cls"
         )
 
-        self.test_loader = torch.utils.data.DataLoader(
-            self.test_dataset,
+        self.test_loader = make_seeded_loader(
+            dataset=self.test_dataset,
+            shuffle=False,
             batch_size=batch_size,
             num_workers=num_workers,
+            seed=seed,
         )
 
         self.class_names = [

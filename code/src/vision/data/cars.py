@@ -1,6 +1,6 @@
 import torch
 from datasets import load_dataset
-from .common import HFVisionDataset, HF_TOKEN, HF_DATASETS_CACHE, make_val_split
+from .common import HFVisionDataset, HF_TOKEN, HF_DATASETS_CACHE, make_val_split, make_seeded_loader
 
 
 class Cars:
@@ -9,7 +9,8 @@ class Cars:
         preprocess_train,
         preprocess_inference,
         batch_size,
-        num_workers
+        num_workers,
+        seed
     ):
 
         # get HF train dataset
@@ -27,17 +28,19 @@ class Cars:
         )
 
         # create dataloaders after dataset splitting
-        self.train_loader = torch.utils.data.DataLoader(
-            self.train_dataset,
+        self.train_loader = make_seeded_loader(
+            dataset=self.train_dataset,
             shuffle=True,
             batch_size=batch_size,
             num_workers=num_workers,
+            seed=seed,
         )
-        self.val_loader = torch.utils.data.DataLoader(
-            self.val_dataset,
+        self.val_loader = make_seeded_loader(
+            dataset=self.val_dataset,
             shuffle=False,
             batch_size=batch_size,
-            num_workers=num_workers
+            num_workers=num_workers,
+            seed=seed,
         )
 
         # get HF test dataset
@@ -45,10 +48,12 @@ class Cars:
         self.test_dataset = HFVisionDataset(hf_test, transform=preprocess_inference)
 
         # create dataloaders after dataset splitting
-        self.test_loader = torch.utils.data.DataLoader(
-            self.test_dataset,
+        self.test_loader = make_seeded_loader(
+            dataset=self.test_dataset,
+            shuffle=False,
             batch_size=batch_size,
-            num_workers=num_workers
+            num_workers=num_workers,
+            seed=seed,
         )
 
         # get class names and process them
