@@ -1,0 +1,29 @@
+# Hydra Submitit SLURM launcher config for qat-transfer.
+#
+# Usage:
+#   - Run locally (default, no SLURM):
+#       uv run --active python code/src/vision/finetune_fp.py \
+#         model_name=openai/clip-vit-base-patch16 dataset_name=CIFAR10 seed=2038
+#
+#   - Submit a single run to SLURM via submitit:
+#       uv run --active python code/src/vision/finetune_fp.py -m \
+#         hydra/launcher=submitit_slurm \
+#         model_name=openai/clip-vit-base-patch16 dataset_name=CIFAR10 seed=2038
+#
+#   - Multirun sweep (each combination = separate SLURM job):
+#       uv run --active python code/src/vision/finetune_fp.py -m \
+#         hydra/launcher=submitit_slurm \
+#         model_name=openai/clip-vit-base-patch16 dataset_name=CIFAR10 seed=1,2,3
+#
+# Without "-m hydra/launcher=submitit_slurm", the script runs in the current
+# process (login node / local machine).
+
+_target_: hydra_plugins.hydra_submitit_launcher.submitit_launcher.SlurmLauncher
+partition: boost_usr_prod
+account: IscrC_SIMP
+gpus_per_node: 1
+cpus_per_task: 16
+mem_gb: 32
+timeout_min: 1440
+nodes: 1
+stderr_to_stdout: true
