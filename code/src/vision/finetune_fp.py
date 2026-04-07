@@ -145,7 +145,7 @@ def main(cfg: DictConfig) -> None:
 
             batch = maybe_dictionarize(batch)
             images = batch["images"].to(device)
-            labels = batch["labels"].to(device)
+            labels = batch["labels"].to(device=device, dtype=torch.long)
 
             logits = classifier(images)
             loss: torch.Tensor = loss_fn(logits, labels)
@@ -181,7 +181,7 @@ def main(cfg: DictConfig) -> None:
                     break
                 batch = maybe_dictionarize(batch)
                 images = batch["images"].to(device)
-                labels = batch["labels"].to(device)
+                labels = batch["labels"].to(device=device, dtype=torch.long)
                 logits = classifier(images)
                 val_correct += (logits.argmax(dim=-1) == labels).sum().item()
                 val_total += labels.size(0)
@@ -211,7 +211,7 @@ def main(cfg: DictConfig) -> None:
                 break
             batch = maybe_dictionarize(batch)
             images = batch["images"].to(device)
-            labels = batch["labels"].to(device)
+            labels = batch["labels"].to(device=device, dtype=torch.long)
             logits = classifier(images)
             test_correct += (logits.argmax(dim=-1) == labels).sum().item()
             test_total += labels.size(0)
