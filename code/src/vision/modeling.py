@@ -1,31 +1,56 @@
 import os
 from typing import Optional
 
+import numpy as np
 import torch
+import torchvision.transforms.functional as F
 from torchvision import transforms
 from torchvision.transforms import InterpolationMode
 from transformers import CLIPImageProcessor, CLIPModel
 
 
-def _build_clip_transform(processor: CLIPImageProcessor) -> transforms.Compose:
-    """Build a torchvision Compose that mirrors HF CLIPImageProcessor numerically.
+# _MaybeConvertMode and _MaybeToTensor are copied verbatim from
+# references/open_clip/src/open_clip/transform.py so that the resulting Compose
+# is numerically identical to open_clip's image_transform output for the path
+# the task_vectors reference takes.
+class _MaybeConvertMode:
+    def __init__(self, mode: str = "RGB") -> None:
+        self.mode = mode
 
-    Reads mean/std/size/crop_size from the processor's config so the resulting
-    Compose accepts a PIL image and returns a tensor numerically equivalent to
-    `processor(images=img, return_tensors="pt")["pixel_values"][0]`.
-    """
-    size = processor.size
-    resize_size = size["shortest_edge"] if "shortest_edge" in size else size.get("height", 224)
+    def __call__(self, pic):
+        if isinstance(pic, (np.ndarray, torch.Tensor)):
+            return pic
+        return pic.convert(self.mode)
 
-    crop_size = processor.crop_size
-    crop = (crop_size["height"], crop_size["width"])
 
+class _MaybeToTensor(transforms.ToTensor):
+    def __call__(self, pic):
+        if isinstance(pic, torch.Tensor):
+            return pic
+        return F.to_tensor(pic)
+
+
+def _build_clip_train_transform(image_size: int, mean, std) -> transforms.Compose:
     return transforms.Compose([
-        transforms.Lambda(lambda img: img.convert("RGB")),
-        transforms.Resize(resize_size, interpolation=InterpolationMode.BICUBIC),
-        transforms.CenterCrop(crop),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=processor.image_mean, std=processor.image_std),
+        transforms.RandomResizedCrop(
+            image_size,
+            scale=(0.9, 1.0),
+            interpolation=InterpolationMode.BICUBIC,
+        ),
+        _MaybeConvertMode("RGB"),
+        _MaybeToTensor(),
+        transforms.Normalize(mean=mean, std=std),
+    ])
+
+
+def _build_clip_val_transform(image_size: int, mean, std) -> transforms.Compose:
+    # Square image -> shortest-edge Resize collapses to scalar Resize, then CenterCrop
+    return transforms.Compose([
+        transforms.Resize(image_size, interpolation=InterpolationMode.BICUBIC),
+        transforms.CenterCrop((image_size, image_size)),
+        _MaybeConvertMode("RGB"),
+        _MaybeToTensor(),
+        transforms.Normalize(mean=mean, std=std),
     ])
 
 
@@ -45,10 +70,21 @@ class ImageEncoder(torch.nn.Module):
         self.model = CLIPModel.from_pretrained(model_name, cache_dir=cache_dir)
 
         processor = CLIPImageProcessor.from_pretrained(model_name, cache_dir=cache_dir)
-        # train_preprocess matches val_preprocess for now (task_vectors / open_clip
-        # default behaviour). Augmentation can be added later if needed.
-        self.val_preprocess = _build_clip_transform(processor)
-        self.train_preprocess = self.val_preprocess
+        assert processor.crop_size["height"] == processor.crop_size["width"], (
+            "Non-square CLIP crop is not handled — open_clip parity path assumes square."
+        )
+        crop = processor.crop_size["height"]
+
+        self.train_preprocess = _build_clip_train_transform(
+            image_size=crop,
+            mean=processor.image_mean,
+            std=processor.image_std,
+        )
+        self.val_preprocess = _build_clip_val_transform(
+            image_size=crop,
+            mean=processor.image_mean,
+            std=processor.image_std,
+        )
 
         if not keep_lang:
             if hasattr(self.model, "text_model"):

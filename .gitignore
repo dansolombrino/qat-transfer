@@ -104,3 +104,5 @@ checkpoints/
 outputs/
 
 storage/
+
+.claude/
