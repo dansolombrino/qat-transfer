@@ -27,3 +27,4 @@ mem_gb: 32
 timeout_min: 1440
 nodes: 1
 stderr_to_stdout: true
+submitit_folder: ${hydra.sweep.dir}/${hydra.sweep.subdir}/.submitit/%j

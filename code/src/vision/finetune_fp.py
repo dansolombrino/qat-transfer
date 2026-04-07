@@ -30,6 +30,10 @@ from src.vision.utils import (
     set_seed,
 )
 
+OmegaConf.register_new_resolver(
+    "sanitize_hf", sanitize_hf_model_name, replace=True
+)
+
 
 @hydra.main(
     config_path="../../../config/src",
