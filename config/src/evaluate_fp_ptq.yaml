@@ -20,6 +20,6 @@ limit_num_batches: null
 log_to_file: false
 
 ptq:
-  skip_modules: ???  # list of child-module attribute names to exclude from PTQ, e.g. [classification_head]
-  bits: ???          # int
-  granularity: ???   # "tensor" or "channel"
+  scope: ???        # list, e.g. [backbone_attn_block, classification_head]
+  bits: ???         # int
+  granularity: ???  # "tensor" or "channel"
