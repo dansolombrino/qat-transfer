@@ -98,3 +98,7 @@ lightning_logs/
 tensorboard/
 runs/
 checkpoints/
+
+
+
+outputs/
