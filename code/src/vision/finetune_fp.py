@@ -26,6 +26,7 @@ from src.vision.utils import (
     LabelSmoothing,
     cosine_lr,
     random_tqdm_color,
+    sanitize_hf_model_name,
     set_seed,
 )
 
@@ -54,7 +55,7 @@ def main(cfg: DictConfig) -> None:
     save_dir_parts = [
         checkpoint_base_path,
         "fp_dryrun" if is_dryrun else "fp",
-        cfg.model_name,
+        sanitize_hf_model_name(cfg.model_name),
         cfg.dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
         f"seed={cfg.seed}",
@@ -84,8 +85,6 @@ def main(cfg: DictConfig) -> None:
     else:
         pprint(list(classifier.state_dict().keys()), expand_all=True)
         pprint(classifier, expand_all=True)
-
-    exit()
 
     # Dataset (seeded with the run seed — not SPLIT_SEED)
     dataset = get_dataset(

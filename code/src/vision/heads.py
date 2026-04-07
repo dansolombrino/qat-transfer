@@ -7,7 +7,7 @@ from transformers import CLIPTokenizer
 from .data.registry import get_dataset
 from .data.templates import get_templates
 from .modeling import ClassificationHead, ImageEncoder
-from .utils import SPLIT_SEED
+from .utils import SPLIT_SEED, sanitize_hf_model_name
 
 
 def build_classification_head(model, tokenizer, dataset_name, device):
@@ -53,7 +53,7 @@ def build_classification_head(model, tokenizer, dataset_name, device):
 
 
 def get_classification_head(model_name: str, dataset_name: str, save_dir: str, device):
-    filename = os.path.join(save_dir, model_name, f"head_{dataset_name}.pt")
+    filename = os.path.join(save_dir, sanitize_hf_model_name(model_name), f"head_{dataset_name}.pt")
     if os.path.exists(filename):
         print(f"Classification head for {model_name} on {dataset_name} exists at {filename}")
         return ClassificationHead.load(filename)

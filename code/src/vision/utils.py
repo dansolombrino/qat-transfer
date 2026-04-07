@@ -13,6 +13,15 @@ def random_tqdm_color():
     return f'#{random.randint(0, 0xFFFFFF):06x}'
 
 
+def sanitize_hf_model_name(model_name: str) -> str:
+    """Make a HuggingFace model id safe for use as a single path component.
+
+    Replaces the org/model separator "/" with "_" so e.g.
+    "openai/clip-vit-base-patch32" becomes "openai_clip-vit-base-patch32".
+    """
+    return model_name.replace("/", "_").replace("-", "_")
+
+
 def set_seed(seed: int) -> None:
     """Seed python, numpy and torch RNGs, and enable deterministic cuDNN.
 
