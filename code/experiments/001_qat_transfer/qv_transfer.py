@@ -45,6 +45,9 @@ load_dotenv()
 
 log = logging.getLogger(__name__)
 
+IS_SLURM = "SLURM_JOB_ID" in os.environ
+TQDM_KW = dict(disable=IS_SLURM, mininterval=1.0)
+
 from src.vision.modeling import ImageClassifier, ImageEncoder
 from src.vision.heads import get_classification_head
 from src.vision.data.registry import get_dataset
@@ -120,7 +123,8 @@ def evaluate(
             total=effective_num_batches,
             desc="Evaluating (test)",
             colour=batch_color,
-            leave=False
+            leave=False,
+            **TQDM_KW,
         )
 
         for i, batch in batch_bar:
@@ -156,6 +160,11 @@ def evaluate(
 )
 def main(cfg: DictConfig):
 
+    if IS_SLURM:
+        log.info("cfg:\n%s", dict(cfg))
+    else:
+        pprint(dict(cfg), expand_all=True)
+
     set_seed(cfg.target.seed)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -176,9 +185,14 @@ def main(cfg: DictConfig):
     qat_source_path = _qat_ckpt_path(cfg, cfg.source.dataset_name, cfg.source.seed, src_epochs)
     fp_target_path = _fp_ckpt_path(cfg, cfg.target.dataset_name, cfg.target.seed, tgt_epochs)
 
-    print(f"\nFP source  checkpoint: {fp_source_path}")
-    print(f"QAT source checkpoint: {qat_source_path}")
-    print(f"FP target  checkpoint: {fp_target_path}\n")
+    if IS_SLURM:
+        log.info("FP source  checkpoint: %s", fp_source_path)
+        log.info("QAT source checkpoint: %s", qat_source_path)
+        log.info("FP target  checkpoint: %s", fp_target_path)
+    else:
+        print(f"\nFP source  checkpoint: {fp_source_path}")
+        print(f"QAT source checkpoint: {qat_source_path}")
+        print(f"FP target  checkpoint: {fp_target_path}\n")
 
     for path in (fp_source_path, qat_source_path, fp_target_path):
         if not os.path.exists(path):
@@ -232,15 +246,24 @@ def main(cfg: DictConfig):
                 num_dtype_filtered += 1
                 continue
             if k not in qat_src_sd:
-                print(f"Warning: key {k} present in fp_source but missing in qat_source — skipping")
+                if IS_SLURM:
+                    log.warning("key %s present in fp_source but missing in qat_source — skipping", k)
+                else:
+                    print(f"Warning: key {k} present in fp_source but missing in qat_source — skipping")
                 continue
             vector[k] = qat_src_sd[k] - v_src
 
     tv = TaskVector(vector=vector)
-    print(
-        f"\nQV built: {len(tv.vector)} keys in vector, "
-        f"{num_dtype_filtered} keys dtype-filtered (int64/uint8)\n"
-    )
+    if IS_SLURM:
+        log.info(
+            "QV built: %d keys in vector, %d keys dtype-filtered (int64/uint8)",
+            len(tv.vector), num_dtype_filtered,
+        )
+    else:
+        print(
+            f"\nQV built: {len(tv.vector)} keys in vector, "
+            f"{num_dtype_filtered} keys dtype-filtered (int64/uint8)\n"
+        )
 
     ############################################################################
     # END QV construction
@@ -271,7 +294,10 @@ def main(cfg: DictConfig):
 
         for k in tv.vector:
             if k not in fp_tgt_sd:
-                print(f"Warning: key {k} present in QV but missing in fp_target — skipping")
+                if IS_SLURM:
+                    log.warning("key %s present in QV but missing in fp_target — skipping", k)
+                else:
+                    print(f"Warning: key {k} present in QV but missing in fp_target — skipping")
 
     ############################################################################
     # END patched-model assembly
@@ -286,11 +312,12 @@ def main(cfg: DictConfig):
     image_encoder = ImageEncoder(model_name=cfg.model_name)
     image_encoder.load_state_dict(patched)
     image_encoder.to(device)
-    print(f"\n\nimage_encoder (patched):")
-    pprint(image_encoder, expand_all=True)
-    print(f"\n\n")
-    if cfg.log_to_file:
-        log.info(f"image_encoder (patched):\n{image_encoder}")
+    if IS_SLURM:
+        log.info("image_encoder (patched): %s", image_encoder)
+    else:
+        print(f"\n\nimage_encoder (patched):")
+        pprint(image_encoder, expand_all=True)
+        print(f"\n\n")
 
     ############################################################################
     # END load patched encoder
@@ -345,11 +372,12 @@ def main(cfg: DictConfig):
         classification_head=classification_head
     )
     image_classifier.to(device)
-    print(f"\n\nimage_classifier:")
-    pprint(image_classifier, expand_all=True)
-    print(f"\n\n")
-    if cfg.log_to_file:
-        log.info(f"image_classifier:\n{image_classifier}")
+    if IS_SLURM:
+        log.info("image_classifier: %s", image_classifier)
+    else:
+        print(f"\n\nimage_classifier:")
+        pprint(image_classifier, expand_all=True)
+        print(f"\n\n")
 
     ############################################################################
     # END image classifier creation
@@ -371,7 +399,10 @@ def main(cfg: DictConfig):
         limit_num_batches=cfg.limit_num_batches,
     )
 
-    print(f"\n    eval test_accuracy (patched QAT, FP_target + {alpha}*QV): {test_accuracy_patched_qat}\n")
+    if IS_SLURM:
+        log.info("eval test_accuracy (patched QAT, FP_target + %s*QV): %s", alpha, test_accuracy_patched_qat)
+    else:
+        print(f"\n    eval test_accuracy (patched QAT, FP_target + {alpha}*QV): {test_accuracy_patched_qat}\n")
 
     ############################################################################
     # END evaluation (patched QAT)
@@ -399,20 +430,24 @@ def main(cfg: DictConfig):
 
     skipped_names = sorted(set(all_linear_names) - set(quantized_names))
 
-    print(f"\nPTQ config: bits={cfg.ptq.bits}, granularity={cfg.ptq.granularity}, skip_modules={list(cfg.ptq.skip_modules)}")
-
-    print(f"\nQuantized layers ({len(quantized_names)}):")
-    for name in quantized_names:
-        print(f"  - {name}")
-
-    print(f"\nSkipped layers ({len(skipped_names)}):")
-    for name in skipped_names:
-        print(f"  - {name}")
-    print()
-
-    if cfg.log_to_file:
+    if IS_SLURM:
+        log.info(
+            "PTQ config: bits=%s, granularity=%s, skip_modules=%s",
+            cfg.ptq.bits, cfg.ptq.granularity, list(cfg.ptq.skip_modules),
+        )
         log.info(f"Quantized layers ({len(quantized_names)}): {quantized_names}")
         log.info(f"Skipped layers ({len(skipped_names)}): {skipped_names}")
+    else:
+        print(f"\nPTQ config: bits={cfg.ptq.bits}, granularity={cfg.ptq.granularity}, skip_modules={list(cfg.ptq.skip_modules)}")
+
+        print(f"\nQuantized layers ({len(quantized_names)}):")
+        for name in quantized_names:
+            print(f"  - {name}")
+
+        print(f"\nSkipped layers ({len(skipped_names)}):")
+        for name in skipped_names:
+            print(f"  - {name}")
+        print()
 
     ############################################################################
     # END PTQ
@@ -431,11 +466,17 @@ def main(cfg: DictConfig):
         limit_num_batches=cfg.limit_num_batches,
     )
 
-    print(f"\n    eval test_accuracy (patched QAT + PTQ, FP_target + {alpha}*QV): {test_accuracy_patched_qat_ptq}\n")
-
     num_classes = len(dataset.class_names)
     random_chance = 1.0 / num_classes
-    print(f"    random chance baseline : {random_chance}  (1 / {num_classes} classes)\n")
+    if IS_SLURM:
+        log.info(
+            "eval test_accuracy (patched QAT + PTQ, FP_target + %s*QV): %s",
+            alpha, test_accuracy_patched_qat_ptq,
+        )
+        log.info("random chance baseline: %s  (1 / %d classes)", random_chance, num_classes)
+    else:
+        print(f"\n    eval test_accuracy (patched QAT + PTQ, FP_target + {alpha}*QV): {test_accuracy_patched_qat_ptq}\n")
+        print(f"    random chance baseline : {random_chance}  (1 / {num_classes} classes)\n")
 
     ############################################################################
     # END evaluation (patched QAT + PTQ)
@@ -524,7 +565,10 @@ def main(cfg: DictConfig):
     with open(eval_results_path, "w") as f:
         json.dump(results, f, indent=2)
 
-    print(f"\nResults saved to: {eval_results_path}")
+    if IS_SLURM:
+        log.info("Results saved to: %s", eval_results_path)
+    else:
+        print(f"\nResults saved to: {eval_results_path}")
 
     ############################################################################
     # END save results
