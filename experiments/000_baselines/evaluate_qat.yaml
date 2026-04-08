@@ -1,0 +1,25 @@
+hydra:
+  searchpath:
+    - file://${oc.env:PWD}/configs
+  sweep:
+    dir: logs/experiments/000_baselines/evaluate_qat
+    subdir: ${model_name}/${dataset_name}/optim=adamw_lr=${lr}_wd=${wd}_ls=${ls}_wl=${wl}_mgn=${max_grad_norm}_bs=${batch_size}/seed=${seed}
+
+model_name: ???
+pretrained: ???
+dataset_name: ???
+batch_size: ???
+lr: ???
+wd: ???
+ls: ???
+wl: ???
+max_grad_norm: ???
+seed: ???
+limit_num_epochs: null
+limit_num_batches: null
+log_to_file: false
+
+qat:
+  skip_modules: ???  # list of child-module attribute names skipped during QAT training, e.g. [classification_head]
+  bits: ???          # int, must match training
+  granularity: ???   # "tensor" or "channel", must match training
