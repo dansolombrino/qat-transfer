@@ -32,6 +32,25 @@ import torch
 from torch import nn
 
 
+_LN_SUBSTRINGS = (
+    "pre_layrnorm",
+    "post_layernorm",
+    ".layer_norm1.",
+    ".layer_norm2.",
+)
+_EMBEDDINGS_PREFIX = "model.vision_model.embeddings."
+
+
+def _should_swap(key: str) -> bool:
+    if key.endswith(".bias"):
+        return True
+    if any(s in key for s in _LN_SUBSTRINGS):
+        return True
+    if key.startswith(_EMBEDDINGS_PREFIX):
+        return True
+    return False
+
+
 def evaluate(
     dataset,
     model: torch.nn.Module,
@@ -90,7 +109,7 @@ def evaluate(
 
 @hydra.main(
     config_path="../../../experiments/000_baselines",
-    config_name="evaluate_fp_ptq",
+    config_name="evaluate_fp_ptq_bias_norm_emb_from_pt",
     version_base=None,
 )
 def main(cfg: DictConfig):
@@ -133,6 +152,72 @@ def main(cfg: DictConfig):
 
     ############################################################################
     # END checkpoint loading
+    ############################################################################
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    ############################################################################
+    # BEGIN swap pretrained bias+norm+embeddings
+    ############################################################################
+
+    print(f"\nInstantiating pretrained encoder to source bias/LN/embedding tensors: {cfg.model_name}")
+    pretrained_encoder = ImageEncoder(model_name=cfg.model_name)
+    pretrained_sd = pretrained_encoder.state_dict()
+    finetuned_sd = image_encoder.state_dict()
+
+    swapped_keys = []
+    missing_in_pretrained = []
+    shape_mismatch = []
+
+    patched_sd = {}
+    for k, v in finetuned_sd.items():
+        if _should_swap(k):
+            if k not in pretrained_sd:
+                missing_in_pretrained.append(k)
+                patched_sd[k] = v
+                continue
+            v_pt = pretrained_sd[k]
+            if v_pt.shape != v.shape:
+                shape_mismatch.append((k, tuple(v.shape), tuple(v_pt.shape)))
+                patched_sd[k] = v
+                continue
+            patched_sd[k] = v_pt.clone().to(device=v.device, dtype=v.dtype)
+            swapped_keys.append(k)
+        else:
+            patched_sd[k] = v
+
+    assert not missing_in_pretrained, (
+        f"Keys selected for swap but missing in pretrained state_dict: {missing_in_pretrained}"
+    )
+    assert not shape_mismatch, (
+        f"Shape mismatches between finetuned and pretrained on swap keys: {shape_mismatch}"
+    )
+
+    image_encoder.load_state_dict(patched_sd, strict=True)
+    image_encoder.to(device)
+
+    del pretrained_encoder, pretrained_sd, finetuned_sd, patched_sd
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    swap_rules = {
+        "bias": "key.endswith('.bias')",
+        "layer_norm": f"any of {list(_LN_SUBSTRINGS)} substring in key",
+        "embeddings": f"key.startswith('{_EMBEDDINGS_PREFIX}')",
+    }
+
+    print(f"\nSwap rules: {swap_rules}")
+    print(f"\nSwapped tensors ({len(swapped_keys)}):")
+    for name in swapped_keys:
+        print(f"  - {name}")
+    print()
+
+    if cfg.log_to_file:
+        log.info(f"Swap rules: {swap_rules}")
+        log.info(f"Swapped tensors ({len(swapped_keys)}): {swapped_keys}")
+
+    ############################################################################
+    # END swap pretrained bias+norm+embeddings
     ############################################################################
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -189,12 +274,6 @@ def main(cfg: DictConfig):
     print(f"\n\n")
     if cfg.log_to_file:
         log.info(f"image_classifier:\n{image_classifier}")
-
-    print(f"\n\nlist(image_classifier.state_dict().keys()):")
-    pprint(list(image_classifier.state_dict().keys()))
-    print(f"\n\n")
-
-    exit()
 
     ############################################################################
     # END image classifier creation
@@ -278,7 +357,7 @@ def main(cfg: DictConfig):
         evaluation_base_path,
         "000_baselines",
         "vision",
-        "fp_ptq",
+        "fp_ptq_bias_norm_emb_from_pt",
         sanitize_hf_model_name(cfg.model_name),
         cfg.dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
@@ -309,6 +388,8 @@ def main(cfg: DictConfig):
         "ptq_skip_modules": list(cfg.ptq.skip_modules),
         "quantized_layers": quantized_names,
         "skipped_layers": skipped_names,
+        "swap_rules": swap_rules,
+        "swapped_keys": swapped_keys,
     }
 
     os.makedirs(eval_dir, exist_ok=True)
