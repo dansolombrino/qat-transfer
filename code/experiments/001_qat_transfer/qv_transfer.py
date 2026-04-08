@@ -31,7 +31,6 @@
 # Please note that D1 can be either the same or different than D2.
 # ==============================================================================
 
-import importlib.util
 import json
 import logging
 import os
@@ -40,19 +39,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-# Load `task_vectors.py` directly by file path, instead of putting
-# `references/task_vectors/src` on sys.path: that directory contains a
-# `datasets/` package which would shadow HuggingFace's `datasets` package
-# and break downstream dataset loaders.
-_TASK_VECTORS_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "references" / "task_vectors" / "src" / "task_vectors.py"
-)
-_spec = importlib.util.spec_from_file_location("task_vectors", _TASK_VECTORS_PATH)
-_task_vectors_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_task_vectors_mod)
-TaskVector = _task_vectors_mod.TaskVector
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -70,6 +56,7 @@ from src.vision.utils import (
     set_seed,
 )
 from src.quantization import apply_ptq_
+from src.task_vectors import TaskVector
 
 import hydra
 from omegaconf import DictConfig

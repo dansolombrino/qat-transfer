@@ -1,6 +1,7 @@
 hydra:
   searchpath:
     - file://${oc.env:PWD}/configs
+    - file://${oc.env:PWD}/config/src
   sweep:
     dir: logs/experiments/001_qat_transfer/qv_transfer
     subdir: ${model_name}/src=${source.dataset_name}_seed=${source.seed}/tgt=${target.dataset_name}_seed=${target.seed}/qat=bits=${qat.bits}_gran=${qat.granularity}/ptq=bits=${ptq.bits}_gran=${ptq.granularity}/qv=alpha=${qv.alpha}
