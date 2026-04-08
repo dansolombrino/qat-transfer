@@ -194,8 +194,6 @@ def main(cfg: DictConfig):
     pprint(list(image_classifier.state_dict().keys()))
     print(f"\n\n")
 
-    exit()
-
     ############################################################################
     # END image classifier creation
     ############################################################################
