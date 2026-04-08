@@ -295,6 +295,8 @@ def main(cfg: DictConfig):
         "epochs": epochs,
         "device": str(device),
         "test_accuracy": test_accuracy,
+        "random_chance": random_chance,
+        "num_classes": num_classes,
         "checkpoint_path": checkpoint_path,
         "ptq_bits": cfg.ptq.bits,
         "ptq_granularity": cfg.ptq.granularity,
