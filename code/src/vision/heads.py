@@ -14,6 +14,15 @@ def build_classification_head(model, tokenizer, dataset_name, device):
     template = get_templates(dataset_name)
 
     logit_scale = model.logit_scale
+    # NOTE: head construction is fully deterministic — the head weights are the
+    # CLIP text-encoder embeddings of `template(classname)`, averaged across
+    # templates and L2-normalized (see the loop below). We only call
+    # get_dataset() here to read `class_names`; the `seed=SPLIT_SEED` is
+    # required by the get_dataset signature but has no effect on the resulting
+    # head. In particular, the per-run seed (`cfg.seed`) is intentionally NOT
+    # threaded in here: a single cached head per (model_name, dataset_name) is
+    # correct for *every* run seed of finetune_fp / evaluate_*, and
+    # regenerating it per seed would produce a bit-identical file.
     dataset = get_dataset(
         dataset_name,
         preprocess_train=None,
