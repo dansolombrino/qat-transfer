@@ -11,7 +11,7 @@ import torch
 from tqdm import tqdm
 
 from src.vision.data.registry import registry, get_dataset
-from src.vision.modeling import ClassificationHead, ImageClassifier, ImageEncoder
+from src.vision.ilharco_hf_clip.modeling import ClassificationHead, ImageClassifier, ImageEncoder
 from src.vision.utils import SPLIT_SEED, random_tqdm_color
 
 
