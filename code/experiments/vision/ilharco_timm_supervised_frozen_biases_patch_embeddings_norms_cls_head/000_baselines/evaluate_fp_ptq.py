@@ -12,11 +12,11 @@ load_dotenv()
 
 log = logging.getLogger(__name__)
 
-from src.vision.ilharco_timm_supervised.modeling import ImageClassifier
+from src.vision.ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head.modeling import ImageClassifier
 from src.vision.data.registry import get_dataset
 from src.vision.data.common import (
-    DATASET_NAME_TO_NUM_CLASSES, 
-    maybe_dictionarize, 
+    DATASET_NAME_TO_NUM_CLASSES,
+    maybe_dictionarize,
     DATASET_NAME_TO_EPOCHS
 )
 from src.vision.utils import (
@@ -92,7 +92,7 @@ def evaluate(
 
 
 @hydra.main(
-    config_path="../../../../../config/experiments/vision/ilharco_timm_supervised/000_baselines",
+    config_path="../../../../../config/experiments/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/000_baselines",
     config_name="evaluate_fp_ptq",
     version_base=None,
 )
@@ -118,7 +118,7 @@ def main(cfg: DictConfig):
     checkpoint_dir_parts = [
         checkpoint_base_path,
         "vision",
-        "ilharco_timm_supervised",
+        "ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head",
         "fp_dryrun" if is_dryrun else "fp",
         sanitize_timm_model_name(cfg.model_name),
         cfg.dataset_name,
@@ -246,7 +246,7 @@ def main(cfg: DictConfig):
     eval_dir = os.path.join(
         evaluation_base_path,
         "vision",
-        "ilharco_timm_supervised",
+        "ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head",
         "000_baselines",
         "vision",
         "fp_ptq",

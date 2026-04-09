@@ -25,12 +25,12 @@ TQDM_KW = dict(disable=IS_SLURM, mininterval=1.0)
 LOG_EVERY = 50
 
 from src.vision.data.common import (
-    DATASET_NAME_TO_NUM_CLASSES, 
-    DATASET_NAME_TO_EPOCHS, 
+    DATASET_NAME_TO_NUM_CLASSES,
+    DATASET_NAME_TO_EPOCHS,
     maybe_dictionarize
 )
 from src.vision.data.registry import get_dataset
-from src.vision.ilharco_timm_supervised.modeling import ImageClassifier
+from src.vision.ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head.modeling import ImageClassifier
 from src.vision.utils import (
     LabelSmoothing,
     cosine_lr,
@@ -45,7 +45,7 @@ OmegaConf.register_new_resolver(
 
 
 @hydra.main(
-    config_path="../../../../config/src/vision/ilharco_timm_supervised",
+    config_path="../../../../config/src/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head",
     config_name="finetune_fp",
     version_base=None,
 )
@@ -68,7 +68,7 @@ def main(cfg: DictConfig) -> None:
     save_dir_parts = [
         checkpoint_base_path,
         "vision",
-        "ilharco_timm_supervised",
+        "ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head",
         "fp_dryrun" if is_dryrun else "fp",
         sanitize_timm_model_name(cfg.model_name),
         cfg.dataset_name,
@@ -86,6 +86,32 @@ def main(cfg: DictConfig) -> None:
         model_name=cfg.model_name,
         num_classes=DATASET_NAME_TO_NUM_CLASSES[cfg.dataset_name]
     )
+
+    # Freeze biases, cls_token, pos_embed, patch_embed, norms, head
+    frozen_names = []
+    trainable_names = []
+    for name, param in classifier.named_parameters():
+        if (
+            name.endswith(".bias")
+            or "cls_token" in name
+            or "pos_embed" in name
+            or "patch_embed" in name
+            or "norm" in name
+            or "head" in name
+        ):
+            param.requires_grad = False
+            frozen_names.append(name)
+        else:
+            trainable_names.append(name)
+
+    if IS_SLURM:
+        log.info("Frozen parameters (%d): %s", len(frozen_names), frozen_names)
+        log.info("Trainable parameters (%d): %s", len(trainable_names), trainable_names)
+    else:
+        print(f"\nFrozen parameters ({len(frozen_names)}):")
+        pprint(frozen_names, expand_all=True)
+        print(f"\nTrainable parameters ({len(trainable_names)}):")
+        pprint(trainable_names, expand_all=True)
 
     # Dataset (seeded with the run seed — not SPLIT_SEED)
     dataset = get_dataset(

@@ -48,16 +48,3 @@ class ImageClassifier(torch.nn.Module):
 
 
 
-
-
-
-if __name__ == "__main__":
-
-    from rich.pretty import pprint
-
-    model = ImageClassifier(
-        model_name="timm/vit_base_patch16_clip_224.openai_ft_in12k_in1k",
-        num_classes=23
-    )
-    
-    pprint(model, expand_all=True)
