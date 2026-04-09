@@ -226,7 +226,7 @@ def load_data(args):
     pskip_frag  = _ptq_skip_frag(args.skip_modules)
     qv_frag     = _qv_frag(args.qv_alpha)
 
-    datasets = sorted(DATASET_NAME_TO_EPOCHS.keys())
+    datasets = sorted(DATASET_NAME_TO_EPOCHS.keys(), key=str.lower)
 
     data = {}
     for target_dataset in datasets:
@@ -316,9 +316,129 @@ def _robust_symmetric_bounds(values, center, min_span=0.05, q_low=0.05, q_high=0
 # ---------------------------------------------------------------------------
 # Plot
 # ---------------------------------------------------------------------------
+def plot_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag):
+    """Raw QV transfer+PTQ accuracy heatmap (sequential Viridis, cmin=0, cmax=1)."""
+    datasets = sorted(data.keys(), key=str.lower)
+
+    qv_col_labels       = datasets
+    baseline_col_labels = [BASELINE_METHOD_LABELS[m] for m in BASELINE_METHODS]
+
+    qv_z, qv_text     = [], []
+    base_z, base_text = [], []
+
+    for target_dataset in datasets:
+        qv_row_z, qv_row_text = [], []
+        b_row_z,  b_row_text  = [], []
+
+        for qv_dataset in qv_col_labels:
+            qv_val = data[target_dataset]["qv_transfer"][qv_dataset]
+            if qv_val is not None:
+                qv_row_z.append(qv_val)
+                qv_row_text.append(f"{qv_val:.2f}")
+            else:
+                qv_row_z.append(None)
+                qv_row_text.append("")
+
+        for method in BASELINE_METHODS:
+            val = data[target_dataset][method]
+            if val is not None:
+                b_row_z.append(val)
+                b_row_text.append(f"{val:.2f}")
+            else:
+                b_row_z.append(None)
+                b_row_text.append("")
+
+        qv_z.append(qv_row_z)
+        qv_text.append(qv_row_text)
+        base_z.append(b_row_z)
+        base_text.append(b_row_text)
+
+    fig = make_subplots(
+        rows=1, cols=2,
+        shared_yaxes=True,
+        horizontal_spacing=0.06,
+        column_widths=[max(1, len(qv_col_labels)), len(baseline_col_labels)],
+    )
+
+    fig.add_trace(
+        go.Heatmap(
+            z=qv_z,
+            x=qv_col_labels,
+            y=datasets,
+            text=qv_text,
+            texttemplate="%{text}",
+            coloraxis="coloraxis",
+            xgap=1, ygap=1,
+            hovertemplate="target=%{y}<br>qv=%{x}<br>acc=%{z:.4f}<extra></extra>",
+        ),
+        row=1, col=1,
+    )
+
+    fig.add_trace(
+        go.Heatmap(
+            z=base_z,
+            x=baseline_col_labels,
+            y=datasets,
+            text=base_text,
+            texttemplate="%{text}",
+            coloraxis="coloraxis2",
+            xgap=1, ygap=1,
+            hovertemplate="target=%{y}<br>baseline=%{x}<br>acc=%{z:.4f}<extra></extra>",
+        ),
+        row=1, col=2,
+    )
+
+    _add_diagonal_borders(fig, datasets, xref="x", yref="y")
+
+    skip_str = ",".join(sorted(args.skip_modules))
+    title = (
+        f"QV Transfer+PTQ<br>"
+        f"<sup>{args.model_name} | seed={args.seed} | optim={args.optim} | "
+        f"bits={args.bits} | granularity={args.granularity} | skip={skip_str} | "
+        f"alpha={args.qv_alpha}</sup>"
+    )
+
+    fig.update_layout(
+        title=title,
+        coloraxis=dict(
+            colorscale=HEATMAP_COLORSCALE_SEQUENTIAL,
+            cmin=0, cmax=1,
+            colorbar=dict(title="Transfer Acc", x=1.01, y=0.78, len=0.42),
+        ),
+        coloraxis2=dict(
+            colorscale=HEATMAP_COLORSCALE_SEQUENTIAL,
+            cmin=0, cmax=1,
+            colorbar=dict(title="Baseline Acc", x=1.01, y=0.22, len=0.42),
+        ),
+        template="plotly_white",
+        height=max(400, 60 * len(datasets) + 180),
+        width=max(900, 55 * len(qv_col_labels) + 100 * len(baseline_col_labels) + 260),
+        margin=dict(l=80, r=220, t=120, b=90),
+    )
+    fig.update_xaxes(
+        title_text="Quantization Vector Dataset<br>(dataset the qv is computed from)",
+        row=1, col=1, side="bottom",
+    )
+    fig.update_xaxes(title_text="Target Baselines", row=1, col=2, side="bottom")
+    fig.update_yaxes(
+        title_text="Target Dataset<br>(dataset the qv is applied to)",
+        row=1, col=1, autorange="reversed",
+    )
+    fig.update_yaxes(row=1, col=2, showticklabels=False, autorange="reversed")
+
+    out_dir = os.path.join(
+        "plots", "001_qat_transfer", "qv_transfer_heatmap",
+        model_dir, f"seed={args.seed}", optim_frag, qat_frag, qv_frag,
+    )
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, "heatmap_qv_transfer_qat_ptq.png")
+    fig.write_image(out_path, scale=300 / 96)
+    print(f"Saved: {out_path}")
+
+
 def plot_difference_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag,
                             subtractor="fp_ptq"):
-    datasets = sorted(data.keys())
+    datasets = sorted(data.keys(), key=str.lower)
 
     qv_col_labels       = datasets
     baseline_col_labels = [BASELINE_METHOD_LABELS[m] for m in BASELINE_METHODS]
@@ -452,10 +572,9 @@ def plot_difference_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag
 def main():
     args = parse_args()
     data, model_dir, optim_frag, qat_frag, qv_frag = load_data(args)
-    plot_difference_heatmap(
-        data, args, model_dir, optim_frag, qat_frag, qv_frag,
-        subtractor="fp_ptq",
-    )
+    common = (data, args, model_dir, optim_frag, qat_frag, qv_frag)
+    plot_heatmap(*common)
+    plot_difference_heatmap(*common, subtractor="fp_ptq")
 
 
 if __name__ == "__main__":
