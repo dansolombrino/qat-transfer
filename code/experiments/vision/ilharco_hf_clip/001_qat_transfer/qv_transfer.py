@@ -72,6 +72,7 @@ from torch import nn
 def _fp_ckpt_path(cfg: DictConfig, dataset_name: str, seed: int, epochs: int) -> str:
     return os.path.join(
         os.environ['CHECKPOINT_BASE_PATH'],
+        "vision",
         "ilharco_hf_clip",
         "fp",
         sanitize_hf_model_name(cfg.model_name),
@@ -87,6 +88,7 @@ def _qat_ckpt_path(cfg: DictConfig, dataset_name: str, seed: int, epochs: int) -
     skip_tag = "-".join(skip_modules_sorted) if skip_modules_sorted else "none"
     return os.path.join(
         os.environ['CHECKPOINT_BASE_PATH'],
+        "vision",
         "ilharco_hf_clip",
         "qat",
         sanitize_hf_model_name(cfg.model_name),
@@ -497,6 +499,7 @@ def main(cfg: DictConfig):
 
     eval_dir = os.path.join(
         evaluation_base_path,
+        "vision",
         "ilharco_hf_clip",
         "001_qat_transfer",
         "vision",

@@ -114,6 +114,7 @@ def main(cfg: DictConfig):
 
     checkpoint_dir = os.path.join(
         checkpoint_base_path,
+        "vision",
         "ilharco_hf_clip",
         "qat",
         sanitize_hf_model_name(cfg.model_name),
@@ -275,6 +276,7 @@ def main(cfg: DictConfig):
 
     eval_dir = os.path.join(
         evaluation_base_path,
+        "vision",
         "ilharco_hf_clip",
         "000_baselines",
         "vision",

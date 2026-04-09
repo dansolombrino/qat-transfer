@@ -62,7 +62,7 @@ def build_classification_head(model, tokenizer, dataset_name, device):
 
 
 def get_classification_head(model_name: str, dataset_name: str, save_dir: str, device):
-    filename = os.path.join(save_dir, "ilharco_hf_clip", sanitize_hf_model_name(model_name), f"head_{dataset_name}.pt")
+    filename = os.path.join(save_dir, "vision", "ilharco_hf_clip", sanitize_hf_model_name(model_name), f"head_{dataset_name}.pt")
     if os.path.exists(filename):
         print(f"Classification head for {model_name} on {dataset_name} exists at {filename}")
         return ClassificationHead.load(filename)

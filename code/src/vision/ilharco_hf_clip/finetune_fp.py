@@ -42,7 +42,7 @@ OmegaConf.register_new_resolver(
 
 
 @hydra.main(
-    config_path="../../../../config/src/ilharco_hf_clip",
+    config_path="../../../../config/src/vision/ilharco_hf_clip",
     config_name="finetune_fp",
     version_base=None,
 )
@@ -63,6 +63,7 @@ def main(cfg: DictConfig) -> None:
     )
     save_dir_parts = [
         checkpoint_base_path,
+        "vision",
         "ilharco_hf_clip",
         "fp_dryrun" if is_dryrun else "fp",
         sanitize_hf_model_name(cfg.model_name),

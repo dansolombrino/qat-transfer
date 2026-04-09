@@ -41,8 +41,8 @@ from src.vision.utils import sanitize_hf_model_name
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-EVAL_ROOT_BASELINES = "evaluations/ilharco_hf_clip/000_baselines/vision"
-EVAL_ROOT_QV        = "evaluations/ilharco_hf_clip/001_qat_transfer/vision/qv_transfer"
+EVAL_ROOT_BASELINES = "evaluations/vision/ilharco_hf_clip/000_baselines/vision"
+EVAL_ROOT_QV        = "evaluations/vision/ilharco_hf_clip/001_qat_transfer/vision/qv_transfer"
 
 BASELINE_METHODS = ["pretrained", "fp", "fp_ptq", "random", "qat", "qat_ptq"]
 

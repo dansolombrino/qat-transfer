@@ -104,7 +104,7 @@ def _evaluate_ptq(
 
 
 @hydra.main(
-    config_path="../../../../config/src/ilharco_hf_clip",
+    config_path="../../../../config/src/vision/ilharco_hf_clip",
     config_name="finetune_qat",
     version_base=None,
 )
@@ -127,6 +127,7 @@ def main(cfg: DictConfig) -> None:
     skip_tag = "-".join(skip_modules_sorted) if skip_modules_sorted else "none"
     save_dir_parts = [
         checkpoint_base_path,
+        "vision",
         "ilharco_hf_clip",
         "qat_dryrun" if is_dryrun else "qat",
         sanitize_hf_model_name(cfg.model_name),

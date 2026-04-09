@@ -201,6 +201,7 @@ def main(cfg: DictConfig):
 
     eval_dir = os.path.join(
         evaluation_base_path,
+        "vision",
         "ilharco_hf_clip",
         "000_baselines",
         "vision",
