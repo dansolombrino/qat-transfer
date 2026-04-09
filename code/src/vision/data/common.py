@@ -57,6 +57,31 @@ DATASET_NAME_TO_EPOCHS = {
     "ImageNet": 1
 }
 
+DATASET_NAME_TO_NUM_CLASSES = {
+    "Cars": 196,
+    "DTD": 47,
+    "EuroSAT": 10,
+    "GTSRB": 43,
+    "MNIST": 10,
+    "RESISC45": 45,
+    "SUN397": 397,
+    "SVHN": 10,
+    "CIFAR10": 10,
+    "CIFAR100": 100,
+    "STL10": 10,
+    "Food101": 101,
+    "Flowers102": 102,
+    "FER2013": 7,
+    "PCAM": 2,
+    "OxfordIIITPet": 37,
+    "RenderedSST2": 2,
+    "EMNIST": 26,
+    "FashionMNIST": 10,
+    "KMNIST": 10,
+    "TinyImageNet": 200,
+    "ImageNet": 1000,
+}
+
 class TransformedSubset(Dataset):
     """Wraps a Subset with a transform applied after fetching items."""
 

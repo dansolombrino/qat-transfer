@@ -31,6 +31,15 @@ def sanitize_hf_model_name(model_name: str) -> str:
     return model_name.replace("/", "_").replace("-", "_")
 
 
+def sanitize_timm_model_name(model_name: str) -> str:
+    """Make a timm model id safe for use as a single path component.
+
+    Replaces "/", "-", and "." with "_" so e.g.
+    "vit_base_patch16_clip_224.openai" becomes "vit_base_patch16_clip_224_openai".
+    """
+    return model_name.replace("/", "_").replace("-", "_").replace(".", "_")
+
+
 def set_seed(seed: int) -> None:
     """Seed python, numpy and torch RNGs, and enable deterministic cuDNN.
 
