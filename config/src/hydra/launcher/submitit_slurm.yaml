@@ -22,9 +22,9 @@ _target_: hydra_plugins.hydra_submitit_launcher.submitit_launcher.SlurmLauncher
 partition: boost_usr_prod
 account: IscrC_SIMP
 gpus_per_node: 1
-cpus_per_task: 16
-mem_gb: 32
-timeout_min: 1440
+cpus_per_task: 8
+mem_gb: 128
+timeout_min: 180
 nodes: 1
 stderr_to_stdout: true
 submitit_folder: ${hydra.sweep.dir}/.submitit/%j
