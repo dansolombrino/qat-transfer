@@ -48,9 +48,9 @@ log = logging.getLogger(__name__)
 IS_SLURM = "SLURM_JOB_ID" in os.environ
 TQDM_KW = dict(disable=IS_SLURM, mininterval=1.0)
 
-from src.vision.ilharco_timm_supervised.modeling import ClassificationHead, ImageClassifier, ImageEncoder
+from src.vision.ilharco_timm_supervised.modeling import ImageClassifier
 from src.vision.data.registry import get_dataset
-from src.vision.data.common import maybe_dictionarize, DATASET_NAME_TO_EPOCHS
+from src.vision.data.common import maybe_dictionarize, DATASET_NAME_TO_EPOCHS, DATASET_NAME_TO_NUM_CLASSES
 from src.vision.utils import (
     accuracy,
     random_tqdm_color,
@@ -61,11 +61,19 @@ from src.quantization import apply_ptq_
 from src.task_vectors import TaskVector
 
 import hydra
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from rich.pretty import pprint
 from tqdm import tqdm
 import torch
 from torch import nn
+
+# Keys whose prefix matches this belong to the classification head and are
+# excluded from the QV (backbone-only transfer).
+HEAD_PREFIX = "model.head."
+
+
+def _is_head_key(k: str) -> bool:
+    return k.startswith(HEAD_PREFIX)
 
 
 def _fp_ckpt_dir(cfg: DictConfig, dataset_name: str, seed: int) -> str:
@@ -154,57 +162,54 @@ def evaluate(
     return top1_acc
 
 
-@hydra.main(
-    config_path="../../../../../config/experiments/vision/ilharco_timm_supervised/001_qat_transfer",
-    config_name="qv_transfer",
-    version_base=None,
-)
-def main(cfg: DictConfig):
-
-    if IS_SLURM:
-        log.info("cfg:\n%s", dict(cfg))
-    else:
-        pprint(dict(cfg), expand_all=True)
-
-    set_seed(cfg.target.seed)
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+def _run_source(
+    cfg: DictConfig,
+    source_dataset_name: str,
+    fp_tgt_sd: dict,
+    qat_tgt_sd: dict,
+    dataset,
+    num_classes: int,
+    device: str,
+    tgt_epochs: int,
+):
+    """Run QV transfer for a single source dataset against the (already loaded) target."""
 
     src_epochs = DATASET_NAME_TO_EPOCHS[
-        cfg.source.dataset_name
+        source_dataset_name
     ] if cfg.source.limit_num_epochs is None else cfg.source.limit_num_epochs
-
-    tgt_epochs = DATASET_NAME_TO_EPOCHS[
-        cfg.target.dataset_name
-    ] if cfg.target.limit_num_epochs is None else cfg.target.limit_num_epochs
 
     ############################################################################
     # BEGIN checkpoint paths
     ############################################################################
 
-    fp_src_dir = _fp_ckpt_dir(cfg, cfg.source.dataset_name, cfg.source.seed)
-    qat_src_dir = _qat_ckpt_dir(cfg, cfg.source.dataset_name, cfg.source.seed)
-    fp_tgt_dir = _fp_ckpt_dir(cfg, cfg.target.dataset_name, cfg.target.seed)
+    fp_src_dir = _fp_ckpt_dir(cfg, source_dataset_name, cfg.source.seed)
+    qat_src_dir = _qat_ckpt_dir(cfg, source_dataset_name, cfg.source.seed)
 
-    fp_source_path = os.path.join(fp_src_dir, f"encoder_epoch_{src_epochs}.pt")
-    qat_source_path = os.path.join(qat_src_dir, f"encoder_epoch_{src_epochs}.pt")
-    fp_target_path = os.path.join(fp_tgt_dir, f"encoder_epoch_{tgt_epochs}.pt")
-    tgt_head_path = os.path.join(fp_tgt_dir, f"head_epoch_{tgt_epochs}.pt")
+    fp_source_path = os.path.join(fp_src_dir, f"classifier_epoch_{src_epochs}.pt")
+    qat_source_path = os.path.join(qat_src_dir, f"classifier_epoch_{src_epochs}.pt")
+
+    fp_target_path = os.path.join(
+        _fp_ckpt_dir(cfg, cfg.target.dataset_name, cfg.target.seed),
+        f"classifier_epoch_{tgt_epochs}.pt",
+    )
+    qat_target_path = os.path.join(
+        _qat_ckpt_dir(cfg, cfg.target.dataset_name, cfg.target.seed),
+        f"classifier_epoch_{tgt_epochs}.pt",
+    )
 
     if IS_SLURM:
-        log.info("FP source  encoder: %s", fp_source_path)
-        log.info("QAT source encoder: %s", qat_source_path)
-        log.info("FP target  encoder: %s", fp_target_path)
-        log.info("FP target  head:    %s", tgt_head_path)
+        log.info("--- source=%s target=%s ---", source_dataset_name, cfg.target.dataset_name)
+        log.info("FP source  classifier: %s", fp_source_path)
+        log.info("QAT source classifier: %s", qat_source_path)
     else:
-        print(f"\nFP source  encoder: {fp_source_path}")
-        print(f"QAT source encoder: {qat_source_path}")
-        print(f"FP target  encoder: {fp_target_path}")
-        print(f"FP target  head:    {tgt_head_path}\n")
+        print(f"\n--- source={source_dataset_name} target={cfg.target.dataset_name} ---")
+        print(f"FP source  classifier: {fp_source_path}")
+        print(f"QAT source classifier: {qat_source_path}")
 
-    for path in (fp_source_path, qat_source_path, fp_target_path, tgt_head_path):
+    for path in (fp_source_path, qat_source_path):
         if not os.path.exists(path):
-            raise FileNotFoundError(f"Required checkpoint missing: {path}")
+            log.warning("Skipping source=%s: checkpoint missing: %s", source_dataset_name, path)
+            return
 
     ############################################################################
     # END checkpoint paths
@@ -213,43 +218,36 @@ def main(cfg: DictConfig):
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     ############################################################################
-    # BEGIN QV construction
+    # BEGIN QV construction (backbone only)
     ############################################################################
-    #
-    # We bypass TaskVector's two-checkpoint constructor branch and apply_to(),
-    # because both call torch.load(path).state_dict(), which assumes a pickled
-    # *model object*. Our checkpoints are saved by ImageEncoder.save() as plain
-    # state_dict pickles (torch.save(self.state_dict(), filename)), so they
-    # would crash that codepath. Instead we load the three state_dicts directly
-    # and build the vector dict ourselves, then hand it to TaskVector via the
-    # vector=... constructor branch (preserving arithmetic support for future
-    # compositions).
 
     fp_src_sd = torch.load(fp_source_path, map_location="cpu")
     qat_src_sd = torch.load(qat_source_path, map_location="cpu")
-    fp_tgt_sd = torch.load(fp_target_path, map_location="cpu")
 
-    src_keys = set(fp_src_sd.keys())
-    qat_keys = set(qat_src_sd.keys())
-    tgt_keys = set(fp_tgt_sd.keys())
-    if src_keys != qat_keys:
+    src_backbone_keys = {k for k in fp_src_sd if not _is_head_key(k)}
+    qat_backbone_keys = {k for k in qat_src_sd if not _is_head_key(k)}
+    tgt_backbone_keys = {k for k in fp_tgt_sd if not _is_head_key(k)}
+    if src_backbone_keys != qat_backbone_keys:
         log.warning(
-            "fp_source and qat_source state_dict key sets differ "
-            f"(only-in-fp={sorted(src_keys - qat_keys)[:5]}..., "
-            f"only-in-qat={sorted(qat_keys - src_keys)[:5]}...)"
+            "fp_source and qat_source backbone key sets differ "
+            f"(only-in-fp={sorted(src_backbone_keys - qat_backbone_keys)[:5]}..., "
+            f"only-in-qat={sorted(qat_backbone_keys - src_backbone_keys)[:5]}...)"
         )
-    if tgt_keys != src_keys:
+    if tgt_backbone_keys != src_backbone_keys:
         log.warning(
-            "fp_target and fp_source state_dict key sets differ "
-            f"(only-in-tgt={sorted(tgt_keys - src_keys)[:5]}..., "
-            f"only-in-src={sorted(src_keys - tgt_keys)[:5]}...)"
+            "fp_target and fp_source backbone key sets differ "
+            f"(only-in-tgt={sorted(tgt_backbone_keys - src_backbone_keys)[:5]}..., "
+            f"only-in-src={sorted(src_backbone_keys - tgt_backbone_keys)[:5]}...)"
         )
 
     vector = {}
     num_dtype_filtered = 0
+    num_head_filtered = 0
     with torch.no_grad():
         for k, v_src in fp_src_sd.items():
-            # Mirror TaskVector's dtype filter for integer counters/masks.
+            if _is_head_key(k):
+                num_head_filtered += 1
+                continue
             if v_src.dtype in (torch.int64, torch.uint8):
                 num_dtype_filtered += 1
                 continue
@@ -264,14 +262,18 @@ def main(cfg: DictConfig):
     tv = TaskVector(vector=vector)
     if IS_SLURM:
         log.info(
-            "QV built: %d keys in vector, %d keys dtype-filtered (int64/uint8)",
-            len(tv.vector), num_dtype_filtered,
+            "QV built (backbone only): %d keys in vector, %d head keys excluded, "
+            "%d keys dtype-filtered (int64/uint8)",
+            len(tv.vector), num_head_filtered, num_dtype_filtered,
         )
     else:
         print(
-            f"\nQV built: {len(tv.vector)} keys in vector, "
+            f"\nQV built (backbone only): {len(tv.vector)} keys in vector, "
+            f"{num_head_filtered} head keys excluded, "
             f"{num_dtype_filtered} keys dtype-filtered (int64/uint8)\n"
         )
+
+    del fp_src_sd, qat_src_sd
 
     ############################################################################
     # END QV construction
@@ -280,25 +282,24 @@ def main(cfg: DictConfig):
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     ############################################################################
-    # BEGIN patched-model assembly
+    # BEGIN patched-backbone assembly
     ############################################################################
-    #
-    # patched = FP_target + alpha * QV (key-by-key)
 
     alpha = float(cfg.qv.alpha)
-    patched = {}
+    patched_backbone = {}
     with torch.no_grad():
         for k, v_tgt in fp_tgt_sd.items():
+            if _is_head_key(k):
+                continue
             if k in tv.vector:
                 if tv.vector[k].shape != v_tgt.shape:
                     raise ValueError(
                         f"Shape mismatch on key {k}: tv.vector={tuple(tv.vector[k].shape)} vs "
                         f"fp_target={tuple(v_tgt.shape)}"
                     )
-                patched[k] = v_tgt + alpha * tv.vector[k]
+                patched_backbone[k] = v_tgt + alpha * tv.vector[k]
             else:
-                # int64/uint8 buffer (dtype-filtered) or missing in src/qat — pass through.
-                patched[k] = v_tgt
+                patched_backbone[k] = v_tgt
 
         for k in tv.vector:
             if k not in fp_tgt_sd:
@@ -307,170 +308,191 @@ def main(cfg: DictConfig):
                 else:
                     print(f"Warning: key {k} present in QV but missing in fp_target — skipping")
 
+    del tv
+
     ############################################################################
-    # END patched-model assembly
+    # END patched-backbone assembly
     ############################################################################
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     ############################################################################
-    # BEGIN load patched encoder + target head
+    # BEGIN build patched state_dicts (backbone + head variants)
     ############################################################################
 
-    image_encoder = ImageEncoder(model_name=cfg.model_name)
-    image_encoder.load_state_dict(patched)
-    image_encoder.to(device)
+    fp_tgt_head = {k: v for k, v in fp_tgt_sd.items() if _is_head_key(k)}
+    qat_tgt_head = {k: v for k, v in qat_tgt_sd.items() if _is_head_key(k)}
+
+    patched_with_fp_head = {**patched_backbone, **fp_tgt_head}
+    patched_with_qat_head = {**patched_backbone, **qat_tgt_head}
+
+    del patched_backbone
+
+    ############################################################################
+    # END build patched state_dicts
+    ############################################################################
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    ############################################################################
+    # BEGIN Eval A: patched backbone + FP target head
+    ############################################################################
+
+    classifier_fp_head = ImageClassifier(model_name=cfg.model_name, num_classes=num_classes)
+    classifier_fp_head.load_state_dict(patched_with_fp_head)
+    classifier_fp_head.to(device)
     if IS_SLURM:
-        log.info("image_encoder (patched): %s", image_encoder)
+        log.info("classifier (patched backbone + FP head): %s", classifier_fp_head)
     else:
-        print(f"\n\nimage_encoder (patched):")
-        pprint(image_encoder, expand_all=True)
+        print(f"\n\nclassifier (patched backbone + FP head):")
+        pprint(classifier_fp_head, expand_all=True)
         print(f"\n\n")
 
-    classification_head = ClassificationHead.load(tgt_head_path)
-
-    ############################################################################
-    # END load patched encoder + target head
-    ############################################################################
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    ############################################################################
-    # BEGIN dataset creation (target)
-    ############################################################################
-
-    dataset = get_dataset(
-        dataset_name=cfg.target.dataset_name,
-        preprocess_train=image_encoder.train_preprocess,
-        preprocess_inference=image_encoder.val_preprocess,
-        batch_size=cfg.batch_size,
-        num_workers=int(os.environ['TORCH_NUM_WORKERS']),
-        seed=cfg.target.seed,
-    )
-
-    ############################################################################
-    # END dataset creation
-    ############################################################################
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    ############################################################################
-    # BEGIN image classifier creation
-    ############################################################################
-
-    image_classifier = ImageClassifier(
-        image_encoder=image_encoder,
-        classification_head=classification_head
-    )
-    image_classifier.to(device)
-    if IS_SLURM:
-        log.info("image_classifier: %s", image_classifier)
-    else:
-        print(f"\n\nimage_classifier:")
-        pprint(image_classifier, expand_all=True)
-        print(f"\n\n")
-
-    ############################################################################
-    # END image classifier creation
-    ############################################################################
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    ############################################################################
-    # BEGIN evaluation (patched QAT, before PTQ)
-    ############################################################################
-    #
-    # Evaluate the patched model in full precision FIRST, before applying PTQ
-    # in-place, so we can report both numbers.
-
-    test_accuracy_patched_qat = evaluate(
+    test_accuracy_fp_head = evaluate(
         dataset=dataset,
-        model=image_classifier,
+        model=classifier_fp_head,
         device=device,
         limit_num_batches=cfg.limit_num_batches,
     )
 
     if IS_SLURM:
-        log.info("eval test_accuracy (patched QAT, FP_target + %s*QV): %s", alpha, test_accuracy_patched_qat)
+        log.info("eval test_accuracy (patched + FP head, before PTQ): %s", test_accuracy_fp_head)
     else:
-        print(f"\n    eval test_accuracy (patched QAT, FP_target + {alpha}*QV): {test_accuracy_patched_qat}\n")
-
-    ############################################################################
-    # END evaluation (patched QAT)
-    ############################################################################
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    ############################################################################
-    # BEGIN PTQ
-    ############################################################################
+        print(f"\n    eval test_accuracy (patched + FP head, before PTQ): {test_accuracy_fp_head}\n")
 
     skip_modules = frozenset(cfg.ptq.skip_modules)
 
-    all_linear_names = [
-        name for name, module in image_classifier.named_modules()
+    all_linear_names_fp = [
+        name for name, module in classifier_fp_head.named_modules()
         if isinstance(module, nn.Linear)
     ]
 
-    quantized_names = apply_ptq_(
-        model=image_classifier,
+    quantized_names_fp = apply_ptq_(
+        model=classifier_fp_head,
         bits=cfg.ptq.bits,
         granularity=cfg.ptq.granularity,
         skip_modules=skip_modules,
     )
 
-    skipped_names = sorted(set(all_linear_names) - set(quantized_names))
+    skipped_names_fp = sorted(set(all_linear_names_fp) - set(quantized_names_fp))
 
     if IS_SLURM:
         log.info(
             "PTQ config: bits=%s, granularity=%s, skip_modules=%s",
             cfg.ptq.bits, cfg.ptq.granularity, list(cfg.ptq.skip_modules),
         )
-        log.info(f"Quantized layers ({len(quantized_names)}): {quantized_names}")
-        log.info(f"Skipped layers ({len(skipped_names)}): {skipped_names}")
+        log.info(f"Quantized layers ({len(quantized_names_fp)}): {quantized_names_fp}")
+        log.info(f"Skipped layers ({len(skipped_names_fp)}): {skipped_names_fp}")
     else:
         print(f"\nPTQ config: bits={cfg.ptq.bits}, granularity={cfg.ptq.granularity}, skip_modules={list(cfg.ptq.skip_modules)}")
 
-        print(f"\nQuantized layers ({len(quantized_names)}):")
-        for name in quantized_names:
+        print(f"\nQuantized layers ({len(quantized_names_fp)}):")
+        for name in quantized_names_fp:
             print(f"  - {name}")
 
-        print(f"\nSkipped layers ({len(skipped_names)}):")
-        for name in skipped_names:
+        print(f"\nSkipped layers ({len(skipped_names_fp)}):")
+        for name in skipped_names_fp:
             print(f"  - {name}")
         print()
 
+    test_accuracy_fp_head_ptq = evaluate(
+        dataset=dataset,
+        model=classifier_fp_head,
+        device=device,
+        limit_num_batches=cfg.limit_num_batches,
+    )
+
+    if IS_SLURM:
+        log.info("eval test_accuracy (patched + FP head + PTQ): %s", test_accuracy_fp_head_ptq)
+    else:
+        print(f"\n    eval test_accuracy (patched + FP head + PTQ): {test_accuracy_fp_head_ptq}\n")
+
+    del classifier_fp_head
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
     ############################################################################
-    # END PTQ
+    # END Eval A
     ############################################################################
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     ############################################################################
-    # BEGIN evaluation (patched QAT + PTQ)
+    # BEGIN Eval B: patched backbone + QAT target head
     ############################################################################
 
-    test_accuracy_patched_qat_ptq = evaluate(
+    classifier_qat_head = ImageClassifier(model_name=cfg.model_name, num_classes=num_classes)
+    classifier_qat_head.load_state_dict(patched_with_qat_head)
+    classifier_qat_head.to(device)
+    if IS_SLURM:
+        log.info("classifier (patched backbone + QAT head): %s", classifier_qat_head)
+    else:
+        print(f"\n\nclassifier (patched backbone + QAT head):")
+        pprint(classifier_qat_head, expand_all=True)
+        print(f"\n\n")
+
+    test_accuracy_qat_head = evaluate(
         dataset=dataset,
-        model=image_classifier,
+        model=classifier_qat_head,
         device=device,
         limit_num_batches=cfg.limit_num_batches,
     )
 
-    num_classes = len(dataset.class_names)
-    random_chance = 1.0 / num_classes
     if IS_SLURM:
-        log.info(
-            "eval test_accuracy (patched QAT + PTQ, FP_target + %s*QV): %s",
-            alpha, test_accuracy_patched_qat_ptq,
-        )
-        log.info("random chance baseline: %s  (1 / %d classes)", random_chance, num_classes)
+        log.info("eval test_accuracy (patched + QAT head, before PTQ): %s", test_accuracy_qat_head)
     else:
-        print(f"\n    eval test_accuracy (patched QAT + PTQ, FP_target + {alpha}*QV): {test_accuracy_patched_qat_ptq}\n")
-        print(f"    random chance baseline : {random_chance}  (1 / {num_classes} classes)\n")
+        print(f"\n    eval test_accuracy (patched + QAT head, before PTQ): {test_accuracy_qat_head}\n")
+
+    all_linear_names_qat = [
+        name for name, module in classifier_qat_head.named_modules()
+        if isinstance(module, nn.Linear)
+    ]
+
+    quantized_names_qat = apply_ptq_(
+        model=classifier_qat_head,
+        bits=cfg.ptq.bits,
+        granularity=cfg.ptq.granularity,
+        skip_modules=skip_modules,
+    )
+
+    skipped_names_qat = sorted(set(all_linear_names_qat) - set(quantized_names_qat))
+
+    test_accuracy_qat_head_ptq = evaluate(
+        dataset=dataset,
+        model=classifier_qat_head,
+        device=device,
+        limit_num_batches=cfg.limit_num_batches,
+    )
+
+    if IS_SLURM:
+        log.info("eval test_accuracy (patched + QAT head + PTQ): %s", test_accuracy_qat_head_ptq)
+    else:
+        print(f"\n    eval test_accuracy (patched + QAT head + PTQ): {test_accuracy_qat_head_ptq}\n")
+
+    del classifier_qat_head
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     ############################################################################
-    # END evaluation (patched QAT + PTQ)
+    # END Eval B
+    ############################################################################
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    ############################################################################
+    # BEGIN summary
+    ############################################################################
+
+    num_classes_actual = len(dataset.class_names)
+    random_chance = 1.0 / num_classes_actual
+
+    if IS_SLURM:
+        log.info("random chance baseline: %s  (1 / %d classes)", random_chance, num_classes_actual)
+    else:
+        print(f"\n    random chance baseline : {random_chance}  (1 / {num_classes_actual} classes)\n")
+
+    ############################################################################
+    # END summary
     ############################################################################
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -492,7 +514,7 @@ def main(cfg: DictConfig):
         "vision",
         "qv_transfer",
         sanitize_timm_model_name(cfg.model_name),
-        f"src={cfg.source.dataset_name}_seed={cfg.source.seed}",
+        f"src={source_dataset_name}_seed={cfg.source.seed}",
         f"tgt={cfg.target.dataset_name}_seed={cfg.target.seed}",
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
         f"qat=bits={cfg.qat.bits}_gran={cfg.qat.granularity}_skip={qat_skip_tag}",
@@ -512,20 +534,20 @@ def main(cfg: DictConfig):
         "limit_num_batches": cfg.limit_num_batches,
         "device": str(device),
         "source": {
-            "dataset_name": cfg.source.dataset_name,
+            "dataset_name": source_dataset_name,
             "seed": cfg.source.seed,
             "limit_num_epochs": cfg.source.limit_num_epochs,
             "epochs": src_epochs,
-            "fp_encoder_path": fp_source_path,
-            "qat_encoder_path": qat_source_path,
+            "fp_classifier_path": fp_source_path,
+            "qat_classifier_path": qat_source_path,
         },
         "target": {
             "dataset_name": cfg.target.dataset_name,
             "seed": cfg.target.seed,
             "limit_num_epochs": cfg.target.limit_num_epochs,
             "epochs": tgt_epochs,
-            "fp_encoder_path": fp_target_path,
-            "head_path": tgt_head_path,
+            "fp_classifier_path": fp_target_path,
+            "qat_classifier_path": qat_target_path,
         },
         "qat": {
             "bits": cfg.qat.bits,
@@ -534,7 +556,8 @@ def main(cfg: DictConfig):
         },
         "qv": {
             "alpha": alpha,
-            "num_keys_in_vector": len(tv.vector),
+            "num_keys_in_vector": len(vector),
+            "num_head_keys_excluded": num_head_filtered,
             "num_keys_dtype_filtered": num_dtype_filtered,
         },
         "ptq": {
@@ -542,11 +565,13 @@ def main(cfg: DictConfig):
             "granularity": cfg.ptq.granularity,
             "skip_modules": list(cfg.ptq.skip_modules),
         },
-        "ptq_quantized_modules": quantized_names,
-        "ptq_skipped_modules": skipped_names,
-        "test_accuracy_patched_qat": test_accuracy_patched_qat,
-        "test_accuracy_patched_qat_ptq": test_accuracy_patched_qat_ptq,
-        "num_classes": num_classes,
+        "ptq_quantized_modules": quantized_names_fp,
+        "ptq_skipped_modules": skipped_names_fp,
+        "test_accuracy_fp_head": test_accuracy_fp_head,
+        "test_accuracy_fp_head_ptq": test_accuracy_fp_head_ptq,
+        "test_accuracy_qat_head": test_accuracy_qat_head,
+        "test_accuracy_qat_head_ptq": test_accuracy_qat_head_ptq,
+        "num_classes": num_classes_actual,
         "random_chance": random_chance,
         "comparison_baseline_note": (
             "Compare to PTQ(QAT_{S2,Q,D2}); NOT computed here. "
@@ -567,6 +592,95 @@ def main(cfg: DictConfig):
     ############################################################################
     # END save results
     ############################################################################
+
+
+@hydra.main(
+    config_path="../../../../../config/experiments/vision/ilharco_timm_supervised/001_qat_transfer",
+    config_name="qv_transfer",
+    version_base=None,
+)
+def main(cfg: DictConfig):
+
+    if IS_SLURM:
+        log.info("cfg:\n%s", dict(cfg))
+    else:
+        pprint(dict(cfg), expand_all=True)
+
+    source_dataset_names = OmegaConf.to_container(cfg.source.dataset_names, resolve=True)
+
+    set_seed(cfg.target.seed)
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    tgt_epochs = DATASET_NAME_TO_EPOCHS[
+        cfg.target.dataset_name
+    ] if cfg.target.limit_num_epochs is None else cfg.target.limit_num_epochs
+
+    num_classes = DATASET_NAME_TO_NUM_CLASSES[cfg.target.dataset_name]
+
+    ############################################################################
+    # Load target checkpoints once (independent of source)
+    ############################################################################
+
+    fp_tgt_dir = _fp_ckpt_dir(cfg, cfg.target.dataset_name, cfg.target.seed)
+    qat_tgt_dir = _qat_ckpt_dir(cfg, cfg.target.dataset_name, cfg.target.seed)
+
+    fp_target_path = os.path.join(fp_tgt_dir, f"classifier_epoch_{tgt_epochs}.pt")
+    qat_target_path = os.path.join(qat_tgt_dir, f"classifier_epoch_{tgt_epochs}.pt")
+
+    if IS_SLURM:
+        log.info("FP target  classifier: %s", fp_target_path)
+        log.info("QAT target classifier: %s", qat_target_path)
+    else:
+        print(f"\nFP target  classifier: {fp_target_path}")
+        print(f"QAT target classifier: {qat_target_path}\n")
+
+    for path in (fp_target_path, qat_target_path):
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Required target checkpoint missing: {path}")
+
+    fp_tgt_sd = torch.load(fp_target_path, map_location="cpu")
+    qat_tgt_sd = torch.load(qat_target_path, map_location="cpu")
+
+    ############################################################################
+    # Create target dataset once (reused across all source datasets)
+    ############################################################################
+
+    _tmp_classifier = ImageClassifier(model_name=cfg.model_name, num_classes=num_classes)
+
+    dataset = get_dataset(
+        dataset_name=cfg.target.dataset_name,
+        preprocess_train=_tmp_classifier.train_preprocess,
+        preprocess_inference=_tmp_classifier.val_preprocess,
+        batch_size=cfg.batch_size,
+        num_workers=int(os.environ['TORCH_NUM_WORKERS']),
+        seed=cfg.target.seed,
+    )
+
+    del _tmp_classifier
+
+    ############################################################################
+    # Iterate over source datasets
+    ############################################################################
+
+    for i, source_dataset_name in enumerate(source_dataset_names):
+        if IS_SLURM:
+            log.info("=== Source %d/%d: %s ===", i + 1, len(source_dataset_names), source_dataset_name)
+        else:
+            print(f"\n{'='*60}")
+            print(f"  Source {i + 1}/{len(source_dataset_names)}: {source_dataset_name}")
+            print(f"{'='*60}")
+
+        _run_source(
+            cfg=cfg,
+            source_dataset_name=source_dataset_name,
+            fp_tgt_sd=fp_tgt_sd,
+            qat_tgt_sd=qat_tgt_sd,
+            dataset=dataset,
+            num_classes=num_classes,
+            device=device,
+            tgt_epochs=tgt_epochs,
+        )
 
 
 if __name__ == "__main__":
