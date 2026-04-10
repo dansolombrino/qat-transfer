@@ -20,7 +20,7 @@
 
 _target_: hydra_plugins.hydra_submitit_launcher.submitit_launcher.SlurmLauncher
 partition: boost_usr_prod
-account: IscrC_SIMP
+account: IscrC_eff-SAM2
 gpus_per_node: 1
 cpus_per_task: 8
 mem_gb: 128
