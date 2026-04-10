@@ -27,10 +27,13 @@ TQDM_KW = dict(disable=IS_SLURM, mininterval=1.0)
 LOG_EVERY = 50
 
 from src.quantization import QATLinear, apply_ptq_, disable_qat_, enable_qat_
-from src.vision.data.common import DATASET_NAME_TO_EPOCHS, maybe_dictionarize
+from src.vision.data.common import (
+    DATASET_NAME_TO_EPOCHS,
+    DATASET_NAME_TO_NUM_CLASSES,
+    maybe_dictionarize,
+)
 from src.vision.data.registry import get_dataset
-from src.vision.ilharco_timm_supervised.heads import get_classification_head
-from src.vision.ilharco_timm_supervised.modeling import ImageClassifier, ImageEncoder
+from src.vision.ilharco_timm_supervised.modeling import ImageClassifier
 from src.vision.utils import (
     LabelSmoothing,
     cosine_lr,
@@ -60,11 +63,10 @@ def _evaluate_ptq(
     but the reported metric is what a true post-training-quantized model
     (apply_ptq_ on plain nn.Linear) would achieve on this checkpoint.
 
-    Deepcopy safety: ImageClassifier / ImageEncoder / ClassificationHead are
-    plain nn.Module subclasses wrapping a timm model + an nn.Linear-based
-    head. No forward/backward hooks or non-picklable attrs are registered.
-    QATLinear stores only a child nn.Linear plus Python scalars. All
-    components are therefore deepcopy-safe.
+    Deepcopy safety: ImageClassifier is a plain nn.Module subclass wrapping a
+    timm model. No forward/backward hooks or non-picklable attrs are
+    registered. QATLinear stores only a child nn.Linear plus Python scalars.
+    All components are therefore deepcopy-safe.
     """
     classifier.eval()
     # Move the live model to CPU briefly so the deepcopy is made on CPU and
@@ -143,36 +145,26 @@ def main(cfg: DictConfig) -> None:
     save_dir = os.path.join(*save_dir_parts)
     os.makedirs(save_dir, exist_ok=True)
 
-    # Build encoder (feature extractor only, no classification head)
-    encoder = ImageEncoder(model_name=cfg.model_name)
+    classifier = ImageClassifier(
+        model_name=cfg.model_name,
+        num_classes=DATASET_NAME_TO_NUM_CLASSES[cfg.dataset_name],
+    )
 
     # Dataset (seeded with the run seed — not SPLIT_SEED)
     dataset = get_dataset(
         dataset_name=cfg.dataset_name,
-        preprocess_train=encoder.train_preprocess,
-        preprocess_inference=encoder.val_preprocess,
+        preprocess_train=classifier.train_preprocess,
+        preprocess_inference=classifier.val_preprocess,
         batch_size=cfg.batch_size,
         num_workers=num_workers,
         seed=cfg.seed,
     )
 
-    # Build classification head (pretrained if num_classes matches, else random init)
-    num_classes = len(dataset.class_names)
-    head = get_classification_head(
-        model_name=cfg.model_name,
-        dataset_name=cfg.dataset_name,
-        num_classes=num_classes,
-        save_dir=cfg.head_cache_dir,
-        device=device,
-    )
-
-    classifier = ImageClassifier(encoder, head)
-    # Train both encoder and head jointly — no freeze_head()
-    classifier.to(device)
+    classifier.to(device=device)
 
     # Enable quantization-aware training: wraps nn.Linear layers in QATLinear
     # (STE fake-quant forward), skipping the named top-level children in
-    # cfg.qat.skip_modules (typically ["classification_head"]).
+    # cfg.qat.skip_modules (typically ["head"]).
     skip_modules = frozenset(cfg.qat.skip_modules)
     all_linear_names_before = sorted(
         name
@@ -220,7 +212,7 @@ def main(cfg: DictConfig) -> None:
         pprint(classifier, expand_all=True)
 
     epochs = DATASET_NAME_TO_EPOCHS[cfg.dataset_name]
-    effective_epochs = (
+    epochs = (
         min(epochs, cfg.limit_num_epochs)
         if cfg.limit_num_epochs is not None
         else epochs
@@ -239,7 +231,7 @@ def main(cfg: DictConfig) -> None:
 
     # Training loop
     epoch_bar = tqdm(
-        range(effective_epochs), desc="epochs", colour=random_tqdm_color(), **TQDM_KW
+        range(epochs), desc="epochs", colour=random_tqdm_color(), **TQDM_KW
     )
     for epoch in epoch_bar:
         classifier.train()
@@ -296,6 +288,18 @@ def main(cfg: DictConfig) -> None:
         else:
             epoch_bar.set_postfix(val_acc=f"{val_acc:.4f}")
 
+        # Save classifier and head checkpoints separately, if limit_num_epochs
+        if cfg.limit_num_epochs:
+            save_copy = copy.deepcopy(classifier)
+            disable_qat_(save_copy)
+            classifier_path = os.path.join(save_dir, f"classifier_epoch_{epoch + 1}.pt")
+            save_copy.save(classifier_path)
+            head_path = os.path.join(save_dir, f"head_epoch_{epoch + 1}.pt")
+            torch.save(save_copy.model.head, head_path)
+            del save_copy
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
     # Final test evaluation — same PTQ-converted deepcopy path.
     test_acc = _evaluate_ptq(
         classifier=classifier,
@@ -312,14 +316,14 @@ def main(cfg: DictConfig) -> None:
     else:
         print(f"Final test accuracy: {test_acc:.4f}")
 
-    # Save encoder and head checkpoints: strip QAT wrappers so the saved
-    # state_dict is identical in format to finetune_fp.py output (plain
-    # nn.Linear keys) and can be consumed unchanged by downstream scripts.
+    # Save classifier and head checkpoints separately: strip QAT wrappers so
+    # the saved state_dict is identical in format to finetune_fp.py output
+    # (plain nn.Linear keys) and can be consumed unchanged by downstream scripts.
     disable_qat_(classifier)
-    encoder_path = os.path.join(save_dir, f"encoder_epoch_{epochs}.pt")
-    classifier.image_encoder.save(encoder_path)
+    classifier_path = os.path.join(save_dir, f"classifier_epoch_{epochs}.pt")
+    classifier.save(classifier_path)
     head_path = os.path.join(save_dir, f"head_epoch_{epochs}.pt")
-    classifier.classification_head.save(head_path)
+    torch.save(classifier.model.head, head_path)
 
 
 if __name__ == "__main__":

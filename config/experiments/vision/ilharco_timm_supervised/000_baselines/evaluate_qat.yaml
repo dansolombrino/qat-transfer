@@ -19,6 +19,6 @@ limit_num_batches: null
 log_to_file: false
 
 qat:
-  skip_modules: ???  # list of child-module attribute names skipped during QAT training, e.g. [classification_head]
+  skip_modules: ???  # list of child-module attribute names skipped during QAT training, e.g. [head]
   bits: ???          # int, must match training
   granularity: ???   # "tensor" or "channel", must match training

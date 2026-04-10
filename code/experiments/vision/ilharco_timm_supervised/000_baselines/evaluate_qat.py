@@ -12,9 +12,9 @@ load_dotenv()
 
 log = logging.getLogger(__name__)
 
-from src.vision.ilharco_timm_supervised.modeling import ClassificationHead, ImageClassifier, ImageEncoder
+from src.vision.ilharco_timm_supervised.modeling import ImageClassifier
 from src.vision.data.registry import get_dataset
-from src.vision.data.common import maybe_dictionarize, DATASET_NAME_TO_EPOCHS
+from src.vision.data.common import maybe_dictionarize, DATASET_NAME_TO_EPOCHS, DATASET_NAME_TO_NUM_CLASSES
 from src.vision.utils import (
     accuracy,
     random_tqdm_color,
@@ -106,37 +106,42 @@ def main(cfg: DictConfig):
 
     checkpoint_base_path = os.environ['CHECKPOINT_BASE_PATH']
 
+    is_dryrun = (
+        cfg.limit_num_batches is not None or cfg.limit_num_epochs is not None
+    )
     qat_skip_modules_sorted = sorted(cfg.qat.skip_modules)
     qat_skip_tag = "-".join(qat_skip_modules_sorted) if qat_skip_modules_sorted else "none"
 
-    checkpoint_dir = os.path.join(
+    checkpoint_dir_parts = [
         checkpoint_base_path,
         "vision",
         "ilharco_timm_supervised",
-        "qat",
+        "qat_dryrun" if is_dryrun else "qat",
         sanitize_timm_model_name(cfg.model_name),
         cfg.dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
         f"qat=bits={cfg.qat.bits}_gran={cfg.qat.granularity}_skip={qat_skip_tag}",
         f"seed={cfg.seed}",
-    )
-    encoder_path = os.path.join(checkpoint_dir, f"encoder_epoch_{epochs}.pt")
-    head_path = os.path.join(checkpoint_dir, f"head_epoch_{epochs}.pt")
+    ]
+    if is_dryrun:
+        lnb = cfg.limit_num_batches if cfg.limit_num_batches is not None else "all"
+        lne = cfg.limit_num_epochs if cfg.limit_num_epochs is not None else "all"
+        checkpoint_dir_parts.append(f"lnb={lnb}_lne={lne}")
+    checkpoint_dir = os.path.join(*checkpoint_dir_parts)
+    classifier_path = os.path.join(checkpoint_dir, f"classifier_epoch_{epochs}.pt")
 
-    print(f"\nLoading encoder from: {encoder_path}")
-    image_encoder = ImageEncoder.load(
+    print(f"\nLoading classifier from: {classifier_path}")
+    image_classifier = ImageClassifier.load(
         model_name=cfg.model_name,
-        filename=encoder_path,
+        num_classes=DATASET_NAME_TO_NUM_CLASSES[cfg.dataset_name],
+        filename=classifier_path,
     )
-    image_encoder.to(device)
-    print(f"\n\nimage_encoder:")
-    pprint(image_encoder, expand_all=True)
+    image_classifier.to(device)
+    print(f"\n\nimage_classifier:")
+    pprint(image_classifier, expand_all=True)
     print(f"\n\n")
     if cfg.log_to_file:
-        log.info(f"image_encoder:\n{image_encoder}")
-
-    print(f"\nLoading head from: {head_path}")
-    classification_head = ClassificationHead.load(head_path)
+        log.info(f"image_classifier:\n{image_classifier}")
 
     ############################################################################
     # END checkpoint loading
@@ -150,8 +155,8 @@ def main(cfg: DictConfig):
 
     dataset = get_dataset(
         dataset_name=cfg.dataset_name,
-        preprocess_train=image_encoder.train_preprocess,
-        preprocess_inference=image_encoder.val_preprocess,
+        preprocess_train=image_classifier.train_preprocess,
+        preprocess_inference=image_classifier.val_preprocess,
         batch_size=cfg.batch_size,
         num_workers=int(os.environ['TORCH_NUM_WORKERS']),
         seed=cfg.seed,
@@ -159,27 +164,6 @@ def main(cfg: DictConfig):
 
     ############################################################################
     # END dataset creation
-    ############################################################################
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    ############################################################################
-    # BEGIN image classifier creation
-    ############################################################################
-
-    image_classifier = ImageClassifier(
-        image_encoder=image_encoder,
-        classification_head=classification_head
-    )
-    image_classifier.to(device)
-    print(f"\n\nimage_classifier:")
-    pprint(image_classifier, expand_all=True)
-    print(f"\n\n")
-    if cfg.log_to_file:
-        log.info(f"image_classifier:\n{image_classifier}")
-
-    ############################################################################
-    # END image classifier creation
     ############################################################################
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -216,19 +200,22 @@ def main(cfg: DictConfig):
 
     evaluation_base_path = os.environ['EVALUATION_BASE_PATH']
 
-    eval_dir = os.path.join(
+    eval_dir_parts = [
         evaluation_base_path,
         "vision",
         "ilharco_timm_supervised",
         "000_baselines",
         "vision",
-        "qat",
+        "qat_dryrun" if is_dryrun else "qat",
         sanitize_timm_model_name(cfg.model_name),
         cfg.dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
         f"qat=bits={cfg.qat.bits}_gran={cfg.qat.granularity}_skip={qat_skip_tag}",
         f"seed={cfg.seed}",
-    )
+    ]
+    if is_dryrun:
+        eval_dir_parts.append(f"lnb={lnb}_lne={lne}")
+    eval_dir = os.path.join(*eval_dir_parts)
 
     results = {
         "model_name": cfg.model_name,
@@ -247,8 +234,7 @@ def main(cfg: DictConfig):
         "test_accuracy": test_accuracy,
         "random_chance": random_chance,
         "num_classes": num_classes,
-        "encoder_path": encoder_path,
-        "head_path": head_path,
+        "classifier_path": classifier_path,
         "qat_bits": cfg.qat.bits,
         "qat_granularity": cfg.qat.granularity,
         "qat_skip_modules": list(cfg.qat.skip_modules),
