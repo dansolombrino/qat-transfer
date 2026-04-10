@@ -29,4 +29,5 @@ nodes: 1
 stderr_to_stdout: true
 submitit_folder: ${hydra.sweep.dir}/.submitit/%j
 setup:
-  - export PYTHONPATH="$SLURM_SUBMIT_DIR/code:$PYTHONPATH"
+  - export PYTHONPATH="/leonardo_work/IscrC_USAE/solombrino/PARA/Projects/quantization/qat-transfer/code:$PYTHONPATH"
+  - export TORCHINDUCTOR_CACHE_DIR="/leonardo_work/IscrC_USAE/solombrino/.cache/torch_inductor"
