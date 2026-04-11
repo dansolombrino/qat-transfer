@@ -1,0 +1,25 @@
+model_name: ???
+pretrained: ???
+dataset_name: ???
+seed: ???
+batch_size: 128
+lr: 1e-5
+wd: 0.1
+ls: 0.0
+wl: 500           # warmup length (steps)
+max_grad_norm: 1.0
+head_cache_dir: ${oc.env:HEAD_CACHE_DIR,heads}
+limit_num_batches: null
+limit_num_epochs: null
+
+qat:
+  bits: ???           # int, required
+  granularity: ???    # "tensor" or "channel", required
+  skip_modules: ???   # list[str], required (e.g. [classification_head])
+
+hydra:
+  run:
+    dir: logs/src/vision/ilharco_open_clip/finetune_qat/${sanitize_open_clip:${model_name},${pretrained}}/${dataset_name}/seed=${seed}
+  sweep:
+    dir: logs/src/vision/ilharco_open_clip/finetune_qat
+    subdir: ${sanitize_open_clip:${model_name},${pretrained}}/${dataset_name}/seed=${seed}

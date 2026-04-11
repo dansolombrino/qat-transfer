@@ -31,6 +31,17 @@ def sanitize_hf_model_name(model_name: str) -> str:
     return model_name.replace("/", "_").replace("-", "_")
 
 
+def sanitize_open_clip_model_name(model_name: str, pretrained: str) -> str:
+    """Make an open_clip (model_name, pretrained) pair safe for use as a single path component.
+
+    Combines model_name and pretrained with "__" separator and replaces
+    "/", "-", and "." with "_", so e.g. model_name="ViT-B-32" and
+    pretrained="openai" becomes "ViT_B_32__openai".
+    """
+    combined = f"{model_name}__{pretrained}"
+    return combined.replace("/", "_").replace("-", "_").replace(".", "_")
+
+
 def sanitize_timm_model_name(model_name: str) -> str:
     """Make a timm model id safe for use as a single path component.
 

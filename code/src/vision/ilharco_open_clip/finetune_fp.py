@@ -24,28 +24,25 @@ IS_SLURM = "SLURM_JOB_ID" in os.environ
 TQDM_KW = dict(disable=IS_SLURM, mininterval=1.0)
 LOG_EVERY = 50
 
-from src.vision.data.common import (
-    DATASET_NAME_TO_NUM_CLASSES, 
-    DATASET_NAME_TO_EPOCHS, 
-    maybe_dictionarize
-)
+from src.vision.data.common import DATASET_NAME_TO_EPOCHS, maybe_dictionarize
 from src.vision.data.registry import get_dataset
-from src.vision.ilharco_timm_supervised.modeling import ImageClassifier
+from src.vision.ilharco_open_clip.heads import get_classification_head
+from src.vision.ilharco_open_clip.modeling import ImageClassifier, ImageEncoder
 from src.vision.utils import (
     LabelSmoothing,
     cosine_lr,
     random_tqdm_color,
-    sanitize_timm_model_name,
+    sanitize_open_clip_model_name,
     set_seed,
 )
 
 OmegaConf.register_new_resolver(
-    "sanitize_timm", sanitize_timm_model_name, replace=True
+    "sanitize_open_clip", sanitize_open_clip_model_name, replace=True
 )
 
 
 @hydra.main(
-    config_path="../../../../config/src/vision/ilharco_timm_supervised",
+    config_path="../../../../config/src/vision/ilharco_open_clip",
     config_name="finetune_fp",
     version_base=None,
 )
@@ -57,10 +54,11 @@ def main(cfg: DictConfig) -> None:
     set_seed(cfg.seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"{device=}")
 
     checkpoint_base_path = os.environ["CHECKPOINT_BASE_PATH"]
     num_workers = int(os.environ["TORCH_NUM_WORKERS"])
+
+    sanitized_model = sanitize_open_clip_model_name(cfg.model_name, cfg.pretrained)
 
     is_dryrun = (
         cfg.limit_num_batches is not None or cfg.limit_num_epochs is not None
@@ -68,9 +66,9 @@ def main(cfg: DictConfig) -> None:
     save_dir_parts = [
         checkpoint_base_path,
         "vision",
-        "ilharco_timm_supervised",
+        "ilharco_open_clip",
         "fp_dryrun" if is_dryrun else "fp",
-        sanitize_timm_model_name(cfg.model_name),
+        sanitized_model,
         cfg.dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
         f"seed={cfg.seed}",
@@ -82,22 +80,18 @@ def main(cfg: DictConfig) -> None:
     save_dir = os.path.join(*save_dir_parts)
     os.makedirs(save_dir, exist_ok=True)
 
-    classifier = ImageClassifier(
+    # Build encoder + frozen zero-shot classification head
+    encoder = ImageEncoder(model_name=cfg.model_name, pretrained=cfg.pretrained, keep_lang=False)
+    head = get_classification_head(
         model_name=cfg.model_name,
-        num_classes=DATASET_NAME_TO_NUM_CLASSES[cfg.dataset_name]
-    )
-
-    # Dataset (seeded with the run seed — not clea)
-    dataset = get_dataset(
+        pretrained=cfg.pretrained,
         dataset_name=cfg.dataset_name,
-        preprocess_train=classifier.train_preprocess,
-        preprocess_inference=classifier.val_preprocess,
-        batch_size=cfg.batch_size,
-        num_workers=num_workers,
-        seed=cfg.seed,
+        save_dir=cfg.head_cache_dir,
+        device=device,
     )
-
-    classifier.to(device=device)
+    classifier = ImageClassifier(encoder, head)
+    classifier.freeze_head()
+    classifier.to(device)
 
     if IS_SLURM:
         log.info("state_dict keys: %s", list(classifier.state_dict().keys()))
@@ -106,8 +100,17 @@ def main(cfg: DictConfig) -> None:
         pprint(list(classifier.state_dict().keys()), expand_all=True)
         pprint(classifier, expand_all=True)
 
+    # Dataset (seeded with the run seed — not SPLIT_SEED)
+    dataset = get_dataset(
+        dataset_name=cfg.dataset_name,
+        preprocess_train=classifier.train_preprocess,
+        preprocess_inference=classifier.val_preprocess,
+        batch_size=cfg.batch_size,
+        num_workers=num_workers,
+        seed=cfg.seed,
+    )
     epochs = DATASET_NAME_TO_EPOCHS[cfg.dataset_name]
-    epochs = (
+    effective_epochs = (
         min(epochs, cfg.limit_num_epochs)
         if cfg.limit_num_epochs is not None
         else epochs
@@ -124,7 +127,7 @@ def main(cfg: DictConfig) -> None:
 
     # Training loop
     epoch_bar = tqdm(
-        range(epochs), desc="epochs", colour=random_tqdm_color(), **TQDM_KW
+        range(effective_epochs), desc="epochs", colour=random_tqdm_color(), **TQDM_KW
     )
     for epoch in epoch_bar:
         classifier.train()
@@ -198,13 +201,6 @@ def main(cfg: DictConfig) -> None:
         else:
             epoch_bar.set_postfix(val_acc=f"{val_acc:.4f}")
 
-        # Save classifier and head checkpoints separately, if limit nu
-        if cfg.limit_num_epochs:
-            classifier_path = os.path.join(save_dir, f"classifier_epoch_{epoch + 1}.pt")
-            classifier.save(classifier_path)
-            head_path = os.path.join(save_dir, f"head_epoch_{epoch + 1}.pt")
-            torch.save(classifier.model.head, head_path)
-
     # Final test evaluation
     classifier.eval()
     test_correct, test_total = 0, 0
@@ -235,11 +231,9 @@ def main(cfg: DictConfig) -> None:
     else:
         print(f"Final test accuracy: {test_acc:.4f}")
 
-    # Save classifier and head checkpoints separately
-    classifier_path = os.path.join(save_dir, f"classifier_epoch_{epochs}.pt")
-    classifier.save(classifier_path)
-    head_path = os.path.join(save_dir, f"head_epoch_{epochs}.pt")
-    torch.save(classifier.model.head, head_path)
+    # Save encoder checkpoint
+    ckpt_path = os.path.join(save_dir, f"epoch_{epochs}.pt")
+    classifier.image_encoder.save(ckpt_path)
 
 
 if __name__ == "__main__":
