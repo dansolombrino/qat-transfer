@@ -25,6 +25,7 @@ log = logging.getLogger(__name__)
 IS_SLURM = "SLURM_JOB_ID" in os.environ
 TQDM_KW = dict(disable=IS_SLURM, mininterval=1.0)
 LOG_EVERY = 50
+REFERENCE_BATCH_SIZE = 128
 
 from src.quantization import (
     QATLinear,
@@ -247,13 +248,17 @@ def main(cfg: DictConfig) -> None:
         else epochs
     )
     num_batches = len(dataset.train_loader)
+    assert REFERENCE_BATCH_SIZE % cfg.batch_size == 0, (
+        f"batch_size={cfg.batch_size} must evenly divide {REFERENCE_BATCH_SIZE}"
+    )
+    accum_steps = REFERENCE_BATCH_SIZE // cfg.batch_size
 
     # Optimizer / scheduler / loss — built AFTER enable_qat_ so params are
     # collected from the QAT-wrapped model (QATLinear.linear.weight is still
     # a regular nn.Parameter; STE keeps the forward differentiable).
     params = [p for p in classifier.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(params, lr=cfg.lr, weight_decay=cfg.wd)
-    scheduler = cosine_lr(optimizer, cfg.lr, cfg.wl, epochs * num_batches)
+    scheduler = cosine_lr(optimizer, cfg.lr, cfg.wl, epochs * num_batches // accum_steps)
     loss_fn = (
         LabelSmoothing(cfg.ls) if cfg.ls > 0 else torch.nn.CrossEntropyLoss()
     )
@@ -271,34 +276,36 @@ def main(cfg: DictConfig) -> None:
             leave=False,
             **TQDM_KW,
         )
+        optimizer.zero_grad()
+        accum_loss = 0.0
         for i, batch in enumerate(train_bar):
-            if (
-                cfg.limit_num_batches is not None
-                and i >= cfg.limit_num_batches
-            ):
-                break
-            step = i + epoch * num_batches
-            scheduler(step)
-            optimizer.zero_grad()
-
             batch = maybe_dictionarize(batch)
             images = batch["images"].to(device)
             labels = batch["labels"].to(device=device, dtype=torch.long)
 
             logits = classifier(images)
-            loss: torch.Tensor = loss_fn(logits, labels)
+            loss: torch.Tensor = loss_fn(logits, labels) / accum_steps
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(params, cfg.max_grad_norm)
-            optimizer.step()
+            accum_loss += loss.item()
 
-            if IS_SLURM:
-                if i % LOG_EVERY == 0 or i == num_batches - 1:
-                    log.info(
-                        "epoch %d step %d/%d loss=%.4f",
-                        epoch, i, num_batches, loss.item(),
-                    )
-            else:
-                train_bar.set_postfix(loss=f"{loss.item():.4f}")
+            if (i + 1) % accum_steps == 0:
+                torch.nn.utils.clip_grad_norm_(params, cfg.max_grad_norm)
+                optimizer.step()
+                opt_step = (i + 1) // accum_steps + epoch * (num_batches // accum_steps) - 1
+                scheduler(opt_step)
+
+                if IS_SLURM:
+                    opt_step_in_epoch = (i + 1) // accum_steps
+                    if opt_step_in_epoch % LOG_EVERY == 0 or i == num_batches - 1:
+                        log.info(
+                            "epoch %d step %d/%d loss=%.4f",
+                            epoch, opt_step_in_epoch, num_batches // accum_steps, accum_loss,
+                        )
+                else:
+                    train_bar.set_postfix(loss=f"{accum_loss:.4f}")
+
+                optimizer.zero_grad()
+                accum_loss = 0.0
 
         # Per-epoch validation: evaluate a PTQ-converted deepcopy so the
         # reported accuracy reflects the deployed (truly quantized) model.
