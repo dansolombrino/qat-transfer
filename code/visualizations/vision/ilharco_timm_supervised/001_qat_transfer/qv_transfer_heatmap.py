@@ -44,11 +44,12 @@ from src.vision.utils import sanitize_timm_model_name
 EVAL_ROOT_BASELINES = "evaluations/vision/ilharco_timm_supervised/000_baselines/vision"
 EVAL_ROOT_QV        = "evaluations/vision/ilharco_timm_supervised/001_qat_transfer/vision/qv_transfer"
 
-BASELINE_METHODS = ["pretrained", "fp", "fp_ptq", "random", "qat", "qat_ptq"]
+BASELINE_METHODS = ["pretrained", "pretrained_ptq", "fp", "fp_ptq", "random", "qat", "qat_ptq"]
 
 BASELINE_METHOD_LABELS = {
-    "pretrained": "Pretrained",
-    "fp":         "FP",
+    "pretrained":     "Pretrained",
+    "pretrained_ptq": "Pretrained+PTQ",
+    "fp":             "FP",
     "fp_ptq":     "FP+PTQ",
     "random":     "Random",
     "qat":        "QAT",
@@ -169,6 +170,13 @@ def _pretrained_path(model_dir, dataset, seed):
     )
 
 
+def _pretrained_ptq_path(model_dir, dataset, seed, ptq_skip_frag):
+    return os.path.join(
+        EVAL_ROOT_BASELINES, "pretrained_ptq", model_dir, dataset,
+        ptq_skip_frag, f"seed={seed}", "eval_results.json",
+    )
+
+
 def _fp_path(model_dir, dataset, seed, optim_frag):
     return os.path.join(
         EVAL_ROOT_BASELINES, "fp", model_dir, dataset,
@@ -242,6 +250,10 @@ def load_data(args):
         data[target_dataset] = {
             "pretrained": _load_value(
                 _pretrained_path(model_dir, target_dataset, args.seed),
+                TEST_ACC_KEY,
+            ),
+            "pretrained_ptq": _load_value(
+                _pretrained_ptq_path(model_dir, target_dataset, args.seed, pskip_frag),
                 TEST_ACC_KEY,
             ),
             "fp": _load_value(

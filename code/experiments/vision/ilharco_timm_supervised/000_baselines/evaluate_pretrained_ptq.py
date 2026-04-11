@@ -17,7 +17,7 @@ from src.vision.data.registry import get_dataset
 from src.vision.data.common import (
     DATASET_NAME_TO_NUM_CLASSES,
     maybe_dictionarize,
-    DATASET_NAME_TO_EPOCHS
+    DATASET_NAME_TO_EPOCHS,
 )
 from src.vision.utils import (
     accuracy,
@@ -25,12 +25,14 @@ from src.vision.utils import (
     sanitize_timm_model_name,
     set_seed,
 )
+from src.quantization import apply_ptq_
 
 import hydra
 from omegaconf import DictConfig
 from rich.pretty import pprint
 from tqdm import tqdm
 import torch
+from torch import nn
 
 
 def evaluate(
@@ -91,7 +93,7 @@ def evaluate(
 
 @hydra.main(
     config_path="../../../../../config/experiments/vision/ilharco_timm_supervised/000_baselines",
-    config_name="evaluate_fp",
+    config_name="evaluate_pretrained_ptq",
     version_base=None,
 )
 def main(cfg: DictConfig):
@@ -105,46 +107,24 @@ def main(cfg: DictConfig):
     ] if cfg.limit_num_epochs is None else cfg.limit_num_epochs
 
     ############################################################################
-    # BEGIN checkpoint loading
+    # BEGIN pre-trained model instantiation
     ############################################################################
 
-    checkpoint_base_path = os.environ['CHECKPOINT_BASE_PATH']
-
-    is_dryrun = (
-        cfg.limit_num_batches is not None or cfg.limit_num_epochs is not None
-    )
-    checkpoint_dir_parts = [
-        checkpoint_base_path,
-        "vision",
-        "ilharco_timm_supervised",
-        "fp_dryrun" if is_dryrun else "fp",
-        sanitize_timm_model_name(cfg.model_name),
-        cfg.dataset_name,
-        f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
-        f"seed={cfg.seed}"
-    ]
-    if is_dryrun:
-        lnb = cfg.limit_num_batches if cfg.limit_num_batches is not None else "all"
-        lne = cfg.limit_num_epochs if cfg.limit_num_epochs is not None else "all"
-        checkpoint_dir_parts.append(f"lnb={lnb}_lne={lne}")
-    checkpoint_dir = os.path.join(*checkpoint_dir_parts)
-    classifier_path = os.path.join(checkpoint_dir, f"classifier_epoch_{epochs}.pt")
-
-    print(f"\nLoading encoder from: {classifier_path}")
-    image_classifier = ImageClassifier.load(
+    print(f"\nInstantiating pre-trained model: {cfg.model_name}")
+    image_classifier = ImageClassifier(
         model_name=cfg.model_name,
-        num_classes=DATASET_NAME_TO_NUM_CLASSES[cfg.dataset_name],
-        filename=classifier_path,
+        # num_classes=DATASET_NAME_TO_NUM_CLASSES[cfg.dataset_name],
+        num_classes=1
     )
     image_classifier.to(device)
-    print(f"\n\nimage_classifier:")
+    print(f"\n\nimage_classifier (pretrained, before head swap):")
     pprint(image_classifier, expand_all=True)
     print(f"\n\n")
     if cfg.log_to_file:
-        log.info(f"image_classifier:\n{image_classifier}")
+        log.info(f"image_classifier (pretrained):\n{image_classifier}")
 
     ############################################################################
-    # END checkpoint loading
+    # END pre-trained model instantiation
     ############################################################################
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -169,6 +149,85 @@ def main(cfg: DictConfig):
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     ############################################################################
+    # BEGIN classification head loading (from QAT checkpoint)
+    ############################################################################
+
+    checkpoint_base_path = os.environ['CHECKPOINT_BASE_PATH']
+
+    qat_skip_modules_sorted = sorted(cfg.qat.skip_modules)
+    qat_skip_tag = "-".join(qat_skip_modules_sorted) if qat_skip_modules_sorted else "none"
+
+    head_dir = os.path.join(
+        checkpoint_base_path,
+        "vision",
+        "ilharco_timm_supervised",
+        "qat",
+        sanitize_timm_model_name(cfg.model_name),
+        cfg.dataset_name,
+        f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
+        f"qat=bits={cfg.qat.bits}_gran={cfg.qat.granularity}_skip={qat_skip_tag}",
+        f"seed={cfg.seed}",
+    )
+    head_path = os.path.join(head_dir, f"head_epoch_{epochs}.pt")
+
+    print(f"\nLoading QAT head from: {head_path}")
+    finetuned_head = torch.load(head_path, map_location=device, weights_only=False)
+    image_classifier.model.head = finetuned_head
+
+    print(f"\n\nimage_classifier (after head swap):")
+    pprint(image_classifier, expand_all=True)
+    print(f"\n\n")
+    if cfg.log_to_file:
+        log.info(f"image_classifier (after head swap):\n{image_classifier}")
+
+    ############################################################################
+    # END classification head loading
+    ############################################################################
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    ############################################################################
+    # BEGIN PTQ
+    ############################################################################
+
+    skip_modules = frozenset(cfg.ptq.skip_modules)
+
+    all_linear_names = [
+        name for name, module in image_classifier.named_modules()
+        if isinstance(module, nn.Linear)
+    ]
+
+    quantized_names = apply_ptq_(
+        model=image_classifier,
+        bits=cfg.ptq.bits,
+        granularity=cfg.ptq.granularity,
+        skip_modules=skip_modules,
+    )
+
+    skipped_names = sorted(set(all_linear_names) - set(quantized_names))
+
+    print(f"\nPTQ config: bits={cfg.ptq.bits}, granularity={cfg.ptq.granularity}, skip_modules={list(cfg.ptq.skip_modules)}")
+
+    print(f"\nQuantized layers ({len(quantized_names)}):")
+    for name in quantized_names:
+        print(f"  - {name}")
+
+    print(f"\nSkipped layers ({len(skipped_names)}):")
+    for name in skipped_names:
+        print(f"  - {name}")
+    print()
+
+    if cfg.log_to_file:
+        log.info(f"Quantized layers ({len(quantized_names)}): {quantized_names}")
+        log.info(f"Skipped layers ({len(skipped_names)}): {skipped_names}")
+
+    ############################################################################
+    # END PTQ
+    ############################################################################
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    ############################################################################
     # BEGIN evaluation
     ############################################################################
 
@@ -179,7 +238,11 @@ def main(cfg: DictConfig):
         limit_num_batches=cfg.limit_num_batches,
     )
 
-    print(f"\n    eval test_accuracy: {test_accuracy}\n")
+    print(f"\n    eval test_accuracy (PTQ): {test_accuracy}\n")
+
+    num_classes = len(dataset.class_names)
+    random_chance = 1.0 / num_classes
+    print(f"    random chance baseline : {random_chance}  (1 / {num_classes} classes)\n")
 
     ############################################################################
     # END evaluation
@@ -193,16 +256,18 @@ def main(cfg: DictConfig):
 
     evaluation_base_path = os.environ['EVALUATION_BASE_PATH']
 
+    skip_modules_tag = "-".join(sorted(cfg.ptq.skip_modules)) if len(cfg.ptq.skip_modules) > 0 else "none"
+
     eval_dir = os.path.join(
         evaluation_base_path,
         "vision",
         "ilharco_timm_supervised",
         "000_baselines",
         "vision",
-        "fp",
+        "pretrained_ptq",
         sanitize_timm_model_name(cfg.model_name),
         cfg.dataset_name,
-        f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
+        f"ptq_skip={skip_modules_tag}",
         f"seed={cfg.seed}",
     )
 
@@ -210,18 +275,21 @@ def main(cfg: DictConfig):
         "model_name": cfg.model_name,
         "dataset_name": cfg.dataset_name,
         "batch_size": cfg.batch_size,
-        "lr": cfg.lr,
-        "wd": cfg.wd,
-        "ls": cfg.ls,
-        "wl": cfg.wl,
-        "max_grad_norm": cfg.max_grad_norm,
         "seed": cfg.seed,
-        "limit_num_epochs": cfg.limit_num_epochs,
         "limit_num_batches": cfg.limit_num_batches,
-        "epochs": epochs,
         "device": str(device),
         "test_accuracy": test_accuracy,
-        "encoder_path": classifier_path,
+        "random_chance": random_chance,
+        "num_classes": num_classes,
+        "head_path": head_path,
+        "qat_bits": cfg.qat.bits,
+        "qat_granularity": cfg.qat.granularity,
+        "qat_skip_modules": list(cfg.qat.skip_modules),
+        "ptq_bits": cfg.ptq.bits,
+        "ptq_granularity": cfg.ptq.granularity,
+        "ptq_skip_modules": list(cfg.ptq.skip_modules),
+        "quantized_layers": quantized_names,
+        "skipped_layers": skipped_names,
     }
 
     os.makedirs(eval_dir, exist_ok=True)

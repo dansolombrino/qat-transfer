@@ -12,10 +12,13 @@ load_dotenv()
 
 log = logging.getLogger(__name__)
 
-from src.vision.ilharco_timm_supervised.modeling import ImageClassifier, ImageEncoder
-from src.vision.ilharco_timm_supervised.heads import get_classification_head
+from src.vision.ilharco_timm_supervised.modeling import ImageClassifier
 from src.vision.data.registry import get_dataset
-from src.vision.data.common import maybe_dictionarize, DATASET_NAME_TO_EPOCHS
+from src.vision.data.common import (
+    DATASET_NAME_TO_NUM_CLASSES,
+    maybe_dictionarize,
+    DATASET_NAME_TO_EPOCHS,
+)
 from src.vision.utils import (
     accuracy,
     random_tqdm_color,
@@ -106,13 +109,17 @@ def main(cfg: DictConfig):
     ############################################################################
 
     print(f"\nInstantiating pre-trained model: {cfg.model_name}")
-    image_encoder = ImageEncoder(model_name=cfg.model_name)
-    image_encoder.to(device)
-    print(f"\n\nimage_encoder:")
-    pprint(image_encoder, expand_all=True)
+    image_classifier = ImageClassifier(
+        model_name=cfg.model_name,
+        # num_classes=DATASET_NAME_TO_NUM_CLASSES[cfg.dataset_name],
+        num_classes=1 # this will be replaced with the actual head
+    )
+    image_classifier.to(device)
+    print(f"\n\nimage_classifier (pretrained, before head swap):")
+    pprint(image_classifier, expand_all=True)
     print(f"\n\n")
     if cfg.log_to_file:
-        log.info(f"image_encoder:\n{image_encoder}")
+        log.info(f"image_classifier (pretrained):\n{image_classifier}")
 
     ############################################################################
     # END pre-trained model instantiation
@@ -126,8 +133,8 @@ def main(cfg: DictConfig):
 
     dataset = get_dataset(
         dataset_name=cfg.dataset_name,
-        preprocess_train=image_encoder.train_preprocess,
-        preprocess_inference=image_encoder.val_preprocess,
+        preprocess_train=image_classifier.train_preprocess,
+        preprocess_inference=image_classifier.val_preprocess,
         batch_size=cfg.batch_size,
         num_workers=int(os.environ['TORCH_NUM_WORKERS']),
         seed=cfg.seed,
@@ -158,31 +165,17 @@ def main(cfg: DictConfig):
     head_path = os.path.join(head_dir, f"head_epoch_{epochs}.pt")
 
     print(f"\nLoading finetuned head from: {head_path}")
-    from src.vision.ilharco_timm_supervised.modeling import ClassificationHead
-    classification_head = ClassificationHead.load(head_path)
+    finetuned_head = torch.load(head_path, map_location=device, weights_only=False)
+    image_classifier.model.head = finetuned_head
 
-    ############################################################################
-    # END classification head loading
-    ############################################################################
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    ############################################################################
-    # BEGIN image classifier creation
-    ############################################################################
-
-    image_classifier = ImageClassifier(
-        image_encoder=image_encoder,
-        classification_head=classification_head
-    )
-    print(f"\n\nimage_classifier:")
+    print(f"\n\nimage_classifier (after head swap):")
     pprint(image_classifier, expand_all=True)
     print(f"\n\n")
     if cfg.log_to_file:
-        log.info(f"image_classifier:\n{image_classifier}")
+        log.info(f"image_classifier (after head swap):\n{image_classifier}")
 
     ############################################################################
-    # END image classifier creation
+    # END classification head loading
     ############################################################################
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -232,6 +225,7 @@ def main(cfg: DictConfig):
         "limit_num_batches": cfg.limit_num_batches,
         "device": str(device),
         "test_accuracy": test_accuracy,
+        "head_path": head_path,
     }
 
     os.makedirs(eval_dir, exist_ok=True)
