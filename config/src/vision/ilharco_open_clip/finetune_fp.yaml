@@ -13,6 +13,8 @@ limit_num_batches: null
 limit_num_epochs: null
 
 hydra:
+  searchpath:
+    - file://config
   run:
     dir: logs/src/vision/ilharco_open_clip/finetune_fp/${sanitize_open_clip:${model_name},${pretrained}}/${dataset_name}/seed=${seed}
   sweep:

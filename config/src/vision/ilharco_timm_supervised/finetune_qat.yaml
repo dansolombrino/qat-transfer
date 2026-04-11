@@ -16,6 +16,8 @@ qat:
   skip_modules: ???   # list[str], required (e.g. [head])
 
 hydra:
+  searchpath:
+    - file://config
   run:
     dir: logs/src/vision/ilharco_timm_supervised/finetune_qat/${sanitize_timm:${model_name}}/${dataset_name}/seed=${seed}
   sweep:

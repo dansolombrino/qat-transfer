@@ -18,6 +18,8 @@ qat:
   skip_modules: ???   # list[str], required (e.g. [classification_head])
 
 hydra:
+  searchpath:
+    - file://config
   run:
     dir: logs/src/vision/ilharco_open_clip/finetune_qat/${sanitize_open_clip:${model_name},${pretrained}}/${dataset_name}/seed=${seed}
   sweep:

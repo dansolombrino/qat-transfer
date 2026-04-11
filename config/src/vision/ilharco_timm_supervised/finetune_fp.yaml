@@ -12,6 +12,8 @@ limit_num_batches: null
 limit_num_epochs: null
 
 hydra:
+  searchpath:
+    - file://config
   run:
     dir: logs/src/vision/ilharco_timm_supervised/finetune_fp/${sanitize_timm:${model_name}}/${dataset_name}/seed=${seed}
   sweep:
