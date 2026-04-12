@@ -25,7 +25,7 @@ account: IscrC_eff-SAM2
 gpus_per_node: 1
 cpus_per_task: 8
 mem_gb: 32
-timeout_min: 180
+timeout_min: 1440
 nodes: 1
 stderr_to_stdout: true
 submitit_folder: ${hydra.sweep.dir}/.submitit/%j
