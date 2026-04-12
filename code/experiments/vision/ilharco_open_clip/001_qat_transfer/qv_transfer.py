@@ -106,10 +106,16 @@ def evaluate(
     dataset,
     model: torch.nn.Module,
     device: torch.device,
+    split: str,
     limit_num_batches: int = None,
 ):
 
-    loader = dataset.test_loader
+    if split == "test":
+        loader = dataset.test_loader
+    elif split == "val":
+        loader = dataset.val_loader
+    else:
+        raise ValueError(f"Unsupported eval_split: {split!r}. Must be 'val' or 'test'.")
 
     num_batches = len(loader)
     effective_num_batches = min(limit_num_batches, num_batches) if limit_num_batches is not None else num_batches
@@ -127,7 +133,7 @@ def evaluate(
         batch_bar = tqdm(
             enumerate(loader),
             total=effective_num_batches,
-            desc="Evaluating (test)",
+            desc=f"Evaluating ({split})",
             colour=batch_color,
             leave=False,
             **TQDM_KW,
@@ -172,6 +178,10 @@ def main(cfg: DictConfig):
         pprint(dict(cfg), expand_all=True)
 
     set_seed(cfg.target.seed)
+
+    eval_split = cfg.eval_split
+    if eval_split not in ("val", "test"):
+        raise ValueError(f"Unsupported eval_split: {eval_split!r}. Must be 'val' or 'test'.")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -399,17 +409,18 @@ def main(cfg: DictConfig):
     # Evaluate the patched model in full precision FIRST, before applying PTQ
     # in-place, so we can report both numbers.
 
-    test_accuracy_patched_qat = evaluate(
+    accuracy_patched_qat = evaluate(
         dataset=dataset,
         model=image_classifier,
         device=device,
+        split=eval_split,
         limit_num_batches=cfg.limit_num_batches,
     )
 
     if IS_SLURM:
-        log.info("eval test_accuracy (patched QAT, FP_target + %s*QV): %s", alpha, test_accuracy_patched_qat)
+        log.info("eval %s_accuracy (patched QAT, FP_target + %s*QV): %s", eval_split, alpha, accuracy_patched_qat)
     else:
-        print(f"\n    eval test_accuracy (patched QAT, FP_target + {alpha}*QV): {test_accuracy_patched_qat}\n")
+        print(f"\n    eval {eval_split}_accuracy (patched QAT, FP_target + {alpha}*QV): {accuracy_patched_qat}\n")
 
     ############################################################################
     # END evaluation (patched QAT)
@@ -466,10 +477,11 @@ def main(cfg: DictConfig):
     # BEGIN evaluation (patched QAT + PTQ)
     ############################################################################
 
-    test_accuracy_patched_qat_ptq = evaluate(
+    accuracy_patched_qat_ptq = evaluate(
         dataset=dataset,
         model=image_classifier,
         device=device,
+        split=eval_split,
         limit_num_batches=cfg.limit_num_batches,
     )
 
@@ -477,12 +489,12 @@ def main(cfg: DictConfig):
     random_chance = 1.0 / num_classes
     if IS_SLURM:
         log.info(
-            "eval test_accuracy (patched QAT + PTQ, FP_target + %s*QV): %s",
-            alpha, test_accuracy_patched_qat_ptq,
+            "eval %s_accuracy (patched QAT + PTQ, FP_target + %s*QV): %s",
+            eval_split, alpha, accuracy_patched_qat_ptq,
         )
         log.info("random chance baseline: %s  (1 / %d classes)", random_chance, num_classes)
     else:
-        print(f"\n    eval test_accuracy (patched QAT + PTQ, FP_target + {alpha}*QV): {test_accuracy_patched_qat_ptq}\n")
+        print(f"\n    eval {eval_split}_accuracy (patched QAT + PTQ, FP_target + {alpha}*QV): {accuracy_patched_qat_ptq}\n")
         print(f"    random chance baseline : {random_chance}  (1 / {num_classes} classes)\n")
 
     ############################################################################
@@ -515,13 +527,18 @@ def main(cfg: DictConfig):
         f"qat=bits={cfg.qat.bits}_gran={cfg.qat.granularity}_skip={qat_skip_tag}",
         f"ptq=bits={cfg.ptq.bits}_gran={cfg.ptq.granularity}_skip={ptq_skip_tag}",
         f"qv=alpha={alpha}",
+        f"split={eval_split}",
     )
+
+    accuracy_key_patched_qat = f"{eval_split}_accuracy_patched_qat"
+    accuracy_key_patched_qat_ptq = f"{eval_split}_accuracy_patched_qat_ptq"
 
     results = {
         "experiment": "qv_transfer",
         "model_name": cfg.model_name,
         "pretrained": cfg.pretrained,
         "batch_size": cfg.batch_size,
+        "eval_split": eval_split,
         "lr": cfg.lr,
         "wd": cfg.wd,
         "ls": cfg.ls,
@@ -561,8 +578,8 @@ def main(cfg: DictConfig):
         },
         "ptq_quantized_modules": quantized_names,
         "ptq_skipped_modules": skipped_names,
-        "test_accuracy_patched_qat": test_accuracy_patched_qat,
-        "test_accuracy_patched_qat_ptq": test_accuracy_patched_qat_ptq,
+        accuracy_key_patched_qat: accuracy_patched_qat,
+        accuracy_key_patched_qat_ptq: accuracy_patched_qat_ptq,
         "num_classes": num_classes,
         "random_chance": random_chance,
         "comparison_baseline_note": (

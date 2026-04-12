@@ -8,6 +8,7 @@ hydra:
 model_name: ???
 pretrained: ???
 batch_size: ???
+eval_split: test        # "val" or "test"
 limit_num_batches: null
 log_to_file: false
 
