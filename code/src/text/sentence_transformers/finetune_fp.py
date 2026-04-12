@@ -8,7 +8,7 @@ def main():
 
     # model_name = "google/embeddinggemma-300m"
     model_name = "Qwen/Qwen3-Embedding-0.6B"
-    # model_name = "google-bert/bert-base-uncased"
+    # model_name = "uv "
 
     st_model = SentenceTransformer(model_name)
     st_model.to(device=device)

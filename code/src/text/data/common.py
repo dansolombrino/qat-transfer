@@ -12,6 +12,21 @@ MAX_VAL_SAMPLES = 5000
 HF_TOKEN = os.environ.get("HF_TOKEN")
 HF_DATASETS_CACHE = os.environ.get("HF_DATASETS_CACHE")
 
+DATASET_NAME_TO_EPOCHS: dict[str, int] = {
+    "Emotion": 22,
+    "IMDB": 14,
+    "Banking77": 35,
+    "AmazonReviewsClassification": 2,
+    "AmazonCounterfactual": 86,
+    "AmazonPolarity": 1,
+    "MassiveIntent": 31,
+    "MassiveScenario": 31,
+    "MTOPDomain": 23,
+    "MTOPIntent": 23,
+    "ToxicConversations": 7,
+    "TweetSentimentExtraction": 13,
+}
+
 
 def seed_worker(worker_id: int) -> None:
     """DataLoader worker_init_fn that seeds numpy and python random per worker."""
