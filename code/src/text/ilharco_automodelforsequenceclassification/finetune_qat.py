@@ -175,7 +175,7 @@ def main(cfg: DictConfig) -> None:
         cfg.model_name, num_labels=num_labels,
     )
     model.config.pad_token_id = tokenizer.pad_token_id
-    model.to(device)
+    model.to(device=device, dtype=torch.float32)
 
     # Enable quantization-aware training: wraps nn.Linear layers in QATLinear
     # (STE fake-quant forward), skipping the named top-level children in

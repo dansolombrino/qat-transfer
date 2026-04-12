@@ -105,7 +105,7 @@ def main(cfg: DictConfig) -> None:
         cfg.model_name, num_labels=num_labels,
     )
     model.config.pad_token_id = tokenizer.pad_token_id
-    model.to(device)
+    model.to(device=device, dtype=torch.float32)
 
     if IS_SLURM:
         log.info("state_dict keys: %s", list(model.state_dict().keys()))
