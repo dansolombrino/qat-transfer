@@ -99,9 +99,11 @@ def make_seeded_loader(dataset, shuffle, batch_size, num_workers, seed):
 
 
 def get_class_names(hf_dataset, label_col="label"):
-    """Return class name list if the label feature is a ClassLabel, else None."""
+    """Return class name list from ClassLabel feature, or sorted unique values as fallback."""
     feat = hf_dataset.features[label_col]
-    return feat.names if hasattr(feat, "names") else None
+    if hasattr(feat, "names"):
+        return feat.names
+    return sorted(set(str(v) for v in hf_dataset[label_col]))
 
 
 def encode_string_labels(hf_dataset, label_col="label"):
