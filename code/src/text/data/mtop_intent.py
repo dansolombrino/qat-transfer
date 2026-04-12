@@ -5,7 +5,7 @@ from .common import HFTextDataset, HF_TOKEN, HF_DATASETS_CACHE, make_val_split, 
 class MTOPIntent:
     def __init__(self, batch_size, num_workers, seed):
 
-        hf_train = load_dataset("mteb/mtop_intent", "en", split="train", token=HF_TOKEN, cache_dir=HF_DATASETS_CACHE, trust_remote_code=True)
+        hf_train = load_dataset("mteb/mtop_intent", "en", split="train", token=HF_TOKEN, cache_dir=HF_DATASETS_CACHE, trust_remote_code=True, verification_mode="no_checks")
 
         self.train_dataset, self.val_dataset = make_val_split(
             HFTextDataset(hf_dataset=hf_train),
@@ -26,7 +26,7 @@ class MTOPIntent:
             seed=seed,
         )
 
-        hf_test = load_dataset("mteb/mtop_intent", "en", split="test", token=HF_TOKEN, cache_dir=HF_DATASETS_CACHE, trust_remote_code=True)
+        hf_test = load_dataset("mteb/mtop_intent", "en", split="test", token=HF_TOKEN, cache_dir=HF_DATASETS_CACHE, trust_remote_code=True, verification_mode="no_checks")
         self.test_dataset = HFTextDataset(hf_test)
 
         self.test_loader = make_seeded_loader(
