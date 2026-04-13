@@ -37,4 +37,4 @@ class MTOPIntent:
             seed=seed,
         )
 
-        self.class_names = get_class_names(hf_test)
+        self.class_names = get_class_names(hf_train)
