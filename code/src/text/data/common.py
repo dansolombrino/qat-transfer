@@ -13,18 +13,18 @@ HF_TOKEN = os.environ.get("HF_TOKEN")
 HF_DATASETS_CACHE = os.environ.get("HF_DATASETS_CACHE")
 
 DATASET_NAME_TO_EPOCHS: dict[str, int] = {
-    "Emotion": 22,
-    "IMDB": 14,
-    "Banking77": 35,
-    "AmazonReviewsClassification": 2,
-    "AmazonCounterfactual": 86,
-    "AmazonPolarity": 1,
-    "MassiveIntent": 31,
-    "MassiveScenario": 31,
-    "MTOPDomain": 23,
-    "MTOPIntent": 23,
-    "ToxicConversations": 7,
-    "TweetSentimentExtraction": 13,
+    "Emotion": 5,
+    "IMDB": 5,
+    "Banking77": 5,
+    "AmazonReviewsClassification": 5,
+    "AmazonCounterfactual": 5,
+    "AmazonPolarity": 5,
+    "MassiveIntent": 5,
+    "MassiveScenario": 5,
+    "MTOPDomain": 5,
+    "MTOPIntent": 5,
+    "ToxicConversations": 5,
+    "TweetSentimentExtraction": 5,
 }
 
 

@@ -1,0 +1,24 @@
+hydra:
+  searchpath:
+    - file://${oc.env:PWD}/config
+  sweep:
+    dir: logs/config/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat
+    subdir: ${sanitize_hf:${model_name}}/${dataset_name}/optim=adamw_lr=${lr}_wd=${wd}_ls=${ls}_mgn=${max_grad_norm}_bs=${batch_size}_ml=${max_length}/seed=${seed}
+
+model_name: ???
+dataset_name: ???
+batch_size: ???
+lr: ???
+wd: ???
+ls: ???
+max_grad_norm: ???
+max_length: ???
+seed: ???
+limit_num_epochs: null
+limit_num_batches: null
+log_to_file: false
+
+qat:
+  skip_modules: ???  # list of child-module names skipped during QAT, e.g. [classifier]
+  bits: ???          # int, must match training
+  granularity: ???   # "tensor" or "channel", must match training

@@ -24,18 +24,24 @@ log = logging.getLogger(__name__)
 IS_SLURM = "SLURM_JOB_ID" in os.environ
 TQDM_KW = dict(disable=IS_SLURM, mininterval=1.0)
 LOG_EVERY = 50
-REFERENCE_BATCH_SIZE = 128
+REFERENCE_BATCH_SIZE = 32
 SUPPORTED_MODELS = {
+    "google-t5/t5-small",
+    "google-t5/t5-base",
+    "google-t5/t5-large",
     "google-bert/bert-base-uncased",
     "google/embeddinggemma-300m",
     "Qwen/Qwen3-Embedding-0.6B",
+}
+MODEL_NAME_TO_HEAD_MODULE = {
+    "google-bert/bert-base-uncased": "classifier",
 }
 
 from src.text.data.common import DATASET_NAME_TO_EPOCHS
 from src.text.data.registry import get_dataset
 from src.vision.utils import (
     LabelSmoothing,
-    cosine_lr,
+    linear_lr,
     random_tqdm_color,
     sanitize_hf_model_name,
     set_seed,
@@ -78,7 +84,7 @@ def main(cfg: DictConfig) -> None:
         "fp_dryrun" if is_dryrun else "fp",
         sanitized_model,
         cfg.dataset_name,
-        f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}_ml={cfg.max_length}",
+        f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}_ml={cfg.max_length}",
         f"seed={cfg.seed}",
     ]
     if is_dryrun:
@@ -130,7 +136,7 @@ def main(cfg: DictConfig) -> None:
     # Optimizer / scheduler / loss
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(params, lr=cfg.lr, weight_decay=cfg.wd)
-    scheduler = cosine_lr(optimizer, cfg.lr, cfg.wl, epochs * num_batches // accum_steps)
+    scheduler = linear_lr(optimizer, cfg.lr, epochs * num_batches // accum_steps)
     loss_fn = (
         LabelSmoothing(cfg.ls) if cfg.ls > 0 else torch.nn.CrossEntropyLoss()
     )
@@ -258,10 +264,11 @@ def main(cfg: DictConfig) -> None:
         print(f"Final test accuracy: {test_acc:.4f}")
 
     # Save backbone and head checkpoints separately
-    prefix = model.base_model_prefix + "."
+    head_module = MODEL_NAME_TO_HEAD_MODULE[cfg.model_name]
+    head_prefix = head_module + "."
     full_sd = model.state_dict()
-    backbone_state = {k: v for k, v in full_sd.items() if k.startswith(prefix)}
-    head_state = {k: v for k, v in full_sd.items() if not k.startswith(prefix)}
+    head_state = {k: v for k, v in full_sd.items() if k.startswith(head_prefix)}
+    backbone_state = {k: v for k, v in full_sd.items() if not k.startswith(head_prefix)}
 
     backbone_path = os.path.join(save_dir, f"backbone_epoch_{epochs}.pt")
     torch.save(backbone_state, backbone_path)

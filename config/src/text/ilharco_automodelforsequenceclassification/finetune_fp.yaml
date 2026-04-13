@@ -1,13 +1,12 @@
 model_name: ???
 dataset_name: ???
 seed: ???
-batch_size: 128
+batch_size: 32
 lr: 1e-5
 wd: 0.1
 ls: 0.0
-wl: 500           # warmup length (steps)
 max_grad_norm: 1.0
-max_length: 512
+max_length: 128
 limit_num_batches: null
 limit_num_epochs: null
 

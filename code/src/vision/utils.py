@@ -108,6 +108,20 @@ def cosine_lr(optimizer, base_lrs, warmup_length, steps):
     return _lr_adjuster
 
 
+def linear_lr(optimizer, base_lrs, steps):
+    """Linear LR schedule: decays linearly from base_lr to 0 over `steps`."""
+    if not isinstance(base_lrs, list):
+        base_lrs = [base_lrs for _ in optimizer.param_groups]
+    assert len(base_lrs) == len(optimizer.param_groups)
+
+    def _lr_adjuster(step):
+        for param_group, base_lr in zip(optimizer.param_groups, base_lrs):
+            lr = base_lr * (1 - step / steps)
+            _assign_learning_rate(param_group, lr)
+
+    return _lr_adjuster
+
+
 class LabelSmoothing(torch.nn.Module):
     def __init__(self, smoothing: float = 0.0):
         super().__init__()

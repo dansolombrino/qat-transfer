@@ -1,0 +1,21 @@
+hydra:
+  searchpath:
+    - file://${oc.env:PWD}/config
+  sweep:
+    dir: logs/config/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained
+    subdir: ${sanitize_hf:${model_name}}/${dataset_name}/seed=${seed}
+
+model_name: ???
+dataset_name: ???
+batch_size: ???
+max_length: ???
+seed: ???
+limit_num_batches: null
+log_to_file: false
+
+# Training hyperparameters used to locate the finetuned FP head checkpoint.
+lr: ???
+wd: ???
+ls: ???
+max_grad_norm: ???
+limit_num_epochs: null
