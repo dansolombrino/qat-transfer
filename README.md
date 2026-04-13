@@ -242,6 +242,20 @@ Local sequential loop over `qv.alpha` values:
 for alpha in 0.25 0.5 0.75 1.0; do uv run --active python code/visualizations/vision/ilharco_hf_clip/001_qat_transfer/qv_transfer_heatmap.py --model-name openai/clip-vit-base-patch16 --seed 2038 --optim adamw --lr 1e-5 --wd 0.1 --ls 0.0 --wl 500 --max-grad-norm 1.0 --batch-size 128 --bits 4 --granularity channel --skip-modules classification_head --qv-alpha $alpha; done
 ```
 
+### weights_candlestick_comparison notebook — [code/visualizations/vision/ilharco_hf_clip/weights_candlestick_comparison.ipynb](code/visualizations/vision/ilharco_hf_clip/weights_candlestick_comparison.ipynb)
+Interactive notebook for side-by-side **layer weight distribution candlesticks** between two model sources (HF model IDs or local `.pt` checkpoints/checkpoint directories).  
+Set `MODEL_A` and `MODEL_B` in the config cell, then run all cells. The notebook includes:
+- layer-level view (all parameter blocks aggregated per layer index)
+- granular view across all layers where each x-tick is a `(layer, component)` pair (e.g. `L0:attention`, `L0:mlp`, ..., `L11:attention`)
+
+Candlesticks show:
+- min/max wick excluding outliers
+- mean line
+- mean ± 1σ body
+- outlier points beyond 2σ
+
+Layer-level stats aggregate all parameter blocks that share the same layer index.
+
 ---
 
 # ilharco_timm_supervised

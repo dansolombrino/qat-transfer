@@ -9,6 +9,7 @@ dependencies = [
     "dotenv>=0.9.9",
     "hydra-submitit-launcher>=1.2.0",
     "kaleido>=1.2.0",
+    "matplotlib>=3.9.4",
     "numpy>=2.0.2",
     "open-clip-torch>=3.3.0",
     "pillow>=11.3.0",
