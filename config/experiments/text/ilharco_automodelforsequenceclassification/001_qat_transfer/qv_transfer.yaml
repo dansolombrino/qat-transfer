@@ -1,0 +1,46 @@
+hydra:
+  searchpath:
+    - file://${oc.env:PWD}/config
+  sweep:
+    dir: logs/config/experiments/text/ilharco_automodelforsequenceclassification/001_qat_transfer/qv_transfer
+    subdir: ${sanitize_hf:${model_name}}/tgt=${target.dataset_name}_seed=${target.seed}/qat=bits=${qat.bits}_gran=${qat.granularity}/ptq=bits=${ptq.bits}_gran=${ptq.granularity}/qv=alpha=${qv.alpha}
+
+model_name: ???
+batch_size: ???
+max_length: ???
+limit_num_batches: null
+eval_split: ???        # "val" or "test"
+log_to_file: false
+
+# Shared training hyperparameters used to locate ALL THREE checkpoints
+# (fp_source, qat_source, fp_target). Assumes source and target were trained
+# with identical optim hp; split into source.optim / target.optim later if needed.
+lr: ???
+wd: ???
+ls: ???
+max_grad_norm: ???
+
+source:
+  dataset_names: ???       # list of source dataset names to iterate over internally
+  seed: ???
+  limit_num_epochs: null   # null -> DATASET_NAME_TO_EPOCHS[dataset_name]
+
+target:
+  dataset_name: ???
+  seed: ???
+  limit_num_epochs: null   # null -> DATASET_NAME_TO_EPOCHS[dataset_name]
+
+# Used to LOCATE the QAT source checkpoint AND recorded in results JSON.
+qat:
+  bits: ???          # int
+  granularity: ???   # "tensor" or "channel"
+  skip_modules: ???  # list of child-module attribute names that were skipped during QAT training, e.g. [classifier]
+
+qv:
+  alpha: ???         # float scaling coefficient applied to the QV when patching FP_target
+
+# FINAL eval PTQ of the patched model.
+ptq:
+  skip_modules: ???  # list of child-module attribute names to exclude from PTQ, e.g. [classifier]
+  bits: ???          # int
+  granularity: ???   # "tensor" or "channel"

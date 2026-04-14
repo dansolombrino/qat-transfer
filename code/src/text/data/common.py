@@ -18,7 +18,7 @@ DATASET_NAME_TO_EPOCHS: dict[str, int] = {
     "Banking77": 5,
     "AmazonReviewsClassification": 5,
     "AmazonCounterfactual": 5,
-    "AmazonPolarity": 5,
+    # "AmazonPolarity": 5,
     "MassiveIntent": 5,
     "MassiveScenario": 5,
     "MTOPDomain": 5,
