@@ -30,6 +30,7 @@ SUPPORTED_MODELS = {
     "google-t5/t5-base",
     "google-t5/t5-large",
     "google-bert/bert-base-uncased",
+    "google-bert/bert-large-uncased",
     "google/embeddinggemma-300m",
     "Qwen/Qwen3-Embedding-0.6B",
 }
