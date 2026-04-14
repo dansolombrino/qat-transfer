@@ -61,7 +61,7 @@ from src.quantization import apply_ptq_
 from src.task_vectors import TaskVector
 
 import hydra
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 from rich.pretty import pprint
 from tqdm import tqdm
 import torch
@@ -168,17 +168,33 @@ def evaluate(
     return top1_acc
 
 
-def _run_source(
-    cfg: DictConfig,
-    source_dataset_name: str,
-    fp_tgt_sd: dict,
-    qat_tgt_sd: dict,
-    dataset,
-    num_classes: int,
-    device: str,
-    tgt_epochs: int,
-):
-    """Run QV transfer for a single source dataset against the (already loaded) target."""
+@hydra.main(
+    config_path="../../../../../config/experiments/vision/ilharco_timm_supervised/001_qat_transfer",
+    config_name="qv_transfer",
+    version_base=None,
+)
+def main(cfg: DictConfig):
+
+    if IS_SLURM:
+        log.info("cfg:\n%s", dict(cfg))
+    else:
+        pprint(dict(cfg), expand_all=True)
+
+    source_dataset_name = cfg.source.dataset_name
+
+    set_seed(cfg.target.seed)
+
+    eval_split = cfg.eval_split
+    if eval_split not in ("val", "test"):
+        raise ValueError(f"Unsupported eval_split: {eval_split!r}. Must be 'val' or 'test'.")
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    tgt_epochs = DATASET_NAME_TO_EPOCHS[
+        cfg.target.dataset_name
+    ] if cfg.target.limit_num_epochs is None else cfg.target.limit_num_epochs
+
+    num_classes = DATASET_NAME_TO_NUM_CLASSES[cfg.target.dataset_name]
 
     src_epochs = DATASET_NAME_TO_EPOCHS[
         source_dataset_name
@@ -207,18 +223,62 @@ def _run_source(
         log.info("--- source=%s target=%s ---", source_dataset_name, cfg.target.dataset_name)
         log.info("FP source  classifier: %s", fp_source_path)
         log.info("QAT source classifier: %s", qat_source_path)
+        log.info("FP target  classifier: %s", fp_target_path)
+        log.info("QAT target classifier: %s", qat_target_path)
     else:
         print(f"\n--- source={source_dataset_name} target={cfg.target.dataset_name} ---")
         print(f"FP source  classifier: {fp_source_path}")
         print(f"QAT source classifier: {qat_source_path}")
+        print(f"FP target  classifier: {fp_target_path}")
+        print(f"QAT target classifier: {qat_target_path}\n")
 
     for path in (fp_source_path, qat_source_path):
         if not os.path.exists(path):
             log.warning("Skipping source=%s: checkpoint missing: %s", source_dataset_name, path)
             return
 
+    for path in (fp_target_path, qat_target_path):
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Required target checkpoint missing: {path}")
+
     ############################################################################
     # END checkpoint paths
+    ############################################################################
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    ############################################################################
+    # BEGIN load target checkpoints
+    ############################################################################
+
+    fp_tgt_sd = torch.load(fp_target_path, map_location="cpu")
+    qat_tgt_sd = torch.load(qat_target_path, map_location="cpu")
+
+    ############################################################################
+    # END load target checkpoints
+    ############################################################################
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    ############################################################################
+    # BEGIN dataset creation (target)
+    ############################################################################
+
+    _tmp_classifier = ImageClassifier(model_name=cfg.model_name, num_classes=num_classes)
+
+    dataset = get_dataset(
+        dataset_name=cfg.target.dataset_name,
+        preprocess_train=_tmp_classifier.train_preprocess,
+        preprocess_inference=_tmp_classifier.val_preprocess,
+        batch_size=cfg.batch_size,
+        num_workers=int(os.environ['TORCH_NUM_WORKERS']),
+        seed=cfg.target.seed,
+    )
+
+    del _tmp_classifier
+
+    ############################################################################
+    # END dataset creation
     ############################################################################
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -609,99 +669,6 @@ def _run_source(
     ############################################################################
     # END save results
     ############################################################################
-
-
-@hydra.main(
-    config_path="../../../../../config/experiments/vision/ilharco_timm_supervised/001_qat_transfer",
-    config_name="qv_transfer",
-    version_base=None,
-)
-def main(cfg: DictConfig):
-
-    if IS_SLURM:
-        log.info("cfg:\n%s", dict(cfg))
-    else:
-        pprint(dict(cfg), expand_all=True)
-
-    source_dataset_names = OmegaConf.to_container(cfg.source.dataset_names, resolve=True)
-
-    set_seed(cfg.target.seed)
-
-    eval_split = cfg.eval_split
-    if eval_split not in ("val", "test"):
-        raise ValueError(f"Unsupported eval_split: {eval_split!r}. Must be 'val' or 'test'.")
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    tgt_epochs = DATASET_NAME_TO_EPOCHS[
-        cfg.target.dataset_name
-    ] if cfg.target.limit_num_epochs is None else cfg.target.limit_num_epochs
-
-    num_classes = DATASET_NAME_TO_NUM_CLASSES[cfg.target.dataset_name]
-
-    ############################################################################
-    # Load target checkpoints once (independent of source)
-    ############################################################################
-
-    fp_tgt_dir = _fp_ckpt_dir(cfg, cfg.target.dataset_name, cfg.target.seed)
-    qat_tgt_dir = _qat_ckpt_dir(cfg, cfg.target.dataset_name, cfg.target.seed)
-
-    fp_target_path = os.path.join(fp_tgt_dir, f"classifier_epoch_{tgt_epochs}.pt")
-    qat_target_path = os.path.join(qat_tgt_dir, f"classifier_epoch_{tgt_epochs}.pt")
-
-    if IS_SLURM:
-        log.info("FP target  classifier: %s", fp_target_path)
-        log.info("QAT target classifier: %s", qat_target_path)
-    else:
-        print(f"\nFP target  classifier: {fp_target_path}")
-        print(f"QAT target classifier: {qat_target_path}\n")
-
-    for path in (fp_target_path, qat_target_path):
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"Required target checkpoint missing: {path}")
-
-    fp_tgt_sd = torch.load(fp_target_path, map_location="cpu")
-    qat_tgt_sd = torch.load(qat_target_path, map_location="cpu")
-
-    ############################################################################
-    # Create target dataset once (reused across all source datasets)
-    ############################################################################
-
-    _tmp_classifier = ImageClassifier(model_name=cfg.model_name, num_classes=num_classes)
-
-    dataset = get_dataset(
-        dataset_name=cfg.target.dataset_name,
-        preprocess_train=_tmp_classifier.train_preprocess,
-        preprocess_inference=_tmp_classifier.val_preprocess,
-        batch_size=cfg.batch_size,
-        num_workers=int(os.environ['TORCH_NUM_WORKERS']),
-        seed=cfg.target.seed,
-    )
-
-    del _tmp_classifier
-
-    ############################################################################
-    # Iterate over source datasets
-    ############################################################################
-
-    for i, source_dataset_name in enumerate(source_dataset_names):
-        if IS_SLURM:
-            log.info("=== Source %d/%d: %s ===", i + 1, len(source_dataset_names), source_dataset_name)
-        else:
-            print(f"\n{'='*60}")
-            print(f"  Source {i + 1}/{len(source_dataset_names)}: {source_dataset_name}")
-            print(f"{'='*60}")
-
-        _run_source(
-            cfg=cfg,
-            source_dataset_name=source_dataset_name,
-            fp_tgt_sd=fp_tgt_sd,
-            qat_tgt_sd=qat_tgt_sd,
-            dataset=dataset,
-            num_classes=num_classes,
-            device=device,
-            tgt_epochs=tgt_epochs,
-        )
 
 
 if __name__ == "__main__":

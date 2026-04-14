@@ -21,7 +21,7 @@ wl: ???
 max_grad_norm: ???
 
 source:
-  dataset_names: ???       # list of source dataset names to iterate over internally
+  dataset_name: ???        # single source dataset name
   seed: ???
   limit_num_epochs: null   # null -> DATASET_NAME_TO_EPOCHS[dataset_name]
 
