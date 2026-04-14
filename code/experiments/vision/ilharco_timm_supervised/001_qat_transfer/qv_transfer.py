@@ -109,10 +109,16 @@ def evaluate(
     dataset,
     model: torch.nn.Module,
     device: torch.device,
+    split: str,
     limit_num_batches: int = None,
 ):
 
-    loader = dataset.test_loader
+    if split == "test":
+        loader = dataset.test_loader
+    elif split == "val":
+        loader = dataset.val_loader
+    else:
+        raise ValueError(f"Unsupported eval_split: {split!r}. Must be 'val' or 'test'.")
 
     num_batches = len(loader)
     effective_num_batches = min(limit_num_batches, num_batches) if limit_num_batches is not None else num_batches
@@ -130,7 +136,7 @@ def evaluate(
         batch_bar = tqdm(
             enumerate(loader),
             total=effective_num_batches,
-            desc="Evaluating (test)",
+            desc=f"Evaluating ({split})",
             colour=batch_color,
             leave=False,
             **TQDM_KW,
@@ -348,17 +354,18 @@ def _run_source(
         pprint(classifier_fp_head, expand_all=True)
         print(f"\n\n")
 
-    test_accuracy_fp_head = evaluate(
+    accuracy_fp_head = evaluate(
         dataset=dataset,
         model=classifier_fp_head,
         device=device,
+        split=eval_split,
         limit_num_batches=cfg.limit_num_batches,
     )
 
     if IS_SLURM:
-        log.info("eval test_accuracy (patched + FP head, before PTQ): %s", test_accuracy_fp_head)
+        log.info("eval %s_accuracy (patched + FP head, before PTQ): %s", eval_split, accuracy_fp_head)
     else:
-        print(f"\n    eval test_accuracy (patched + FP head, before PTQ): {test_accuracy_fp_head}\n")
+        print(f"\n    eval {eval_split}_accuracy (patched + FP head, before PTQ): {accuracy_fp_head}\n")
 
     skip_modules = frozenset(cfg.ptq.skip_modules)
 
@@ -395,17 +402,18 @@ def _run_source(
             print(f"  - {name}")
         print()
 
-    test_accuracy_fp_head_ptq = evaluate(
+    accuracy_fp_head_ptq = evaluate(
         dataset=dataset,
         model=classifier_fp_head,
         device=device,
+        split=eval_split,
         limit_num_batches=cfg.limit_num_batches,
     )
 
     if IS_SLURM:
-        log.info("eval test_accuracy (patched + FP head + PTQ): %s", test_accuracy_fp_head_ptq)
+        log.info("eval %s_accuracy (patched + FP head + PTQ): %s", eval_split, accuracy_fp_head_ptq)
     else:
-        print(f"\n    eval test_accuracy (patched + FP head + PTQ): {test_accuracy_fp_head_ptq}\n")
+        print(f"\n    eval {eval_split}_accuracy (patched + FP head + PTQ): {accuracy_fp_head_ptq}\n")
 
     del classifier_fp_head
     if torch.cuda.is_available():
@@ -431,17 +439,18 @@ def _run_source(
         pprint(classifier_qat_head, expand_all=True)
         print(f"\n\n")
 
-    test_accuracy_qat_head = evaluate(
+    accuracy_qat_head = evaluate(
         dataset=dataset,
         model=classifier_qat_head,
         device=device,
+        split=eval_split,
         limit_num_batches=cfg.limit_num_batches,
     )
 
     if IS_SLURM:
-        log.info("eval test_accuracy (patched + QAT head, before PTQ): %s", test_accuracy_qat_head)
+        log.info("eval %s_accuracy (patched + QAT head, before PTQ): %s", eval_split, accuracy_qat_head)
     else:
-        print(f"\n    eval test_accuracy (patched + QAT head, before PTQ): {test_accuracy_qat_head}\n")
+        print(f"\n    eval {eval_split}_accuracy (patched + QAT head, before PTQ): {accuracy_qat_head}\n")
 
     all_linear_names_qat = [
         name for name, module in classifier_qat_head.named_modules()
@@ -457,17 +466,18 @@ def _run_source(
 
     skipped_names_qat = sorted(set(all_linear_names_qat) - set(quantized_names_qat))
 
-    test_accuracy_qat_head_ptq = evaluate(
+    accuracy_qat_head_ptq = evaluate(
         dataset=dataset,
         model=classifier_qat_head,
         device=device,
+        split=eval_split,
         limit_num_batches=cfg.limit_num_batches,
     )
 
     if IS_SLURM:
-        log.info("eval test_accuracy (patched + QAT head + PTQ): %s", test_accuracy_qat_head_ptq)
+        log.info("eval %s_accuracy (patched + QAT head + PTQ): %s", eval_split, accuracy_qat_head_ptq)
     else:
-        print(f"\n    eval test_accuracy (patched + QAT head + PTQ): {test_accuracy_qat_head_ptq}\n")
+        print(f"\n    eval {eval_split}_accuracy (patched + QAT head + PTQ): {accuracy_qat_head_ptq}\n")
 
     del classifier_qat_head
     if torch.cuda.is_available():
@@ -520,12 +530,19 @@ def _run_source(
         f"qat=bits={cfg.qat.bits}_gran={cfg.qat.granularity}_skip={qat_skip_tag}",
         f"ptq=bits={cfg.ptq.bits}_gran={cfg.ptq.granularity}_skip={ptq_skip_tag}",
         f"qv=alpha={alpha}",
+        f"split={eval_split}",
     )
+
+    accuracy_key_fp_head = f"{eval_split}_accuracy_fp_head"
+    accuracy_key_fp_head_ptq = f"{eval_split}_accuracy_fp_head_ptq"
+    accuracy_key_qat_head = f"{eval_split}_accuracy_qat_head"
+    accuracy_key_qat_head_ptq = f"{eval_split}_accuracy_qat_head_ptq"
 
     results = {
         "experiment": "qv_transfer",
         "model_name": cfg.model_name,
         "batch_size": cfg.batch_size,
+        "eval_split": eval_split,
         "lr": cfg.lr,
         "wd": cfg.wd,
         "ls": cfg.ls,
@@ -567,10 +584,10 @@ def _run_source(
         },
         "ptq_quantized_modules": quantized_names_fp,
         "ptq_skipped_modules": skipped_names_fp,
-        "test_accuracy_fp_head": test_accuracy_fp_head,
-        "test_accuracy_fp_head_ptq": test_accuracy_fp_head_ptq,
-        "test_accuracy_qat_head": test_accuracy_qat_head,
-        "test_accuracy_qat_head_ptq": test_accuracy_qat_head_ptq,
+        accuracy_key_fp_head: accuracy_fp_head,
+        accuracy_key_fp_head_ptq: accuracy_fp_head_ptq,
+        accuracy_key_qat_head: accuracy_qat_head,
+        accuracy_key_qat_head_ptq: accuracy_qat_head_ptq,
         "num_classes": num_classes_actual,
         "random_chance": random_chance,
         "comparison_baseline_note": (
@@ -609,6 +626,10 @@ def main(cfg: DictConfig):
     source_dataset_names = OmegaConf.to_container(cfg.source.dataset_names, resolve=True)
 
     set_seed(cfg.target.seed)
+
+    eval_split = cfg.eval_split
+    if eval_split not in ("val", "test"):
+        raise ValueError(f"Unsupported eval_split: {eval_split!r}. Must be 'val' or 'test'.")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
