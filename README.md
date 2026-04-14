@@ -464,3 +464,16 @@ for alpha in 0.25 0.5 0.75 1.0; do uv run --active python code/visualizations/vi
 - **Tuning the Slurm job** without editing YAML: append `hydra.launcher.timeout_min=...`, `hydra.launcher.mem_gb=...`, `hydra.launcher.cpus_per_task=...`, etc.
 - **Output layout**: single runs land under `hydra.run.dir`; sweeps (both local and submitit) land under `hydra.sweep.dir` with per-combo `subdir`s defined in each experiment's YAML. Submitit additionally writes per-job metadata under `${hydra.sweep.dir}/.submitit/%j`.
 - **Environment variables** required at runtime (loaded via `.env`): `CHECKPOINT_BASE_PATH`, `HEAD_BASE_PATH`, `EVALUATION_BASE_PATH`, `TORCH_NUM_WORKERS`.
+
+# REx baselines
+ uv run --active python code/experiments/vision/rex/evaluate_rex.py \
+   model_family=ilharco_hf_clip \
+   model_name=openai/clip-vit-base-patch16 \
+   dataset_name=CIFAR10 seed=2038 \
+   'skip_modules=[classification_head]'
+
+ uv run --active python code/experiments/vision/rex/evaluate_rex.py \
+   model_family=ilharco_timm_supervised \
+   model_name=vit_base_patch16_224.augreg2_in21k_ft_in1k \
+   dataset_name=CIFAR10 seed=2038 \
+   'skip_modules=[head]'

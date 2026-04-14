@@ -9,6 +9,21 @@ from torchvision.transforms import InterpolationMode
 from transformers import CLIPImageProcessor, CLIPModel
 
 
+def _extract_feature_tensor(outputs):
+    if isinstance(outputs, torch.Tensor):
+        return outputs
+    if hasattr(outputs, "image_embeds"):
+        return outputs.image_embeds
+    if hasattr(outputs, "pooler_output"):
+        return outputs.pooler_output
+    if isinstance(outputs, (tuple, list)) and len(outputs) > 0:
+        return outputs[0]
+    raise TypeError(
+        "Could not extract a tensor from get_image_features output "
+        f"of type {type(outputs)}"
+    )
+
+
 # _MaybeConvertMode and _MaybeToTensor are copied verbatim from
 # references/open_clip/src/open_clip/transform.py so that the resulting Compose
 # is numerically identical to open_clip's image_transform output for the path
@@ -94,7 +109,8 @@ class ImageEncoder(torch.nn.Module):
 
     def forward(self, images):
         assert self.model is not None
-        return self.model.get_image_features(pixel_values=images)
+        outputs = self.model.get_image_features(pixel_values=images)
+        return _extract_feature_tensor(outputs)
 
     def __call__(self, inputs):
         return self.forward(inputs)

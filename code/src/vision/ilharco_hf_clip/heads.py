@@ -10,6 +10,21 @@ from .modeling import ClassificationHead, ImageEncoder
 from ..utils import SPLIT_SEED, sanitize_hf_model_name
 
 
+def _extract_text_tensor(outputs):
+    if isinstance(outputs, torch.Tensor):
+        return outputs
+    if hasattr(outputs, "text_embeds"):
+        return outputs.text_embeds
+    if hasattr(outputs, "pooler_output"):
+        return outputs.pooler_output
+    if isinstance(outputs, (tuple, list)) and len(outputs) > 0:
+        return outputs[0]
+    raise TypeError(
+        "Could not extract a tensor from get_text_features output "
+        f"of type {type(outputs)}"
+    )
+
+
 def build_classification_head(model, tokenizer, dataset_name, device):
     template = get_templates(dataset_name)
 
@@ -41,6 +56,7 @@ def build_classification_head(model, tokenizer, dataset_name, device):
             texts = [t(classname) for t in template]
             tokens = tokenizer(texts, padding=True, return_tensors="pt").to(device)
             embeddings = model.get_text_features(**tokens)  # embed with text encoder
+            embeddings = _extract_text_tensor(embeddings)
             embeddings /= embeddings.norm(dim=-1, keepdim=True)
 
             embeddings = embeddings.mean(dim=0, keepdim=True)

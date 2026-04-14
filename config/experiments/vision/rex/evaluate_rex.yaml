@@ -1,0 +1,34 @@
+hydra:
+  searchpath:
+    - file://${oc.env:PWD}/config
+  sweep:
+    dir: logs/config/experiments/vision/rex/evaluate_rex
+    subdir: ${model_family}/${model_name}/${dataset_name}/seed=${seed}
+
+model_family: ???
+model_name: ???
+dataset_name: ???
+seed: 2038
+
+batch_size: 128
+lr: 1e-5
+wd: 0.1
+ls: 0.0
+wl: 500
+max_grad_norm: 1.0
+
+limit_num_epochs: null
+limit_num_batches: null
+num_workers: 4
+skip_modules: null
+head_base_path: ${oc.env:HEAD_BASE_PATH,heads}
+
+checkpoint_roots:
+  hf_clip_fp: /media/hdd1_4TB/dansolombrino/cache/PARA/Projects/quantization/qat-transfer/storage/checkpoints/vision/ilharco_hf_clip/fp
+  timm_supervised_fp: /media/hdd1_4TB/dansolombrino/cache/PARA/Projects/quantization/qat-transfer/storage/checkpoints/vision/ilharco_timm_supervised/fp
+
+rex:
+  bits: [8, 4, 3, 2]
+  order: 2
+  sparsity: [0.0, 0.5, 1.0]
+  granularity: channel
