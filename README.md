@@ -477,3 +477,8 @@ for alpha in 0.25 0.5 0.75 1.0; do uv run --active python code/visualizations/vi
    model_name=vit_base_patch16_224.augreg2_in21k_ft_in1k \
    dataset_name=CIFAR10 seed=2038 \
    'skip_modules=[head]'
+
+## Visualizations of REx
+  uv run --active python code/visualizations/vision/rex/rex_heatmap.py --model-family ilharco_hf_clip --model-name openai/clip-vit-base-patch16 --seed 2038 --optim adamw --lr 1e-5 --wd 0.1 --ls 0.0 --wl 500 --max-grad-norm 1.0 --batch-size 128 --order 2 --granularity channel --skip-modules classification_head --evaluation-root quantization/qat-transfer/evaluations/vision/rex
+
+  uv run --active python code/visualizations/vision/rex/rex_heatmap.py --model-family ilharco_timm_supervised --model-name vit_base_patch16_224.augreg2_in21k_ft_in1k --seed 2038 --optim adamw --lr 1e-5 --wd 0.1 --ls 0.0 --wl 500 --max-grad-norm 1.0 --batch-size 128 --order 2 --granularity channel --skip-modules head --evaluation-root quantization/qat-transfer/evaluations/vision/rex
