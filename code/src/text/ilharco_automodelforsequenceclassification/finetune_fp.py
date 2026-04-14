@@ -36,6 +36,7 @@ SUPPORTED_MODELS = {
 }
 MODEL_NAME_TO_HEAD_MODULE = {
     "google-bert/bert-base-uncased": "classifier",
+    "google-bert/bert-large-uncased": "classifier",
 }
 
 from src.text.data.common import DATASET_NAME_TO_EPOCHS
