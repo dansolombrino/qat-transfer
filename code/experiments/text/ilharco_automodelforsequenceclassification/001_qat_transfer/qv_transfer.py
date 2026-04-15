@@ -31,6 +31,7 @@
 # Please note that D1 can be either the same or different than D2.
 # ==============================================================================
 
+import gc
 import json
 import logging
 import os
@@ -190,38 +191,26 @@ def evaluate(
     return correct / max(total, 1)
 
 
-@hydra.main(
-    config_path="../../../../../config/experiments/text/ilharco_automodelforsequenceclassification/001_qat_transfer",
-    config_name="qv_transfer",
-    version_base=None,
-)
-def main(cfg: DictConfig):
+def _run_pair(
+    cfg: DictConfig,
+    source_dataset_name: str,
+    target_dataset_name: str,
+    fp_tgt_backbone_sd: dict,
+    fp_tgt_head_sd: dict,
+    qat_tgt_head_sd: dict,
+    dataset,
+    num_classes: int,
+    device: str,
+    tgt_epochs: int,
+    tokenizer,
+    max_length: int,
+    head_prefix: str,
+    eval_split: str,
+):
+    """Run QV transfer for a single (source, target) pair."""
 
-    if IS_SLURM:
-        log.info("cfg:\n%s", dict(cfg))
-    else:
-        pprint(dict(cfg), expand_all=True)
-
-    if cfg.model_name not in SUPPORTED_MODELS:
-        raise ValueError(f"Unsupported model_name={cfg.model_name!r}. Supported: {sorted(SUPPORTED_MODELS)}")
-
-    source_dataset_name = cfg.source.dataset_name
-
-    set_seed(cfg.target.seed)
-
-    eval_split = cfg.eval_split
-    if eval_split not in ("val", "test"):
-        raise ValueError(f"Unsupported eval_split: {eval_split!r}. Must be 'val' or 'test'.")
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    tgt_epochs = DATASET_NAME_TO_EPOCHS[
-        cfg.target.dataset_name
-    ] if cfg.target.limit_num_epochs is None else cfg.target.limit_num_epochs
-
-    head_module = MODEL_NAME_TO_HEAD_MODULE[cfg.model_name]
-    head_prefix = head_module + "."
-    max_length = cfg.max_length
+    def _is_head_key(k: str) -> bool:
+        return k.startswith(head_prefix)
 
     src_epochs = DATASET_NAME_TO_EPOCHS[
         source_dataset_name
@@ -237,86 +226,22 @@ def main(cfg: DictConfig):
     fp_src_backbone_path = os.path.join(fp_src_dir, f"backbone_epoch_{src_epochs}.pt")
     qat_src_backbone_path = os.path.join(qat_src_dir, f"backbone_epoch_{src_epochs}.pt")
 
-    fp_tgt_dir = _fp_ckpt_dir(cfg, cfg.target.dataset_name, cfg.target.seed)
-    qat_tgt_dir = _qat_ckpt_dir(cfg, cfg.target.dataset_name, cfg.target.seed)
-
-    fp_tgt_backbone_path = os.path.join(fp_tgt_dir, f"backbone_epoch_{tgt_epochs}.pt")
-    fp_tgt_head_path = os.path.join(fp_tgt_dir, f"head_epoch_{tgt_epochs}.pt")
-    qat_tgt_head_path = os.path.join(qat_tgt_dir, f"head_epoch_{tgt_epochs}.pt")
-
     if IS_SLURM:
-        log.info("--- source=%s target=%s ---", source_dataset_name, cfg.target.dataset_name)
+        log.info("--- source=%s target=%s ---", source_dataset_name, target_dataset_name)
         log.info("FP source  backbone: %s", fp_src_backbone_path)
         log.info("QAT source backbone: %s", qat_src_backbone_path)
-        log.info("FP target  backbone: %s", fp_tgt_backbone_path)
-        log.info("FP target  head:     %s", fp_tgt_head_path)
-        log.info("QAT target head:     %s", qat_tgt_head_path)
     else:
-        print(f"\n--- source={source_dataset_name} target={cfg.target.dataset_name} ---")
+        print(f"\n--- source={source_dataset_name} target={target_dataset_name} ---")
         print(f"FP source  backbone: {fp_src_backbone_path}")
         print(f"QAT source backbone: {qat_src_backbone_path}")
-        print(f"FP target  backbone: {fp_tgt_backbone_path}")
-        print(f"FP target  head:     {fp_tgt_head_path}")
-        print(f"QAT target head:     {qat_tgt_head_path}\n")
 
     for path in (fp_src_backbone_path, qat_src_backbone_path):
         if not os.path.exists(path):
             log.warning("Skipping source=%s: checkpoint missing: %s", source_dataset_name, path)
             return
 
-    for path in (fp_tgt_backbone_path, fp_tgt_head_path, qat_tgt_head_path):
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"Required target checkpoint missing: {path}")
-
     ############################################################################
     # END checkpoint paths
-    ############################################################################
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    ############################################################################
-    # BEGIN load target checkpoints
-    ############################################################################
-
-    fp_tgt_backbone_sd = torch.load(fp_tgt_backbone_path, map_location="cpu")
-    fp_tgt_head_sd = torch.load(fp_tgt_head_path, map_location="cpu")
-    qat_tgt_head_sd = torch.load(qat_tgt_head_path, map_location="cpu")
-
-    ############################################################################
-    # END load target checkpoints
-    ############################################################################
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    ############################################################################
-    # BEGIN dataset creation (target)
-    ############################################################################
-
-    dataset = get_dataset(
-        dataset_name=cfg.target.dataset_name,
-        batch_size=cfg.batch_size,
-        num_workers=int(os.environ['TORCH_NUM_WORKERS']),
-        seed=cfg.target.seed,
-    )
-
-    num_classes = len(dataset.class_names)
-
-    ############################################################################
-    # END dataset creation
-    ############################################################################
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    ############################################################################
-    # BEGIN tokenizer creation
-    ############################################################################
-
-    tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    ############################################################################
-    # END tokenizer creation
     ############################################################################
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -327,9 +252,6 @@ def main(cfg: DictConfig):
 
     fp_src_sd = torch.load(fp_src_backbone_path, map_location="cpu")
     qat_src_sd = torch.load(qat_src_backbone_path, map_location="cpu")
-
-    def _is_head_key(k: str) -> bool:
-        return k.startswith(head_prefix)
 
     src_backbone_keys = {k for k in fp_src_sd if not _is_head_key(k)}
     qat_backbone_keys = {k for k in qat_src_sd if not _is_head_key(k)}
@@ -622,6 +544,17 @@ def main(cfg: DictConfig):
     qat_skip_tag = "-".join(sorted(cfg.qat.skip_modules)) if len(cfg.qat.skip_modules) > 0 else "none"
     ptq_skip_tag = "-".join(sorted(cfg.ptq.skip_modules)) if len(cfg.ptq.skip_modules) > 0 else "none"
 
+    fp_src_dir = _fp_ckpt_dir(cfg, source_dataset_name, cfg.source.seed)
+    qat_src_dir = _qat_ckpt_dir(cfg, source_dataset_name, cfg.source.seed)
+    fp_src_backbone_path_for_results = os.path.join(fp_src_dir, f"backbone_epoch_{src_epochs}.pt")
+    qat_src_backbone_path_for_results = os.path.join(qat_src_dir, f"backbone_epoch_{src_epochs}.pt")
+
+    fp_tgt_dir = _fp_ckpt_dir(cfg, target_dataset_name, cfg.target.seed)
+    qat_tgt_dir = _qat_ckpt_dir(cfg, target_dataset_name, cfg.target.seed)
+    fp_tgt_backbone_path_for_results = os.path.join(fp_tgt_dir, f"backbone_epoch_{tgt_epochs}.pt")
+    fp_tgt_head_path_for_results = os.path.join(fp_tgt_dir, f"head_epoch_{tgt_epochs}.pt")
+    qat_tgt_head_path_for_results = os.path.join(qat_tgt_dir, f"head_epoch_{tgt_epochs}.pt")
+
     eval_dir = os.path.join(
         evaluation_base_path,
         "text",
@@ -631,7 +564,7 @@ def main(cfg: DictConfig):
         "qv_transfer",
         sanitize_hf_model_name(cfg.model_name),
         f"src={source_dataset_name}_seed={cfg.source.seed}",
-        f"tgt={cfg.target.dataset_name}_seed={cfg.target.seed}",
+        f"tgt={target_dataset_name}_seed={cfg.target.seed}",
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}_ml={cfg.max_length}",
         f"qat=bits={cfg.qat.bits}_gran={cfg.qat.granularity}_skip={qat_skip_tag}",
         f"ptq=bits={cfg.ptq.bits}_gran={cfg.ptq.granularity}_skip={ptq_skip_tag}",
@@ -655,17 +588,17 @@ def main(cfg: DictConfig):
             "seed": cfg.source.seed,
             "limit_num_epochs": cfg.source.limit_num_epochs,
             "epochs": src_epochs,
-            "fp_backbone_path": fp_src_backbone_path,
-            "qat_backbone_path": qat_src_backbone_path,
+            "fp_backbone_path": fp_src_backbone_path_for_results,
+            "qat_backbone_path": qat_src_backbone_path_for_results,
         },
         "target": {
-            "dataset_name": cfg.target.dataset_name,
+            "dataset_name": target_dataset_name,
             "seed": cfg.target.seed,
             "limit_num_epochs": cfg.target.limit_num_epochs,
             "epochs": tgt_epochs,
-            "fp_backbone_path": fp_tgt_backbone_path,
-            "fp_head_path": fp_tgt_head_path,
-            "qat_head_path": qat_tgt_head_path,
+            "fp_backbone_path": fp_tgt_backbone_path_for_results,
+            "fp_head_path": fp_tgt_head_path_for_results,
+            "qat_head_path": qat_tgt_head_path_for_results,
         },
         "qat": {
             "bits": cfg.qat.bits,
@@ -711,6 +644,150 @@ def main(cfg: DictConfig):
     ############################################################################
     # END save results
     ############################################################################
+
+
+@hydra.main(
+    config_path="../../../../../config/experiments/text/ilharco_automodelforsequenceclassification/001_qat_transfer",
+    config_name="qv_transfer",
+    version_base=None,
+)
+def main(cfg: DictConfig):
+
+    if IS_SLURM:
+        log.info("cfg:\n%s", dict(cfg))
+    else:
+        pprint(dict(cfg), expand_all=True)
+
+    if cfg.model_name not in SUPPORTED_MODELS:
+        raise ValueError(f"Unsupported model_name={cfg.model_name!r}. Supported: {sorted(SUPPORTED_MODELS)}")
+
+    source_dataset_names = OmegaConf.to_container(cfg.source.dataset_names, resolve=True)
+    target_dataset_names = OmegaConf.to_container(cfg.target.dataset_names, resolve=True)
+
+    set_seed(cfg.target.seed)
+
+    eval_split = cfg.eval_split
+    if eval_split not in ("val", "test"):
+        raise ValueError(f"Unsupported eval_split: {eval_split!r}. Must be 'val' or 'test'.")
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    head_module = MODEL_NAME_TO_HEAD_MODULE[cfg.model_name]
+    head_prefix = head_module + "."
+    max_length = cfg.max_length
+
+    ########################################################################
+    # Create tokenizer once (depends only on model_name)
+    ########################################################################
+
+    tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    total_pairs = len(source_dataset_names) * len(target_dataset_names)
+    pair_idx = 0
+
+    for ti, target_dataset_name in enumerate(target_dataset_names):
+
+        if IS_SLURM:
+            log.info("=== Target %d/%d: %s ===", ti + 1, len(target_dataset_names), target_dataset_name)
+        else:
+            print(f"\n{'='*60}")
+            print(f"  Target {ti + 1}/{len(target_dataset_names)}: {target_dataset_name}")
+            print(f"{'='*60}")
+
+        tgt_epochs = DATASET_NAME_TO_EPOCHS[
+            target_dataset_name
+        ] if cfg.target.limit_num_epochs is None else cfg.target.limit_num_epochs
+
+        ####################################################################
+        # Load target checkpoints
+        ####################################################################
+
+        fp_tgt_dir = _fp_ckpt_dir(cfg, target_dataset_name, cfg.target.seed)
+        qat_tgt_dir = _qat_ckpt_dir(cfg, target_dataset_name, cfg.target.seed)
+
+        fp_tgt_backbone_path = os.path.join(fp_tgt_dir, f"backbone_epoch_{tgt_epochs}.pt")
+        fp_tgt_head_path = os.path.join(fp_tgt_dir, f"head_epoch_{tgt_epochs}.pt")
+        qat_tgt_head_path = os.path.join(qat_tgt_dir, f"head_epoch_{tgt_epochs}.pt")
+
+        if IS_SLURM:
+            log.info("FP target  backbone: %s", fp_tgt_backbone_path)
+            log.info("FP target  head:     %s", fp_tgt_head_path)
+            log.info("QAT target head:     %s", qat_tgt_head_path)
+        else:
+            print(f"\nFP target  backbone: {fp_tgt_backbone_path}")
+            print(f"FP target  head:     {fp_tgt_head_path}")
+            print(f"QAT target head:     {qat_tgt_head_path}\n")
+
+        target_missing = False
+        for path in (fp_tgt_backbone_path, fp_tgt_head_path, qat_tgt_head_path):
+            if not os.path.exists(path):
+                log.warning("Skipping target=%s: checkpoint missing: %s", target_dataset_name, path)
+                target_missing = True
+                break
+        if target_missing:
+            pair_idx += len(source_dataset_names)
+            continue
+
+        fp_tgt_backbone_sd = torch.load(fp_tgt_backbone_path, map_location="cpu")
+        fp_tgt_head_sd = torch.load(fp_tgt_head_path, map_location="cpu")
+        qat_tgt_head_sd = torch.load(qat_tgt_head_path, map_location="cpu")
+
+        ####################################################################
+        # Create dataset (target)
+        ####################################################################
+
+        dataset = get_dataset(
+            dataset_name=target_dataset_name,
+            batch_size=cfg.batch_size,
+            num_workers=int(os.environ['TORCH_NUM_WORKERS']),
+            seed=cfg.target.seed,
+        )
+
+        num_classes = len(dataset.class_names)
+
+        ####################################################################
+        # Iterate over source datasets
+        ####################################################################
+
+        for si, source_dataset_name in enumerate(source_dataset_names):
+            pair_idx += 1
+
+            if IS_SLURM:
+                log.info("--- Pair %d/%d: source=%s target=%s ---", pair_idx, total_pairs, source_dataset_name, target_dataset_name)
+            else:
+                print(f"\n--- Pair {pair_idx}/{total_pairs}: source={source_dataset_name} target={target_dataset_name} ---")
+
+            _run_pair(
+                cfg=cfg,
+                source_dataset_name=source_dataset_name,
+                target_dataset_name=target_dataset_name,
+                fp_tgt_backbone_sd=fp_tgt_backbone_sd,
+                fp_tgt_head_sd=fp_tgt_head_sd,
+                qat_tgt_head_sd=qat_tgt_head_sd,
+                dataset=dataset,
+                num_classes=num_classes,
+                device=device,
+                tgt_epochs=tgt_epochs,
+                tokenizer=tokenizer,
+                max_length=max_length,
+                head_prefix=head_prefix,
+                eval_split=eval_split,
+            )
+
+        ####################################################################
+        # Cleanup between target iterations
+        ####################################################################
+
+        del dataset, fp_tgt_backbone_sd, fp_tgt_head_sd, qat_tgt_head_sd
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    if IS_SLURM:
+        log.info("All %d pairs completed. Forcing exit.", total_pairs)
+        os._exit(0)
 
 
 if __name__ == "__main__":

@@ -31,6 +31,7 @@
 # Please note that D1 can be either the same or different than D2.
 # ==============================================================================
 
+import gc
 import json
 import logging
 import os
@@ -62,7 +63,7 @@ from src.quantization import apply_ptq_
 from src.task_vectors import TaskVector
 
 import hydra
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from rich.pretty import pprint
 from tqdm import tqdm
 import torch
@@ -163,54 +164,43 @@ def evaluate(
     return top1_acc
 
 
-@hydra.main(
-    config_path="../../../../../config/experiments/vision/ilharco_hf_clip/001_qat_transfer",
-    config_name="qv_transfer",
-    version_base=None,
-)
-def main(cfg: DictConfig):
-
-    if IS_SLURM:
-        log.info("cfg:\n%s", dict(cfg))
-    else:
-        pprint(dict(cfg), expand_all=True)
-
-    set_seed(cfg.target.seed)
-
-    eval_split = cfg.eval_split
-    if eval_split not in ("val", "test"):
-        raise ValueError(f"Unsupported eval_split: {eval_split!r}. Must be 'val' or 'test'.")
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+def _run_pair(
+    cfg: DictConfig,
+    source_dataset_name: str,
+    target_dataset_name: str,
+    fp_tgt_sd: dict,
+    dataset,
+    classification_head,
+    device: str,
+    tgt_epochs: int,
+    eval_split: str,
+):
+    """Run QV transfer for a single (source, target) pair."""
 
     src_epochs = DATASET_NAME_TO_EPOCHS[
-        cfg.source.dataset_name
+        source_dataset_name
     ] if cfg.source.limit_num_epochs is None else cfg.source.limit_num_epochs
-
-    tgt_epochs = DATASET_NAME_TO_EPOCHS[
-        cfg.target.dataset_name
-    ] if cfg.target.limit_num_epochs is None else cfg.target.limit_num_epochs
 
     ############################################################################
     # BEGIN checkpoint paths
     ############################################################################
 
-    fp_source_path = _fp_ckpt_path(cfg, cfg.source.dataset_name, cfg.source.seed, src_epochs)
-    qat_source_path = _qat_ckpt_path(cfg, cfg.source.dataset_name, cfg.source.seed, src_epochs)
-    fp_target_path = _fp_ckpt_path(cfg, cfg.target.dataset_name, cfg.target.seed, tgt_epochs)
+    fp_source_path = _fp_ckpt_path(cfg, source_dataset_name, cfg.source.seed, src_epochs)
+    qat_source_path = _qat_ckpt_path(cfg, source_dataset_name, cfg.source.seed, src_epochs)
 
     if IS_SLURM:
+        log.info("--- source=%s target=%s ---", source_dataset_name, target_dataset_name)
         log.info("FP source  checkpoint: %s", fp_source_path)
         log.info("QAT source checkpoint: %s", qat_source_path)
-        log.info("FP target  checkpoint: %s", fp_target_path)
     else:
-        print(f"\nFP source  checkpoint: {fp_source_path}")
+        print(f"\n--- source={source_dataset_name} target={target_dataset_name} ---")
+        print(f"FP source  checkpoint: {fp_source_path}")
         print(f"QAT source checkpoint: {qat_source_path}")
-        print(f"FP target  checkpoint: {fp_target_path}\n")
 
-    for path in (fp_source_path, qat_source_path, fp_target_path):
+    for path in (fp_source_path, qat_source_path):
         if not os.path.exists(path):
-            raise FileNotFoundError(f"Required checkpoint missing: {path}")
+            log.warning("Skipping source=%s: checkpoint missing: %s", source_dataset_name, path)
+            return
 
     ############################################################################
     # END checkpoint paths
@@ -221,19 +211,9 @@ def main(cfg: DictConfig):
     ############################################################################
     # BEGIN QV construction
     ############################################################################
-    #
-    # We bypass TaskVector's two-checkpoint constructor branch and apply_to(),
-    # because both call torch.load(path).state_dict(), which assumes a pickled
-    # *model object*. Our checkpoints are saved by ImageEncoder.save() as plain
-    # state_dict pickles (torch.save(self.state_dict(), filename)), so they
-    # would crash that codepath. Instead we load the three state_dicts directly
-    # and build the vector dict ourselves, then hand it to TaskVector via the
-    # vector=... constructor branch (preserving arithmetic support for future
-    # compositions).
 
     fp_src_sd = torch.load(fp_source_path, map_location="cpu")
     qat_src_sd = torch.load(qat_source_path, map_location="cpu")
-    fp_tgt_sd = torch.load(fp_target_path, map_location="cpu")
 
     src_keys = set(fp_src_sd.keys())
     qat_keys = set(qat_src_sd.keys())
@@ -255,7 +235,6 @@ def main(cfg: DictConfig):
     num_dtype_filtered = 0
     with torch.no_grad():
         for k, v_src in fp_src_sd.items():
-            # Mirror TaskVector's dtype filter for integer counters/masks.
             if v_src.dtype in (torch.int64, torch.uint8):
                 num_dtype_filtered += 1
                 continue
@@ -279,6 +258,8 @@ def main(cfg: DictConfig):
             f"{num_dtype_filtered} keys dtype-filtered (int64/uint8)\n"
         )
 
+    del fp_src_sd, qat_src_sd
+
     ############################################################################
     # END QV construction
     ############################################################################
@@ -288,8 +269,6 @@ def main(cfg: DictConfig):
     ############################################################################
     # BEGIN patched-model assembly
     ############################################################################
-    #
-    # patched = FP_target + alpha * QV (key-by-key)
 
     alpha = float(cfg.qv.alpha)
     patched = {}
@@ -303,7 +282,6 @@ def main(cfg: DictConfig):
                     )
                 patched[k] = v_tgt + alpha * tv.vector[k]
             else:
-                # int64/uint8 buffer (dtype-filtered) or missing in src/qat — pass through.
                 patched[k] = v_tgt
 
         for k in tv.vector:
@@ -312,6 +290,8 @@ def main(cfg: DictConfig):
                     log.warning("key %s present in QV but missing in fp_target — skipping", k)
                 else:
                     print(f"Warning: key {k} present in QV but missing in fp_target — skipping")
+
+    del tv
 
     ############################################################################
     # END patched-model assembly
@@ -333,46 +313,10 @@ def main(cfg: DictConfig):
         pprint(image_encoder, expand_all=True)
         print(f"\n\n")
 
+    del patched
+
     ############################################################################
     # END load patched encoder
-    ############################################################################
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    ############################################################################
-    # BEGIN dataset creation (target)
-    ############################################################################
-
-    dataset = get_dataset(
-        dataset_name=cfg.target.dataset_name,
-        preprocess_train=image_encoder.train_preprocess,
-        preprocess_inference=image_encoder.val_preprocess,
-        batch_size=cfg.batch_size,
-        num_workers=int(os.environ['TORCH_NUM_WORKERS']),
-        seed=cfg.target.seed,
-    )
-
-    ############################################################################
-    # END dataset creation
-    ############################################################################
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    ############################################################################
-    # BEGIN classification head creation (target)
-    ############################################################################
-
-    head_base_path = os.environ['HEAD_BASE_PATH']
-
-    classification_head = get_classification_head(
-        model_name=cfg.model_name,
-        dataset_name=cfg.target.dataset_name,
-        save_dir=head_base_path,
-        device=device,
-    )
-
-    ############################################################################
-    # END classification head creation
     ############################################################################
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -402,9 +346,6 @@ def main(cfg: DictConfig):
     ############################################################################
     # BEGIN evaluation (patched QAT, before PTQ)
     ############################################################################
-    #
-    # Evaluate the patched model in full precision FIRST, before applying PTQ
-    # in-place, so we can report both numbers.
 
     accuracy_patched_qat = evaluate(
         dataset=dataset,
@@ -509,6 +450,10 @@ def main(cfg: DictConfig):
     qat_skip_tag = "-".join(sorted(cfg.qat.skip_modules)) if len(cfg.qat.skip_modules) > 0 else "none"
     ptq_skip_tag = "-".join(sorted(cfg.ptq.skip_modules)) if len(cfg.ptq.skip_modules) > 0 else "none"
 
+    fp_source_path = _fp_ckpt_path(cfg, source_dataset_name, cfg.source.seed, src_epochs)
+    qat_source_path = _qat_ckpt_path(cfg, source_dataset_name, cfg.source.seed, src_epochs)
+    fp_target_path = _fp_ckpt_path(cfg, target_dataset_name, cfg.target.seed, tgt_epochs)
+
     eval_dir = os.path.join(
         evaluation_base_path,
         "vision",
@@ -517,8 +462,8 @@ def main(cfg: DictConfig):
         "vision",
         "qv_transfer",
         sanitize_hf_model_name(cfg.model_name),
-        f"src={cfg.source.dataset_name}_seed={cfg.source.seed}",
-        f"tgt={cfg.target.dataset_name}_seed={cfg.target.seed}",
+        f"src={source_dataset_name}_seed={cfg.source.seed}",
+        f"tgt={target_dataset_name}_seed={cfg.target.seed}",
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
         f"qat=bits={cfg.qat.bits}_gran={cfg.qat.granularity}_skip={qat_skip_tag}",
         f"ptq=bits={cfg.ptq.bits}_gran={cfg.ptq.granularity}_skip={ptq_skip_tag}",
@@ -542,7 +487,7 @@ def main(cfg: DictConfig):
         "limit_num_batches": cfg.limit_num_batches,
         "device": str(device),
         "source": {
-            "dataset_name": cfg.source.dataset_name,
+            "dataset_name": source_dataset_name,
             "seed": cfg.source.seed,
             "limit_num_epochs": cfg.source.limit_num_epochs,
             "epochs": src_epochs,
@@ -550,7 +495,7 @@ def main(cfg: DictConfig):
             "qat_checkpoint_path": qat_source_path,
         },
         "target": {
-            "dataset_name": cfg.target.dataset_name,
+            "dataset_name": target_dataset_name,
             "seed": cfg.target.seed,
             "limit_num_epochs": cfg.target.limit_num_epochs,
             "epochs": tgt_epochs,
@@ -563,7 +508,7 @@ def main(cfg: DictConfig):
         },
         "qv": {
             "alpha": alpha,
-            "num_keys_in_vector": len(tv.vector),
+            "num_keys_in_vector": len(vector),
             "num_keys_dtype_filtered": num_dtype_filtered,
         },
         "ptq": {
@@ -593,9 +538,134 @@ def main(cfg: DictConfig):
     else:
         print(f"\nResults saved to: {eval_results_path}")
 
+    del image_classifier, image_encoder
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
     ############################################################################
     # END save results
     ############################################################################
+
+
+@hydra.main(
+    config_path="../../../../../config/experiments/vision/ilharco_hf_clip/001_qat_transfer",
+    config_name="qv_transfer",
+    version_base=None,
+)
+def main(cfg: DictConfig):
+
+    if IS_SLURM:
+        log.info("cfg:\n%s", dict(cfg))
+    else:
+        pprint(dict(cfg), expand_all=True)
+
+    source_dataset_names = OmegaConf.to_container(cfg.source.dataset_names, resolve=True)
+    target_dataset_names = OmegaConf.to_container(cfg.target.dataset_names, resolve=True)
+
+    set_seed(cfg.target.seed)
+
+    eval_split = cfg.eval_split
+    if eval_split not in ("val", "test"):
+        raise ValueError(f"Unsupported eval_split: {eval_split!r}. Must be 'val' or 'test'.")
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    total_pairs = len(source_dataset_names) * len(target_dataset_names)
+    pair_idx = 0
+
+    for ti, target_dataset_name in enumerate(target_dataset_names):
+
+        if IS_SLURM:
+            log.info("=== Target %d/%d: %s ===", ti + 1, len(target_dataset_names), target_dataset_name)
+        else:
+            print(f"\n{'='*60}")
+            print(f"  Target {ti + 1}/{len(target_dataset_names)}: {target_dataset_name}")
+            print(f"{'='*60}")
+
+        tgt_epochs = DATASET_NAME_TO_EPOCHS[
+            target_dataset_name
+        ] if cfg.target.limit_num_epochs is None else cfg.target.limit_num_epochs
+
+        ####################################################################
+        # Load target checkpoint
+        ####################################################################
+
+        fp_target_path = _fp_ckpt_path(cfg, target_dataset_name, cfg.target.seed, tgt_epochs)
+
+        if IS_SLURM:
+            log.info("FP target  checkpoint: %s", fp_target_path)
+        else:
+            print(f"\nFP target  checkpoint: {fp_target_path}\n")
+
+        if not os.path.exists(fp_target_path):
+            log.warning("Skipping target=%s: checkpoint missing: %s", target_dataset_name, fp_target_path)
+            pair_idx += len(source_dataset_names)
+            continue
+
+        fp_tgt_sd = torch.load(fp_target_path, map_location="cpu")
+
+        ####################################################################
+        # Create dataset and classification head (target)
+        ####################################################################
+
+        image_encoder = ImageEncoder(model_name=cfg.model_name)
+
+        dataset = get_dataset(
+            dataset_name=target_dataset_name,
+            preprocess_train=image_encoder.train_preprocess,
+            preprocess_inference=image_encoder.val_preprocess,
+            batch_size=cfg.batch_size,
+            num_workers=int(os.environ['TORCH_NUM_WORKERS']),
+            seed=cfg.target.seed,
+        )
+
+        del image_encoder
+
+        head_base_path = os.environ['HEAD_BASE_PATH']
+
+        classification_head = get_classification_head(
+            model_name=cfg.model_name,
+            dataset_name=target_dataset_name,
+            save_dir=head_base_path,
+            device=device,
+        )
+
+        ####################################################################
+        # Iterate over source datasets
+        ####################################################################
+
+        for si, source_dataset_name in enumerate(source_dataset_names):
+            pair_idx += 1
+
+            if IS_SLURM:
+                log.info("--- Pair %d/%d: source=%s target=%s ---", pair_idx, total_pairs, source_dataset_name, target_dataset_name)
+            else:
+                print(f"\n--- Pair {pair_idx}/{total_pairs}: source={source_dataset_name} target={target_dataset_name} ---")
+
+            _run_pair(
+                cfg=cfg,
+                source_dataset_name=source_dataset_name,
+                target_dataset_name=target_dataset_name,
+                fp_tgt_sd=fp_tgt_sd,
+                dataset=dataset,
+                classification_head=classification_head,
+                device=device,
+                tgt_epochs=tgt_epochs,
+                eval_split=eval_split,
+            )
+
+        ####################################################################
+        # Cleanup between target iterations
+        ####################################################################
+
+        del dataset, fp_tgt_sd, classification_head
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    if IS_SLURM:
+        log.info("All %d pairs completed. Forcing exit.", total_pairs)
+        os._exit(0)
 
 
 if __name__ == "__main__":

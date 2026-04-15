@@ -3,7 +3,7 @@ hydra:
     - file://${oc.env:PWD}/config
   sweep:
     dir: logs/config/experiments/vision/ilharco_timm_supervised/001_qat_transfer/qv_transfer
-    subdir: ${model_name}/tgt=${target.dataset_name}_seed=${target.seed}/qat=bits=${qat.bits}_gran=${qat.granularity}/ptq=bits=${ptq.bits}_gran=${ptq.granularity}/qv=alpha=${qv.alpha}
+    subdir: ${model_name}/seed=${target.seed}/qat=bits=${qat.bits}_gran=${qat.granularity}/ptq=bits=${ptq.bits}_gran=${ptq.granularity}/qv=alpha=${qv.alpha}
 
 model_name: ???
 batch_size: ???
@@ -21,12 +21,12 @@ wl: ???
 max_grad_norm: ???
 
 source:
-  dataset_name: ???        # single source dataset name
+  dataset_names: ???       # list of source dataset names to iterate over internally
   seed: ???
   limit_num_epochs: null   # null -> DATASET_NAME_TO_EPOCHS[dataset_name]
 
 target:
-  dataset_name: ???
+  dataset_names: ???       # list of target dataset names to iterate over internally
   seed: ???
   limit_num_epochs: null   # null -> DATASET_NAME_TO_EPOCHS[dataset_name]
 
