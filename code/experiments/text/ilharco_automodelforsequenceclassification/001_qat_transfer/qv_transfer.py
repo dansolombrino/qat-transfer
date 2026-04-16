@@ -52,10 +52,12 @@ TQDM_KW = dict(disable=IS_SLURM, mininterval=1.0)
 SUPPORTED_MODELS = {
     "google-bert/bert-base-uncased",
     "google-bert/bert-large-uncased",
+    "google/embeddinggemma-300m",
 }
 MODEL_NAME_TO_HEAD_MODULE = {
     "google-bert/bert-base-uncased": "classifier",
     "google-bert/bert-large-uncased": "classifier",
+    "google/embeddinggemma-300m": "score",
 }
 
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
