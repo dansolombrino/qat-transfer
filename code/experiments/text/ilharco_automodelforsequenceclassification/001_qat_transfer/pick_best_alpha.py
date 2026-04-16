@@ -39,6 +39,15 @@ METRIC_KEYS = {
     "qat_head_ptq": "val_accuracy_qat_head_ptq",
 }
 
+# Allowed QV scaling factors for the restricted sweep. Any qv=alpha=* directory
+# on disk whose alpha is not in this set is silently ignored.
+ALLOWED_ALPHAS = (0.15, 0.30, 0.45, 0.60, 0.75, 0.90, 1.05, 1.20, 1.35, 1.50)
+_ALPHA_TOL = 1e-9
+
+
+def _is_allowed_alpha(alpha: float) -> bool:
+    return any(abs(alpha - a) < _ALPHA_TOL for a in ALLOWED_ALPHAS)
+
 EVAL_ROOT_QV = os.path.join(
     os.environ["EVALUATION_BASE_PATH"],
     "text",
@@ -150,6 +159,9 @@ def find_best_alphas(args):
                     alpha_val = float(m.group(1))
                 except ValueError:
                     pass
+                else:
+                    if not _is_allowed_alpha(alpha_val):
+                        alpha_val = None
 
         if src_dataset is None or tgt_dataset is None or alpha_val is None:
             print(f"  [SKIP] could not parse: {fpath}", file=sys.stderr)

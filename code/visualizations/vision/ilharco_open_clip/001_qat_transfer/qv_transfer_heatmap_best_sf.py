@@ -94,6 +94,15 @@ TEST_ACC_KEY    = "test_accuracy"
 HEATMAP_COLORSCALE_SEQUENTIAL = "Viridis"
 HEATMAP_COLORSCALE_DIVERGING  = "RdYlGn"
 
+# Allowed QV scaling factors for the restricted sweep. Any qv=alpha=* directory
+# on disk whose alpha is not in this set is silently ignored.
+ALLOWED_ALPHAS = (0.15, 0.30, 0.45, 0.60, 0.75, 0.90, 1.05, 1.20, 1.35, 1.50)
+_ALPHA_TOL = 1e-9
+
+
+def _is_allowed_alpha(alpha: float) -> bool:
+    return any(abs(alpha - a) < _ALPHA_TOL for a in ALLOWED_ALPHAS)
+
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -284,6 +293,9 @@ def load_data(args):
                 try:
                     alpha_val = float(m.group(1))
                 except ValueError:
+                    continue
+
+                if not _is_allowed_alpha(alpha_val):
                     continue
 
                 acc = _load_value(val_file, VAL_METRIC_KEY)
