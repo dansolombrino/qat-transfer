@@ -1,11 +1,11 @@
-"""001 — QV Transfer Best-Alpha Heatmap (difference vs FP+PTQ) — timm supervised
+"""001 — QV Transfer Best-Alpha Heatmap (difference vs FP+PTQ) — open_clip
 
 Loads QV-transfer results for all (target_dataset x qv_dataset) pairs and, for
-each cell, picks the alpha that achieves the highest *val* accuracy across all
-alpha values swept on disk.  Then loads the *test* result for that alpha.
-Produces one heatmap per head variant (FP head / QAT head):
+each cell, picks the alpha that achieves the highest
+val_accuracy_patched_qat_ptq across all alpha values swept on disk.  Then loads
+the *test* result for that alpha and plots:
 
-  heatmap_qv_transfer_<variant>_best_alpha_minus_fp_ptq.png
+  heatmap_qv_transfer_qat_ptq_best_alpha_minus_fp_ptq.png
       Left-panel cell value  = test_acc_at_best_alpha[target, qv] - fp_ptq_acc[target]
       Right-panel cell value = test_accuracy of the corresponding baseline.
 
@@ -40,21 +40,20 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from src.vision.data.common import DATASET_NAME_TO_EPOCHS
-from src.vision.utils import sanitize_timm_model_name
+from src.vision.utils import sanitize_open_clip_model_name
 
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-EVAL_ROOT_BASELINES = "evaluations/vision/ilharco_timm_supervised/000_baselines/vision"
-EVAL_ROOT_QV        = "evaluations/vision/ilharco_timm_supervised/001_qat_transfer/vision/qv_transfer"
+EVAL_ROOT_BASELINES = "evaluations/vision/ilharco_open_clip/000_baselines/vision"
+EVAL_ROOT_QV        = "evaluations/vision/ilharco_open_clip/001_qat_transfer/vision/qv_transfer"
 
-BASELINE_METHODS = ["pretrained", "pretrained_ptq", "fp", "fp_ptq", "random", "qat", "qat_ptq"]
+BASELINE_METHODS = ["pretrained", "fp", "fp_ptq", "random", "qat", "qat_ptq"]
 
 BASELINE_METHOD_LABELS = {
-    "pretrained":     "Pretrained",
-    "pretrained_ptq": "Pretrained+PTQ",
-    "fp":             "FP",
+    "pretrained": "Pretrained",
+    "fp":         "FP",
     "fp_ptq":     "FP+PTQ",
     "random":     "Random",
     "qat":        "QAT",
@@ -88,22 +87,9 @@ DATASET_NAME_TO_NUM_CLASSES = {
     "ImageNet":      1000,
 }
 
-VAL_METRIC_KEYS = {
-    "fp_head_ptq":  "val_accuracy_fp_head_ptq",
-    "qat_head_ptq": "val_accuracy_qat_head_ptq",
-}
-
-TEST_METRIC_KEYS = {
-    "fp_head_ptq":  "test_accuracy_fp_head_ptq",
-    "qat_head_ptq": "test_accuracy_qat_head_ptq",
-}
-
-QV_METRIC_LABELS = {
-    "fp_head_ptq":  "FP Head",
-    "qat_head_ptq": "QAT Head",
-}
-
-TEST_ACC_KEY  = "test_accuracy"
+VAL_METRIC_KEY  = "val_accuracy_patched_qat_ptq"
+TEST_METRIC_KEY = "test_accuracy_patched_qat_ptq"
+TEST_ACC_KEY    = "test_accuracy"
 
 HEATMAP_COLORSCALE_SEQUENTIAL = "Viridis"
 HEATMAP_COLORSCALE_DIVERGING  = "RdYlGn"
@@ -115,7 +101,9 @@ HEATMAP_COLORSCALE_DIVERGING  = "RdYlGn"
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-name",     required=True,
-                        help="timm model name, e.g. vit_base_patch16_224")
+                        help="open_clip model name, e.g. ViT-B-16")
+    parser.add_argument("--pretrained",     required=True,
+                        help="open_clip pretrained tag, e.g. openai")
     parser.add_argument("--seed",           required=True, type=int)
 
     # optim path-fragment components
@@ -151,8 +139,6 @@ def _skip_tag(skip_modules):
 
 
 def _optim_frag(optim, lr, wd, ls, wl, mgn, bs):
-    # NOTE: config/experiments/* hardcode "optim=adamw" in the path even though they
-    # accept other optimizers in cfg. We mirror that exactly.
     del optim
     return f"optim=adamw_lr={lr}_wd={wd}_ls={ls}_wl={wl}_mgn={mgn}_bs={bs}"
 
@@ -176,13 +162,6 @@ def _pretrained_path(model_dir, dataset, seed):
     return os.path.join(
         EVAL_ROOT_BASELINES, "pretrained", model_dir, dataset,
         f"seed={seed}", "eval_results.json",
-    )
-
-
-def _pretrained_ptq_path(model_dir, dataset, seed, ptq_skip_frag):
-    return os.path.join(
-        EVAL_ROOT_BASELINES, "pretrained_ptq", model_dir, dataset,
-        ptq_skip_frag, f"seed={seed}", "eval_results.json",
     )
 
 
@@ -215,7 +194,7 @@ def _qat_ptq_path(model_dir, dataset, seed, optim_frag, qat_frag, ptq_skip_frag)
 
 
 def _qv_transfer_cell_prefix(model_dir, qv_dataset, target_dataset, seed,
-                              optim_frag, qat_frag, ptq_frag):
+                             optim_frag, qat_frag, ptq_frag):
     """Return the QV cell directory up to (but not including) the qv=alpha=* segment."""
     return os.path.join(
         EVAL_ROOT_QV, model_dir,
@@ -244,7 +223,7 @@ def _load_value(path, key):
 # Data loading
 # ---------------------------------------------------------------------------
 def load_data(args):
-    model_dir   = sanitize_timm_model_name(args.model_name)
+    model_dir   = sanitize_open_clip_model_name(args.model_name, args.pretrained)
     optim_frag  = _optim_frag(args.optim, args.lr, args.wd, args.ls, args.wl,
                               args.max_grad_norm, args.batch_size)
     qat_frag    = _qat_frag(args.bits, args.granularity, args.skip_modules)
@@ -258,10 +237,6 @@ def load_data(args):
         data[target_dataset] = {
             "pretrained": _load_value(
                 _pretrained_path(model_dir, target_dataset, args.seed),
-                TEST_ACC_KEY,
-            ),
-            "pretrained_ptq": _load_value(
-                _pretrained_ptq_path(model_dir, target_dataset, args.seed, pskip_frag),
                 TEST_ACC_KEY,
             ),
             "fp": _load_value(
@@ -298,8 +273,8 @@ def load_data(args):
             val_pattern = os.path.join(cell_prefix, "qv=alpha=*", "split=val", "eval_results.json")
             val_files   = sorted(glob.glob(val_pattern))
 
-            # Track best alpha on val independently per metric.
-            best = {mt: {"val_acc": None, "alpha": None} for mt in VAL_METRIC_KEYS}
+            best_val_acc   = None
+            best_alpha_val = None
 
             for val_file in val_files:
                 alpha_dir = os.path.basename(os.path.dirname(os.path.dirname(val_file)))
@@ -311,34 +286,29 @@ def load_data(args):
                 except ValueError:
                     continue
 
-                for metric_tag, val_key in VAL_METRIC_KEYS.items():
-                    acc = _load_value(val_file, val_key)
-                    if acc is None:
-                        continue
-                    if best[metric_tag]["val_acc"] is None or acc > best[metric_tag]["val_acc"]:
-                        best[metric_tag]["val_acc"] = acc
-                        best[metric_tag]["alpha"]   = alpha_val
+                acc = _load_value(val_file, VAL_METRIC_KEY)
+                if acc is None:
+                    continue
 
-            if not val_files:
+                if best_val_acc is None or acc > best_val_acc:
+                    best_val_acc   = acc
+                    best_alpha_val = alpha_val
+
+            # Load test result for the val-selected best alpha.
+            best_alpha_acc = None
+            if best_alpha_val is not None:
+                test_path = os.path.join(
+                    cell_prefix, f"qv=alpha={best_alpha_val}",
+                    "split=test", "eval_results.json",
+                )
+                best_alpha_acc = _load_value(test_path, TEST_METRIC_KEY)
+            else:
                 print(f"  [NO VAL ALPHA FILES] {val_pattern}", file=sys.stderr)
 
-            # Load test results for the val-selected best alpha (per metric).
-            cell_data = {}
-            for metric_tag in VAL_METRIC_KEYS:
-                best_alpha = best[metric_tag]["alpha"]
-                test_acc = None
-                if best_alpha is not None:
-                    test_path = os.path.join(
-                        cell_prefix, f"qv=alpha={best_alpha}",
-                        "split=test", "eval_results.json",
-                    )
-                    test_acc = _load_value(test_path, TEST_METRIC_KEYS[metric_tag])
-                cell_data[metric_tag] = {
-                    "best_alpha_acc": test_acc,
-                    "best_alpha_val": best_alpha,
-                }
-
-            data[target_dataset]["qv_transfer"][qv_dataset] = cell_data
+            data[target_dataset]["qv_transfer"][qv_dataset] = {
+                "best_alpha_acc": best_alpha_acc,
+                "best_alpha_val": best_alpha_val,
+            }
 
     return data, model_dir, optim_frag, qat_frag
 
@@ -388,10 +358,8 @@ def _robust_symmetric_bounds(values, center, min_span=0.05, q_low=0.05, q_high=0
 # ---------------------------------------------------------------------------
 # Plot: best-alpha minus FP+PTQ
 # ---------------------------------------------------------------------------
-def plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag,
-                                          qat_frag, metric_tag):
+def plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag, qat_frag):
     datasets = sorted(data.keys())
-    head_label = QV_METRIC_LABELS[metric_tag]
 
     qv_col_labels       = datasets
     baseline_col_labels = [BASELINE_METHOD_LABELS[m] for m in BASELINE_METHODS]
@@ -406,7 +374,7 @@ def plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag,
         fp_ptq_acc = data[target_dataset]["fp_ptq"]
 
         for qv_dataset in qv_col_labels:
-            cell           = data[target_dataset]["qv_transfer"][qv_dataset][metric_tag]
+            cell           = data[target_dataset]["qv_transfer"][qv_dataset]
             best_alpha_acc = cell["best_alpha_acc"]
             best_alpha_val = cell["best_alpha_val"]
             if best_alpha_acc is not None and fp_ptq_acc is not None:
@@ -477,8 +445,8 @@ def plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag,
 
     skip_str = ",".join(sorted(args.skip_modules))
     title = (
-        f"QV Transfer ({head_label}, QAT+PTQ, Best Alpha) \u2212 FP+PTQ<br>"
-        f"<sup>{args.model_name} | seed={args.seed} | optim={args.optim} | "
+        f"QV Transfer (QAT+PTQ, Best Alpha) \u2212 FP+PTQ<br>"
+        f"<sup>{args.model_name}/{args.pretrained} | seed={args.seed} | optim={args.optim} | "
         f"bits={args.bits} | granularity={args.granularity} | skip={skip_str} | "
         f"alpha=best</sup>"
     )
@@ -514,12 +482,12 @@ def plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag,
     fig.update_yaxes(row=1, col=2, showticklabels=False, autorange="reversed")
 
     out_dir = os.path.join(
-        "plots", "vision", "ilharco_timm_supervised", "001_qat_transfer", "qv_transfer_heatmap",
+        "plots", "vision", "ilharco_open_clip", "001_qat_transfer", "qv_transfer_heatmap",
         model_dir, f"seed={args.seed}", optim_frag, qat_frag, "qv=alpha=best",
     )
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(
-        out_dir, f"heatmap_qv_transfer_{metric_tag}_best_alpha_minus_fp_ptq.png",
+        out_dir, "heatmap_qv_transfer_qat_ptq_best_alpha_minus_fp_ptq.png",
     )
     fig.write_image(out_path, scale=300 / 96)
     print(f"Saved: {out_path}")
@@ -531,10 +499,7 @@ def plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag,
 def main():
     args = parse_args()
     data, model_dir, optim_frag, qat_frag = load_data(args)
-    for metric_tag in VAL_METRIC_KEYS:
-        plot_best_alpha_minus_fp_ptq_heatmap(
-            data, args, model_dir, optim_frag, qat_frag, metric_tag,
-        )
+    plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag, qat_frag)
 
 
 if __name__ == "__main__":

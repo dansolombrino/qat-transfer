@@ -1,4 +1,4 @@
-"""001 — QV Transfer Best-Alpha Heatmap (difference vs FP+PTQ) — timm supervised
+"""001 — QV Transfer Best-Alpha Heatmap (difference vs FP+PTQ) — text
 
 Loads QV-transfer results for all (target_dataset x qv_dataset) pairs and, for
 each cell, picks the alpha that achieves the highest *val* accuracy across all
@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Make `from src.vision...` imports work when this script is run from the
+# Make `from src.text...` imports work when this script is run from the
 # project root via `uv run python code/visualizations/.../qv_transfer_heatmap_best_sf.py`.
 # ---------------------------------------------------------------------------
 _PROJECT_ROOT = Path(__file__).resolve().parents[5]
@@ -39,22 +39,21 @@ os.chdir(_PROJECT_ROOT)
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from src.vision.data.common import DATASET_NAME_TO_EPOCHS
-from src.vision.utils import sanitize_timm_model_name
+from src.text.data.common import DATASET_NAME_TO_EPOCHS
+from src.vision.utils import sanitize_hf_model_name
 
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-EVAL_ROOT_BASELINES = "evaluations/vision/ilharco_timm_supervised/000_baselines/vision"
-EVAL_ROOT_QV        = "evaluations/vision/ilharco_timm_supervised/001_qat_transfer/vision/qv_transfer"
+EVAL_ROOT_BASELINES = "evaluations/text/ilharco_automodelforsequenceclassification/000_baselines/text"
+EVAL_ROOT_QV        = "evaluations/text/ilharco_automodelforsequenceclassification/001_qat_transfer/text/qv_transfer"
 
-BASELINE_METHODS = ["pretrained", "pretrained_ptq", "fp", "fp_ptq", "random", "qat", "qat_ptq"]
+BASELINE_METHODS = ["pretrained", "fp", "fp_ptq", "random", "qat", "qat_ptq"]
 
 BASELINE_METHOD_LABELS = {
-    "pretrained":     "Pretrained",
-    "pretrained_ptq": "Pretrained+PTQ",
-    "fp":             "FP",
+    "pretrained": "Pretrained",
+    "fp":         "FP",
     "fp_ptq":     "FP+PTQ",
     "random":     "Random",
     "qat":        "QAT",
@@ -62,30 +61,19 @@ BASELINE_METHOD_LABELS = {
 }
 
 # Number of classes per dataset, used to compute the random-chance baseline
-# (1 / num_classes). Mirrors the class_names sizes in code/src/vision/data/*.py.
+# (1 / num_classes).
 DATASET_NAME_TO_NUM_CLASSES = {
-    "Cars":          196,
-    "DTD":           47,
-    "EuroSAT":       10,
-    "GTSRB":         43,
-    "MNIST":         10,
-    "RESISC45":      45,
-    "SUN397":        397,
-    "SVHN":          10,
-    "CIFAR10":       10,
-    "CIFAR100":      100,
-    "STL10":         10,
-    "Food101":       101,
-    "Flowers102":    102,
-    "FER2013":       7,
-    "PCAM":          2,
-    "OxfordIIITPet": 37,
-    "RenderedSST2":  2,
-    "EMNIST":        26,
-    "FashionMNIST":  10,
-    "KMNIST":        10,
-    "TinyImageNet":  200,
-    "ImageNet":      1000,
+    "Emotion":                      6,
+    "IMDB":                         2,
+    "Banking77":                   77,
+    "AmazonReviewsClassification":  5,
+    "AmazonCounterfactual":         2,
+    "MassiveIntent":               60,
+    "MassiveScenario":             18,
+    "MTOPDomain":                  11,
+    "MTOPIntent":                 113,
+    "ToxicConversations":           2,
+    "TweetSentimentExtraction":     3,
 }
 
 VAL_METRIC_KEYS = {
@@ -115,7 +103,7 @@ HEATMAP_COLORSCALE_DIVERGING  = "RdYlGn"
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-name",     required=True,
-                        help="timm model name, e.g. vit_base_patch16_224")
+                        help="HF model id, e.g. google-bert/bert-base-uncased")
     parser.add_argument("--seed",           required=True, type=int)
 
     # optim path-fragment components
@@ -123,9 +111,9 @@ def parse_args():
     parser.add_argument("--lr",             required=True, type=float)
     parser.add_argument("--wd",             required=True, type=float)
     parser.add_argument("--ls",             required=True, type=float)
-    parser.add_argument("--wl",             required=True, type=int)
     parser.add_argument("--max-grad-norm",  required=True, type=float)
     parser.add_argument("--batch-size",     required=True, type=int)
+    parser.add_argument("--max-length",     required=True, type=int)
 
     # quantization path-fragment components
     parser.add_argument("--bits",           required=True, type=int)
@@ -144,17 +132,15 @@ def parse_args():
 
 
 # ---------------------------------------------------------------------------
-# Path-fragment helpers (must mirror what config/experiments/* write to disk)
+# Path-fragment helpers (must mirror what experiments write to disk)
 # ---------------------------------------------------------------------------
 def _skip_tag(skip_modules):
     return "-".join(sorted(skip_modules)) if len(skip_modules) > 0 else "none"
 
 
-def _optim_frag(optim, lr, wd, ls, wl, mgn, bs):
-    # NOTE: config/experiments/* hardcode "optim=adamw" in the path even though they
-    # accept other optimizers in cfg. We mirror that exactly.
+def _optim_frag(optim, lr, wd, ls, mgn, bs, ml):
     del optim
-    return f"optim=adamw_lr={lr}_wd={wd}_ls={ls}_wl={wl}_mgn={mgn}_bs={bs}"
+    return f"optim=adamw_lr={lr}_wd={wd}_ls={ls}_mgn={mgn}_bs={bs}_ml={ml}"
 
 
 def _qat_frag(bits, gran, skip_modules):
@@ -176,13 +162,6 @@ def _pretrained_path(model_dir, dataset, seed):
     return os.path.join(
         EVAL_ROOT_BASELINES, "pretrained", model_dir, dataset,
         f"seed={seed}", "eval_results.json",
-    )
-
-
-def _pretrained_ptq_path(model_dir, dataset, seed, ptq_skip_frag):
-    return os.path.join(
-        EVAL_ROOT_BASELINES, "pretrained_ptq", model_dir, dataset,
-        ptq_skip_frag, f"seed={seed}", "eval_results.json",
     )
 
 
@@ -244,24 +223,20 @@ def _load_value(path, key):
 # Data loading
 # ---------------------------------------------------------------------------
 def load_data(args):
-    model_dir   = sanitize_timm_model_name(args.model_name)
-    optim_frag  = _optim_frag(args.optim, args.lr, args.wd, args.ls, args.wl,
-                              args.max_grad_norm, args.batch_size)
+    model_dir   = sanitize_hf_model_name(args.model_name)
+    optim_frag  = _optim_frag(args.optim, args.lr, args.wd, args.ls,
+                              args.max_grad_norm, args.batch_size, args.max_length)
     qat_frag    = _qat_frag(args.bits, args.granularity, args.skip_modules)
     ptq_frag    = _ptq_frag(args.bits, args.granularity, args.skip_modules)
     pskip_frag  = _ptq_skip_frag(args.skip_modules)
 
-    datasets = sorted(DATASET_NAME_TO_EPOCHS.keys())
+    datasets = sorted(DATASET_NAME_TO_EPOCHS.keys(), key=str.lower)
 
     data = {}
     for target_dataset in datasets:
         data[target_dataset] = {
             "pretrained": _load_value(
                 _pretrained_path(model_dir, target_dataset, args.seed),
-                TEST_ACC_KEY,
-            ),
-            "pretrained_ptq": _load_value(
-                _pretrained_ptq_path(model_dir, target_dataset, args.seed, pskip_frag),
                 TEST_ACC_KEY,
             ),
             "fp": _load_value(
@@ -344,7 +319,7 @@ def load_data(args):
 
 
 # ---------------------------------------------------------------------------
-# Plot helpers (ported verbatim from qv_transfer_heatmap.py)
+# Plot helpers
 # ---------------------------------------------------------------------------
 def _add_diagonal_borders(fig, datasets, color="black", width=2, xref="x", yref="y"):
     """Add a rectangular border around each diagonal cell (row i, col i)."""
@@ -390,7 +365,7 @@ def _robust_symmetric_bounds(values, center, min_span=0.05, q_low=0.05, q_high=0
 # ---------------------------------------------------------------------------
 def plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag,
                                           qat_frag, metric_tag):
-    datasets = sorted(data.keys())
+    datasets = sorted(data.keys(), key=str.lower)
     head_label = QV_METRIC_LABELS[metric_tag]
 
     qv_col_labels       = datasets
@@ -514,7 +489,8 @@ def plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag,
     fig.update_yaxes(row=1, col=2, showticklabels=False, autorange="reversed")
 
     out_dir = os.path.join(
-        "plots", "vision", "ilharco_timm_supervised", "001_qat_transfer", "qv_transfer_heatmap",
+        "plots", "text", "ilharco_automodelforsequenceclassification",
+        "001_qat_transfer", "qv_transfer_heatmap",
         model_dir, f"seed={args.seed}", optim_frag, qat_frag, "qv=alpha=best",
     )
     os.makedirs(out_dir, exist_ok=True)

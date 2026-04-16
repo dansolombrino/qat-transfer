@@ -2,10 +2,11 @@
 
 Loads QV-transfer results for all (target_dataset x qv_dataset) pairs and, for
 each cell, picks the alpha that achieves the highest
-test_accuracy_patched_qat_ptq across all alpha values swept on disk. Then plots:
+val_accuracy_patched_qat_ptq across all alpha values swept on disk.  Then loads
+the *test* result for that alpha and plots:
 
   heatmap_qv_transfer_qat_ptq_best_alpha_minus_fp_ptq.png
-      Left-panel cell value  = best_alpha_acc[target, qv] - fp_ptq_acc[target]
+      Left-panel cell value  = test_acc_at_best_alpha[target, qv] - fp_ptq_acc[target]
       Right-panel cell value = test_accuracy of the corresponding baseline.
 
 Cells where the best alpha differs from --qv-alpha (the fixed reference) are
@@ -86,8 +87,9 @@ DATASET_NAME_TO_NUM_CLASSES = {
     "ImageNet":      1000,
 }
 
-QV_METRIC_KEY = "test_accuracy_patched_qat_ptq"
-TEST_ACC_KEY  = "test_accuracy"
+VAL_METRIC_KEY  = "val_accuracy_patched_qat_ptq"
+TEST_METRIC_KEY = "test_accuracy_patched_qat_ptq"
+TEST_ACC_KEY    = "test_accuracy"
 
 HEATMAP_COLORSCALE_SEQUENTIAL = "Viridis"
 HEATMAP_COLORSCALE_DIVERGING  = "RdYlGn"
@@ -267,15 +269,15 @@ def load_data(args):
                 optim_frag, qat_frag, ptq_frag,
             )
 
-            # Auto-discover all available alpha results for this cell.
-            alpha_pattern = os.path.join(cell_prefix, "qv=alpha=*", "eval_results.json")
-            alpha_files   = sorted(glob.glob(alpha_pattern))
+            # Auto-discover all available alpha val results for this cell.
+            val_pattern = os.path.join(cell_prefix, "qv=alpha=*", "split=val", "eval_results.json")
+            val_files   = sorted(glob.glob(val_pattern))
 
-            best_alpha_acc = None
+            best_val_acc   = None
             best_alpha_val = None
 
-            for alpha_file in alpha_files:
-                alpha_dir = os.path.basename(os.path.dirname(alpha_file))
+            for val_file in val_files:
+                alpha_dir = os.path.basename(os.path.dirname(os.path.dirname(val_file)))
                 m = re.match(r"^qv=alpha=(.+)$", alpha_dir)
                 if m is None:
                     continue
@@ -284,16 +286,24 @@ def load_data(args):
                 except ValueError:
                     continue
 
-                acc = _load_value(alpha_file, QV_METRIC_KEY)
+                acc = _load_value(val_file, VAL_METRIC_KEY)
                 if acc is None:
                     continue
 
-                if best_alpha_acc is None or acc > best_alpha_acc:
-                    best_alpha_acc = acc
+                if best_val_acc is None or acc > best_val_acc:
+                    best_val_acc   = acc
                     best_alpha_val = alpha_val
 
-            if best_alpha_acc is None:
-                print(f"  [NO ALPHA FILES] {alpha_pattern}", file=sys.stderr)
+            # Load test result for the val-selected best alpha.
+            best_alpha_acc = None
+            if best_alpha_val is not None:
+                test_path = os.path.join(
+                    cell_prefix, f"qv=alpha={best_alpha_val}",
+                    "split=test", "eval_results.json",
+                )
+                best_alpha_acc = _load_value(test_path, TEST_METRIC_KEY)
+            else:
+                print(f"  [NO VAL ALPHA FILES] {val_pattern}", file=sys.stderr)
 
             data[target_dataset]["qv_transfer"][qv_dataset] = {
                 "best_alpha_acc": best_alpha_acc,

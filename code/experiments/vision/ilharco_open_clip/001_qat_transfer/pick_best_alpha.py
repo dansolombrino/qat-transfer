@@ -22,8 +22,7 @@ import re
 import sys
 from pathlib import Path
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[4]
-_CODE_DIR = _PROJECT_ROOT / "code"
+_CODE_DIR = Path(__file__).resolve().parents[4]
 if str(_CODE_DIR) not in sys.path:
     sys.path.insert(0, str(_CODE_DIR))
 
@@ -206,9 +205,12 @@ def output_json(best):
 def output_commands(best, args):
     src_datasets = sorted(best.keys(), key=str.lower)
     skip_list = ",".join(sorted(args.skip_modules))
+    total = sum(len(best[src]) for src in src_datasets)
+    current = 0
 
     for src in src_datasets:
         for tgt in sorted(best[src].keys(), key=str.lower):
+            current += 1
             entry = best[src][tgt]
             alpha = entry["alpha"]
             cmd = (
@@ -235,6 +237,7 @@ def output_commands(best, args):
                 f" 'ptq.skip_modules=[{skip_list}]'"
                 f" eval_split=test"
             )
+            print(f"\n\necho '[progress] {current}/{total} src={src} tgt={tgt}'\n\n")
             print(cmd)
 
 

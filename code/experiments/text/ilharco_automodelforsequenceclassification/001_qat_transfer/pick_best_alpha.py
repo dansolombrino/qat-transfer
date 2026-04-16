@@ -230,7 +230,7 @@ def output_commands(best, args):
 
     total = len(commands)
 
-    for i, (label, src, tgt, entry) in enumerate(commands):
+    for i, (label, src, tgt, entry) in enumerate(commands, start=1):
         alpha = entry["alpha"]
         cmd = (
             f"uv run --active python {SCRIPT_PATH} -m"
@@ -255,7 +255,7 @@ def output_commands(best, args):
             f" 'ptq.skip_modules=[{skip_list}]'"
             f" eval_split=test"
         )
-        print(f"\necho '{i} / {total} — {label} src={src} tgt={tgt}'\n")
+        print(f"\n\necho '[progress] {i}/{total} {label} src={src} tgt={tgt}'\n\n")
         print(cmd)
 
 
