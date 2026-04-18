@@ -1,0 +1,49 @@
+hydra:
+  searchpath:
+    - file://${oc.env:PWD}/config
+  sweep:
+    dir: logs/config/experiments/vision/rex/rex_transfer
+    subdir: ${model_family}/${model_name}/src_seed=${source.seed}/tgt_seed=${target.seed}
+
+model_family: ???
+model_name: ???
+
+batch_size: 128
+lr: 1e-5
+wd: 0.1
+ls: 0.0
+wl: 500
+max_grad_norm: 1.0
+
+limit_num_batches: null
+num_workers: 4
+head_base_path: ${oc.env:HEAD_BASE_PATH,heads}
+skip_missing_pairs: true
+
+source:
+  dataset_names: ???
+  seed: 2038
+  limit_num_epochs: null
+
+target:
+  dataset_names: ???
+  seed: 2038
+  limit_num_epochs: null
+
+alphas: [1.0]
+
+checkpoint_roots:
+  hf_clip_fp: /media/hdd1_4TB/dansolombrino/cache/PARA/Projects/quantization/qat-transfer/storage/checkpoints/vision/ilharco_hf_clip/fp
+  timm_supervised_fp: /media/hdd1_4TB/dansolombrino/cache/PARA/Projects/quantization/qat-transfer/storage/checkpoints/vision/ilharco_timm_supervised/fp
+
+rex:
+  bits: 4
+  order: 2
+  sparsity: 0.5
+  granularity: channel
+  skip_modules: null
+
+ptq:
+  bits: 4
+  granularity: channel
+  skip_modules: null
