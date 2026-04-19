@@ -36,7 +36,7 @@ METRIC_KEY = "val_accuracy_patched_qat_ptq"
 
 # Allowed QV scaling factors for the restricted sweep. Any qv=alpha=* directory
 # on disk whose alpha is not in this set is silently ignored.
-ALLOWED_ALPHAS = (0.15, 0.30, 0.45, 0.60, 0.75, 0.90, 1.05, 1.20, 1.35, 1.50)
+ALLOWED_ALPHAS = (0.15, 0.30, 0.45, 0.60, 0.75, 0.90, 1.00, 1.05, 1.20, 1.35, 1.50)
 _ALPHA_TOL = 1e-9
 
 
@@ -53,6 +53,21 @@ EVAL_ROOT_QV = os.path.join(
 )
 
 SCRIPT_PATH = "code/experiments/vision/ilharco_open_clip/001_qat_transfer/qv_transfer.py"
+
+# SLURM parameters for sbatch mode (must match config/hydra/launcher/submitit_slurm.yaml)
+_SLURM_PARTITION = "boost_usr_prod"
+_SLURM_ACCOUNT = "IscrC_eff-SAM2"
+_SLURM_GRES = "gpu:1"
+_SLURM_CPUS = 8
+_SLURM_MEM = "128G"
+_SLURM_PROJECT_ROOT = "/leonardo_work/IscrC_USAE/solombrino/PARA/Projects/quantization/qat-transfer"
+_SLURM_LOG_DIR = f"{_SLURM_PROJECT_ROOT}/logs/config/experiments/vision/ilharco_open_clip/001_qat_transfer/qv_transfer"
+_SLURM_SETUP = (
+    f"cd {_SLURM_PROJECT_ROOT}"
+    f" && export PYTHONPATH='{_SLURM_PROJECT_ROOT}/code:$PYTHONPATH'"
+    f" && export TORCHINDUCTOR_CACHE_DIR='/leonardo_work/IscrC_USAE/solombrino/.cache/torch_inductor'"
+    f" && mkdir -p {_SLURM_LOG_DIR}"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -76,8 +91,13 @@ def parse_args():
     p.add_argument("--granularity",   required=True, choices=["tensor", "channel"])
     p.add_argument("--skip-modules",  required=True, nargs="+")
 
+    p.add_argument("--slurm-timeout",  required=True, type=int,
+                   help="SLURM job timeout in minutes")
+    p.add_argument("--slurm-job-name", required=True,
+                   help="SLURM job name")
+
     p.add_argument("--output",        default="table",
-                   choices=["table", "json", "commands"],
+                   choices=["table", "json", "commands", "commands-bg", "commands-sbatch"],
                    help="Output format (default: table)")
 
     return p.parse_args()
@@ -214,7 +234,56 @@ def output_json(best):
     print(json.dumps(best, indent=2, sort_keys=True))
 
 
-def output_commands(best, args):
+def _build_cmd(args, src, tgt, alpha, skip_list, *, submitit=True):
+    parts = [f"uv run --active python {SCRIPT_PATH}"]
+    if submitit:
+        parts.extend([
+            "-m hydra/launcher=submitit_slurm",
+            f"hydra.launcher.timeout_min={args.slurm_timeout}",
+            f"hydra.job.name={args.slurm_job_name}",
+        ])
+    parts.extend([
+        f"model_name={args.model_name}",
+        f"pretrained={args.pretrained}",
+        f"batch_size={args.batch_size}",
+        f"lr={args.lr}",
+        f"wd={args.wd}",
+        f"ls={args.ls}",
+        f"wl={args.wl}",
+        f"max_grad_norm={args.max_grad_norm}",
+        f"'source.dataset_names=[{src}]'",
+        f"source.seed={args.seed}",
+        f"'target.dataset_names=[{tgt}]'",
+        f"target.seed={args.seed}",
+        f"qat.bits={args.bits}",
+        f"qat.granularity={args.granularity}",
+        f"'qat.skip_modules=[{skip_list}]'",
+        f"qv.alpha={alpha}",
+        f"ptq.bits={args.bits}",
+        f"ptq.granularity={args.granularity}",
+        f"'ptq.skip_modules=[{skip_list}]'",
+        "eval_split=test",
+    ])
+    return " ".join(parts)
+
+
+def _sbatch_wrap(inner_cmd, args):
+    return (
+        f"sbatch"
+        f" --partition={_SLURM_PARTITION}"
+        f" --account={_SLURM_ACCOUNT}"
+        f" --gres={_SLURM_GRES}"
+        f" --cpus-per-task={_SLURM_CPUS}"
+        f" --mem={_SLURM_MEM}"
+        f" --time={args.slurm_timeout}"
+        f" --job-name={args.slurm_job_name}"
+        f" --output={_SLURM_LOG_DIR}/%x_%j.out"
+        f" --error={_SLURM_LOG_DIR}/%x_%j.err"
+        f" --wrap=\"{_SLURM_SETUP} && {inner_cmd}\""
+    )
+
+
+def output_commands(best, args, *, bg=False):
     src_datasets = sorted(best.keys(), key=str.lower)
     skip_list = ",".join(sorted(args.skip_modules))
     total = sum(len(best[src]) for src in src_datasets)
@@ -224,33 +293,27 @@ def output_commands(best, args):
         for tgt in sorted(best[src].keys(), key=str.lower):
             current += 1
             entry = best[src][tgt]
-            alpha = entry["alpha"]
-            cmd = (
-                f"uv run --active python {SCRIPT_PATH} -m"
-                f" hydra/launcher=submitit_slurm"
-                f" model_name={args.model_name}"
-                f" pretrained={args.pretrained}"
-                f" batch_size={args.batch_size}"
-                f" lr={args.lr}"
-                f" wd={args.wd}"
-                f" ls={args.ls}"
-                f" wl={args.wl}"
-                f" max_grad_norm={args.max_grad_norm}"
-                f" 'source.dataset_names=[{src}]'"
-                f" source.seed={args.seed}"
-                f" 'target.dataset_names=[{tgt}]'"
-                f" target.seed={args.seed}"
-                f" qat.bits={args.bits}"
-                f" qat.granularity={args.granularity}"
-                f" 'qat.skip_modules=[{skip_list}]'"
-                f" qv.alpha={alpha}"
-                f" ptq.bits={args.bits}"
-                f" ptq.granularity={args.granularity}"
-                f" 'ptq.skip_modules=[{skip_list}]'"
-                f" eval_split=test"
-            )
+            cmd = _build_cmd(args, src, tgt, entry["alpha"], skip_list, submitit=True)
             print(f"\n\necho '[progress] {current}/{total} src={src} tgt={tgt}'\n\n")
-            print(cmd)
+            print(f"{cmd} &" if bg else cmd)
+
+    if bg:
+        print("\nwait")
+
+
+def output_commands_sbatch(best, args):
+    src_datasets = sorted(best.keys(), key=str.lower)
+    skip_list = ",".join(sorted(args.skip_modules))
+    total = sum(len(best[src]) for src in src_datasets)
+    current = 0
+
+    for src in src_datasets:
+        for tgt in sorted(best[src].keys(), key=str.lower):
+            current += 1
+            entry = best[src][tgt]
+            inner = _build_cmd(args, src, tgt, entry["alpha"], skip_list, submitit=False)
+            print(f"\n\necho '[progress] {current}/{total} src={src} tgt={tgt}'\n\n")
+            print(_sbatch_wrap(inner, args))
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +333,10 @@ def main():
         output_json(best)
     elif args.output == "commands":
         output_commands(best, args)
+    elif args.output == "commands-bg":
+        output_commands(best, args, bg=True)
+    elif args.output == "commands-sbatch":
+        output_commands_sbatch(best, args)
 
 
 if __name__ == "__main__":

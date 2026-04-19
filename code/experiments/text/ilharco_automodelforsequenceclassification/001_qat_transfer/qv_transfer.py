@@ -53,11 +53,13 @@ SUPPORTED_MODELS = {
     "google-bert/bert-base-uncased",
     "google-bert/bert-large-uncased",
     "google/embeddinggemma-300m",
+    "Qwen/Qwen3-Embedding-0.6B",
 }
 MODEL_NAME_TO_HEAD_MODULE = {
     "google-bert/bert-base-uncased": "classifier",
     "google-bert/bert-large-uncased": "classifier",
     "google/embeddinggemma-300m": "score",
+    "Qwen/Qwen3-Embedding-0.6B": "score",
 }
 
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
