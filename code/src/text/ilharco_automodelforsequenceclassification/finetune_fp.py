@@ -116,6 +116,8 @@ def main(cfg: DictConfig) -> None:
     )
     model.config.pad_token_id = tokenizer.pad_token_id
     model.to(device=device, dtype=torch.float32)
+    if cfg.model_name == "Qwen/Qwen3-Embedding-0.6B":
+        model.gradient_checkpointing_enable()
 
     if IS_SLURM:
         log.info("state_dict keys: %s", list(model.state_dict().keys()))
