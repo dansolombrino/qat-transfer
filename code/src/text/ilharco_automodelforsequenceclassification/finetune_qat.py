@@ -37,6 +37,7 @@ MODEL_NAME_TO_HEAD_MODULE = {
     "google-bert/bert-base-uncased": "classifier",
     "google-bert/bert-large-uncased": "classifier",
     "google/embeddinggemma-300m": "score",
+    "Qwen/Qwen3-Embedding-0.6B": "score",
 }
 
 from src.quantization import QATLinear, apply_ptq_, disable_qat_, enable_qat_

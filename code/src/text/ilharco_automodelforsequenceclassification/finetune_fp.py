@@ -38,6 +38,7 @@ MODEL_NAME_TO_HEAD_MODULE = {
     "google-bert/bert-base-uncased": "classifier",
     "google-bert/bert-large-uncased": "classifier",
     "google/embeddinggemma-300m": "score",
+    "Qwen/Qwen3-Embedding-0.6B": "score",
 }
 
 from src.text.data.common import DATASET_NAME_TO_EPOCHS
