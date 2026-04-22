@@ -3,13 +3,121 @@
 All commands below assume the repo root as the working directory and the project `.venv` managed by `uv`. Every Hydra script resolves config search paths from `${oc.env:PWD}`, so **you must launch from the repo root** — not from inside `code/` or `config/`.
 
 Scripts come in two families:
-- **Hydra scripts** — everything under `code/src/vision/` and `code/experiments/vision/`. They support three launch modes: single local run, local *sequential* sweep (Hydra's basic launcher), and Slurm *parallel* sweep (submitit launcher).
-- **Argparse scripts** — the plotting utilities under `code/visualizations/`. Plain CLI, no Hydra.
+- **Hydra scripts** — everything under `code/src/` and `code/experiments/`. They support three launch modes: single local run, local *sequential* sweep (Hydra's basic launcher), and Slurm *parallel* sweep (submitit launcher).
+- **Argparse scripts** — the plotting utilities under `code/visualizations/` and the `pick_best_alpha` helpers under `code/experiments/.../001_qat_transfer/`. Plain CLI, no Hydra.
 
-The full list of supported datasets (used in every sweep example below) is defined in [code/src/vision/data/common.py](code/src/vision/data/common.py#L35):
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3.11 (pinned in `.python-version`)
+- [`uv`](https://docs.astral.sh/uv/) package manager
+
+### Setup
+
+```
+git clone <repo-url> && cd qat-transfer
+uv sync
+cp .env.example .env   # then fill in the values below
+```
+
+### Environment variables
+
+Edit `.env` before running any script. Every entry is required at runtime (loaded via `dotenv`).
+
+| Variable | Purpose |
+|---|---|
+| `CHECKPOINT_BASE_PATH` | Root directory for finetuned model checkpoints (backbone + head `.pt` files) |
+| `HEAD_BASE_PATH` | Root directory for classification head checkpoints |
+| `EVALUATION_BASE_PATH` | Root directory where `eval_results.json` files are written |
+| `TORCH_NUM_WORKERS` | Number of DataLoader workers |
+| `HF_DATASETS_CACHE` | HuggingFace datasets cache directory |
+| `HF_HUB_CACHE` | HuggingFace model hub cache directory |
+| `HF_HOME` | HuggingFace home directory |
+| `HF_TOKEN` | HuggingFace API token (for gated models / datasets) |
+| `HUGGING_FACE_HUB_TOKEN` | Legacy HF token (some libraries still read this) |
+| `OPENCLIP_CACHE_DIR` | OpenCLIP model cache directory |
+| `CACHE_DIR` | General-purpose cache directory |
+
+---
+
+## Datasets
+
+### Vision datasets
+
+The full list of supported vision datasets (used in every vision sweep example below) is defined in [code/src/vision/data/common.py](code/src/vision/data/common.py#L35):
 
 ```
 Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet
+```
+
+### Text datasets
+
+The full list of supported text datasets is defined in [code/src/text/data/common.py](code/src/text/data/common.py#L15):
+
+```
+Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction
+```
+
+All text datasets train for 5 epochs by default. Split constants shared across all domains: `SPLIT_SEED=0`, `VAL_FRACTION=0.1`, `MAX_VAL_SAMPLES=5000`.
+
+---
+
+## Project structure
+
+```
+qat-transfer/
+  code/
+    src/              # Shared library code (models, data, quantization)
+    experiments/      # Evaluation & transfer scripts (000_baselines, 001_qat_transfer)
+    test/             # Smoke tests for dataloading and modeling
+    visualizations/   # Argparse plotting scripts (heatmaps)
+  config/             # Hydra YAML configs — mirrors code/ 1:1
+  evaluations/        # eval_results.json outputs
+  storage/            # Checkpoints and heads
+  plots/              # Generated visualization HTML files
+  logs/               # Hydra run/sweep logs
+```
+
+### Conventions
+
+Follow these rules when adding new experiments or model families:
+
+- **`config/` mirrors `code/` 1:1** — every Hydra script at `code/a/b/script.py` has a matching YAML at `config/a/b/script.yaml`.
+- **Numbered experiment phases** — `000_baselines`, `001_qat_transfer`, etc. New experiments get the next sequential number.
+- **Model families** — each gets its own subdirectory under `code/src/{vision,text}/`, `code/experiments/{vision,text}/`, `config/...`, etc. All follow the same internal structure: finetune scripts → baselines → transfer → visualizations.
+- **`skip_modules` always explicit** — no defaults in any script or config. Every call must specify which modules to skip during quantization.
+- **Split constants** — `SPLIT_SEED=0`, `VAL_FRACTION=0.1`, `MAX_VAL_SAMPLES=5000` (shared across all domains; defined in `code/src/{vision,text}/data/common.py`).
+
+### Model name sanitization
+
+Each model family uses a different sanitizer to convert model identifiers into safe filesystem path components:
+
+| Family | Sanitizer | Example |
+|---|---|---|
+| `ilharco_hf_clip`, text families | `sanitize_hf_model_name` | `openai/clip-vit-base-patch16` → `openai--clip-vit-base-patch16` |
+| `ilharco_timm_supervised` | `sanitize_timm_model_name` | `vit_base_patch16_clip_224.openai_ft_in12k_in1k` (unchanged) |
+| `ilharco_open_clip` | `sanitize_open_clip_model_name` | `(ViT-B-32, openai)` → `ViT-B-32__openai` |
+
+All sanitizers live in [code/src/vision/utils.py](code/src/vision/utils.py).
+
+### Output path layouts
+
+**Checkpoint paths** (vision):
+```
+{CHECKPOINT_BASE_PATH}/vision/{family}/{fp,qat}/{sanitized_model}/{dataset}/optim=adamw_lr={lr}_wd={wd}_ls={ls}_wl={wl}_mgn={max_grad_norm}_bs={batch_size}/[qat=bits={bits}_gran={granularity}_skip={skip_tag}/]seed={seed}/backbone_epoch_{N}.pt
+```
+
+**Checkpoint paths** (text): same structure but the optim fragment uses `_ml={max_length}` instead of `_wl={wl}`:
+```
+{CHECKPOINT_BASE_PATH}/text/{family}/{fp,qat}/{sanitized_model}/{dataset}/optim=adamw_lr={lr}_wd={wd}_ls={ls}_mgn={max_grad_norm}_bs={batch_size}_ml={max_length}/[qat=bits={bits}_gran={granularity}_skip={skip_tag}/]seed={seed}/backbone_epoch_{N}.pt
+```
+
+**Evaluation paths**:
+```
+{EVALUATION_BASE_PATH}/{vision,text}/{family}/{phase}/{experiment_type}/{sanitized_model}/{dataset}/optim=.../{seed}/eval_results.json
 ```
 
 ---
@@ -38,6 +146,27 @@ uv run --active python <script.py> -m hydra/launcher=submitit_slurm <overrides..
 The launcher config lives at [config/hydra/launcher/submitit_slurm.yaml](config/hydra/launcher/submitit_slurm.yaml) (partition, account, GPUs, CPUs, mem, walltime). Override any field on the CLI, e.g. `hydra.launcher.timeout_min=240 hydra.launcher.mem_gb=64`.
 
 > Modes 2 and 3 both use `-m`. The **only** difference is whether you add `hydra/launcher=submitit_slurm`. Without it, Hydra's basic launcher runs the sweep sequentially in-process; with it, submitit fans the sweep out to Slurm.
+
+---
+
+## Test suite
+
+Smoke tests for data loading and model forward passes live under [code/test/](code/test/).
+
+### Vision data loading — [code/test/vision/data/dataloading.py](code/test/vision/data/dataloading.py)
+```
+uv run --active python code/test/vision/data/dataloading.py --dataset-name CIFAR10 CIFAR100 --batch-size 64 --num-workers 4
+```
+
+### Text data loading — [code/test/text/data/dataloading.py](code/test/text/data/dataloading.py)
+```
+uv run --active python code/test/text/data/dataloading.py --dataset-name Emotion IMDB --batch-size 32 --num-workers 4 --seed 42
+```
+
+### Vision modeling — [code/test/vision/modeling.py](code/test/vision/modeling.py)
+```
+uv run --active python code/test/vision/modeling.py --model-name openai/clip-vit-base-patch32 --dataset-name CIFAR10 --batch-size 8 --num-workers 2 --max-batches 2
+```
 
 ---
 
@@ -436,6 +565,16 @@ Submitit parallel sweep (all source × all target datasets):
 uv run --active python code/experiments/vision/ilharco_timm_supervised/001_qat_transfer/qv_transfer.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 'source.dataset_names=[Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet]' source.seed=2038 target.dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[head]' qv.alpha=0.25,0.5,0.75,1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[head]'
 ```
 
+### pick_best_alpha — [code/experiments/vision/ilharco_timm_supervised/001_qat_transfer/pick_best_alpha.py](code/experiments/vision/ilharco_timm_supervised/001_qat_transfer/pick_best_alpha.py)
+
+Reads val-split `eval_results.json` files produced by `qv_transfer.py`, finds the alpha that maximises accuracy for each `(source_dataset, target_dataset)` pair. Only considers the restricted alpha sweep: `(0.15, 0.30, 0.45, 0.60, 0.75, 0.90, 1.00, 1.05, 1.20, 1.35, 1.50)`.
+
+Output modes: `table` (markdown), `json`, `commands` (local), `commands-bg` (background), `commands-sbatch` (Slurm).
+
+```
+uv run --active python code/experiments/vision/ilharco_timm_supervised/001_qat_transfer/pick_best_alpha.py --model-name vit_base_patch16_clip_224.openai_ft_in12k_in1k --seed 2038 --lr 1e-5 --wd 0.1 --ls 0.0 --wl 500 --max-grad-norm 1.0 --batch-size 128 --bits 4 --granularity channel --skip-modules head --slurm-timeout 120 --slurm-job-name pick_best --output table
+```
+
 ---
 
 ## Visualizations (argparse, no Hydra, no Slurm)
@@ -457,10 +596,477 @@ for alpha in 0.25 0.5 0.75 1.0; do uv run --active python code/visualizations/vi
 
 ---
 
+# ilharco_open_clip
+
+All open_clip scripts require an extra `pretrained` parameter (e.g. `openai`) alongside `model_name`.
+
+## Finetuning
+
+### FP finetuning — [code/src/vision/ilharco_open_clip/finetune_fp.py](code/src/vision/ilharco_open_clip/finetune_fp.py)
+Config: [config/src/vision/ilharco_open_clip/finetune_fp.yaml](config/src/vision/ilharco_open_clip/finetune_fp.yaml)
+
+Single local run:
+```
+uv run --active python code/src/vision/ilharco_open_clip/finetune_fp.py model_name=ViT-B-32 pretrained=openai dataset_name=CIFAR10 seed=2038
+```
+
+Local sequential sweep (all datasets):
+```
+uv run --active python code/src/vision/ilharco_open_clip/finetune_fp.py -m model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3
+```
+
+Submitit parallel sweep (all datasets):
+```
+uv run --active python code/src/vision/ilharco_open_clip/finetune_fp.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3
+```
+
+### QAT finetuning — [code/src/vision/ilharco_open_clip/finetune_qat.py](code/src/vision/ilharco_open_clip/finetune_qat.py)
+Config: [config/src/vision/ilharco_open_clip/finetune_qat.yaml](config/src/vision/ilharco_open_clip/finetune_qat.yaml). Requires `qat.bits`, `qat.granularity`, `qat.skip_modules`.
+
+Single local run:
+```
+uv run --active python code/src/vision/ilharco_open_clip/finetune_qat.py model_name=ViT-B-32 pretrained=openai dataset_name=CIFAR10 seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]'
+```
+
+Local sequential sweep (all datasets):
+```
+uv run --active python code/src/vision/ilharco_open_clip/finetune_qat.py -m model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classification_head]'
+```
+
+Submitit parallel sweep (all datasets):
+```
+uv run --active python code/src/vision/ilharco_open_clip/finetune_qat.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classification_head]'
+```
+
+---
+
+## 000_baselines — evaluation scripts
+
+All scripts live in [code/experiments/vision/ilharco_open_clip/000_baselines/](code/experiments/vision/ilharco_open_clip/000_baselines/) with matching configs in [config/experiments/vision/ilharco_open_clip/000_baselines/](config/experiments/vision/ilharco_open_clip/000_baselines/).
+
+### evaluate_pretrained — [code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_pretrained.py](code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_pretrained.py)
+Config: [config/experiments/vision/ilharco_open_clip/000_baselines/evaluate_pretrained.yaml](config/experiments/vision/ilharco_open_clip/000_baselines/evaluate_pretrained.yaml)
+
+Single local run:
+```
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_pretrained.py model_name=ViT-B-32 pretrained=openai dataset_name=CIFAR10 batch_size=128 seed=2038
+```
+
+Local sequential sweep (all datasets):
+```
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_pretrained.py -m model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 seed=1,2,3
+```
+
+Submitit parallel sweep (all datasets):
+```
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_pretrained.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 seed=1,2,3
+```
+
+### evaluate_fp — [code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp.py](code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp.py)
+Config: [config/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp.yaml](config/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp.yaml)
+
+Single local run:
+```
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp.py model_name=ViT-B-32 pretrained=openai dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038
+```
+
+Local sequential sweep (all datasets):
+```
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp.py -m model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3
+```
+
+Submitit parallel sweep (all datasets):
+```
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3
+```
+
+### evaluate_fp_ptq — [code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp_ptq.py](code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp_ptq.py)
+Config: [config/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp_ptq.yaml](config/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp_ptq.yaml). Adds a `ptq` group.
+
+Single local run:
+```
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp_ptq.py model_name=ViT-B-32 pretrained=openai dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]'
+```
+
+Local sequential sweep (all datasets):
+```
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp_ptq.py -m model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
+```
+
+Submitit parallel sweep (all datasets):
+```
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp_ptq.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
+```
+
+### evaluate_qat — [code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat.py](code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat.py)
+Config: [config/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat.yaml](config/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat.yaml). The `qat.*` group must match the training config of the checkpoint being evaluated.
+
+Single local run:
+```
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat.py model_name=ViT-B-32 pretrained=openai dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]'
+```
+
+Local sequential sweep (all datasets):
+```
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat.py -m model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classification_head]'
+```
+
+Submitit parallel sweep (all datasets):
+```
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classification_head]'
+```
+
+### evaluate_qat_ptq — [code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat_ptq.py](code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat_ptq.py)
+Config: [config/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat_ptq.yaml](config/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat_ptq.yaml). Has both a `qat` group (to locate the checkpoint) and a `ptq` group (for the PTQ applied at eval time).
+
+Single local run:
+```
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat_ptq.py model_name=ViT-B-32 pretrained=openai dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]'
+```
+
+Local sequential sweep (all datasets):
+```
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat_ptq.py -m model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
+```
+
+Submitit parallel sweep (all datasets):
+```
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat_ptq.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
+```
+
+---
+
+## 001_qat_transfer — QV transfer experiment
+
+### qv_transfer — [code/experiments/vision/ilharco_open_clip/001_qat_transfer/qv_transfer.py](code/experiments/vision/ilharco_open_clip/001_qat_transfer/qv_transfer.py)
+Config: [config/experiments/vision/ilharco_open_clip/001_qat_transfer/qv_transfer.yaml](config/experiments/vision/ilharco_open_clip/001_qat_transfer/qv_transfer.yaml)
+
+Same concept as the other vision variants. Uses `source.dataset_names` and `target.dataset_names` (plural — lists of datasets iterated internally by the script). Requires `eval_split` (`val` or `test`).
+
+Single local run:
+```
+uv run --active python code/experiments/vision/ilharco_open_clip/001_qat_transfer/qv_transfer.py model_name=ViT-B-32 pretrained=openai batch_size=128 eval_split=val lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 'source.dataset_names=[CIFAR10]' source.seed=2038 'target.dataset_names=[CIFAR100]' target.seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' qv.alpha=1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]'
+```
+
+Local sequential sweep (all source x all target datasets):
+```
+uv run --active python code/experiments/vision/ilharco_open_clip/001_qat_transfer/qv_transfer.py -m model_name=ViT-B-32 pretrained=openai batch_size=128 eval_split=val lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 'source.dataset_names=[Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet]' source.seed=2038 'target.dataset_names=[Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet]' target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' qv.alpha=0.25,0.5,0.75,1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]'
+```
+
+Submitit parallel sweep (all source x all target datasets):
+```
+uv run --active python code/experiments/vision/ilharco_open_clip/001_qat_transfer/qv_transfer.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai batch_size=128 eval_split=val lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 'source.dataset_names=[Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet]' source.seed=2038 'target.dataset_names=[Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet]' target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' qv.alpha=0.25,0.5,0.75,1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]'
+```
+
+### pick_best_alpha — [code/experiments/vision/ilharco_open_clip/001_qat_transfer/pick_best_alpha.py](code/experiments/vision/ilharco_open_clip/001_qat_transfer/pick_best_alpha.py)
+
+Same as the timm_supervised variant but adds `--pretrained`. Restricted alpha sweep: `(0.15, 0.30, 0.45, 0.60, 0.75, 0.90, 1.00, 1.05, 1.20, 1.35, 1.50)`. Output modes: `table`, `json`, `commands`, `commands-bg`, `commands-sbatch`.
+
+```
+uv run --active python code/experiments/vision/ilharco_open_clip/001_qat_transfer/pick_best_alpha.py --model-name ViT-B-32 --pretrained openai --seed 2038 --lr 1e-5 --wd 0.1 --ls 0.0 --wl 500 --max-grad-norm 1.0 --batch-size 128 --bits 4 --granularity channel --skip-modules classification_head --slurm-timeout 120 --slurm-job-name pick_best --output table
+```
+
+---
+
+## Visualizations (argparse, no Hydra, no Slurm)
+
+### qv_transfer_heatmap — [code/visualizations/vision/ilharco_open_clip/001_qat_transfer/qv_transfer_heatmap.py](code/visualizations/vision/ilharco_open_clip/001_qat_transfer/qv_transfer_heatmap.py)
+```
+uv run --active python code/visualizations/vision/ilharco_open_clip/001_qat_transfer/qv_transfer_heatmap.py --model-name ViT-B-32 --pretrained openai --seed 2038 --optim adamw --lr 1e-5 --wd 0.1 --ls 0.0 --wl 500 --max-grad-norm 1.0 --batch-size 128 --bits 4 --granularity channel --skip-modules classification_head --qv-alpha 1.0
+```
+
+### qv_transfer_heatmap_best_sf — [code/visualizations/vision/ilharco_open_clip/001_qat_transfer/qv_transfer_heatmap_best_sf.py](code/visualizations/vision/ilharco_open_clip/001_qat_transfer/qv_transfer_heatmap_best_sf.py)
+```
+uv run --active python code/visualizations/vision/ilharco_open_clip/001_qat_transfer/qv_transfer_heatmap_best_sf.py --model-name ViT-B-32 --pretrained openai --seed 2038 --optim adamw --lr 1e-5 --wd 0.1 --ls 0.0 --wl 500 --max-grad-norm 1.0 --batch-size 128 --bits 4 --granularity channel --skip-modules classification_head --qv-alpha 1.0
+```
+
+Local sequential loop over `qv.alpha` values:
+```
+for alpha in 0.25 0.5 0.75 1.0; do uv run --active python code/visualizations/vision/ilharco_open_clip/001_qat_transfer/qv_transfer_heatmap.py --model-name ViT-B-32 --pretrained openai --seed 2038 --optim adamw --lr 1e-5 --wd 0.1 --ls 0.0 --wl 500 --max-grad-norm 1.0 --batch-size 128 --bits 4 --granularity channel --skip-modules classification_head --qv-alpha $alpha; done
+```
+
+---
+
+# ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head
+
+A specialised variant of `ilharco_timm_supervised` that keeps biases, patch embeddings, layer norms, and the classification head frozen during finetuning. Only FP finetuning is available (no QAT).
+
+## Finetuning
+
+### FP finetuning — [code/src/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/finetune_fp.py](code/src/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/finetune_fp.py)
+Config: [config/src/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/finetune_fp.yaml](config/src/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/finetune_fp.yaml)
+
+Single local run:
+```
+uv run --active python code/src/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/finetune_fp.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 seed=2038
+```
+
+Local sequential sweep (all datasets):
+```
+uv run --active python code/src/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/finetune_fp.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3
+```
+
+Submitit parallel sweep (all datasets):
+```
+uv run --active python code/src/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/finetune_fp.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3
+```
+
+---
+
+## 000_baselines — evaluation scripts
+
+Scripts live in [code/experiments/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/000_baselines/](code/experiments/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/000_baselines/) with matching configs in [config/experiments/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/000_baselines/](config/experiments/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/000_baselines/).
+
+### evaluate_fp_ptq — [code/experiments/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/000_baselines/evaluate_fp_ptq.py](code/experiments/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/000_baselines/evaluate_fp_ptq.py)
+Config: [config/experiments/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/000_baselines/evaluate_fp_ptq.yaml](config/experiments/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/000_baselines/evaluate_fp_ptq.yaml). Adds a `ptq` group.
+
+Single local run:
+```
+uv run --active python code/experiments/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/000_baselines/evaluate_fp_ptq.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[head]'
+```
+
+Local sequential sweep (all datasets):
+```
+uv run --active python code/experiments/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/000_baselines/evaluate_fp_ptq.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[head]'
+```
+
+Submitit parallel sweep (all datasets):
+```
+uv run --active python code/experiments/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/000_baselines/evaluate_fp_ptq.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[head]'
+```
+
+---
+
+# ilharco_automodelforsequenceclassification
+
+Text classification models using HuggingFace `AutoModelForSequenceClassification`.
+
+Key differences from the vision families:
+- `batch_size` defaults to **32** (not 128)
+- `max_length=128` replaces `wl` (warmup length)
+- `skip_modules` is `classifier` (not `classification_head` or `head`)
+- Optim path fragment uses `_ml={max_length}` instead of `_wl={wl}`
+
+## Finetuning
+
+### FP finetuning — [code/src/text/ilharco_automodelforsequenceclassification/finetune_fp.py](code/src/text/ilharco_automodelforsequenceclassification/finetune_fp.py)
+Config: [config/src/text/ilharco_automodelforsequenceclassification/finetune_fp.yaml](config/src/text/ilharco_automodelforsequenceclassification/finetune_fp.yaml)
+
+Single local run:
+```
+uv run --active python code/src/text/ilharco_automodelforsequenceclassification/finetune_fp.py model_name=google-bert/bert-base-uncased dataset_name=Emotion seed=2038
+```
+
+Local sequential sweep (all datasets):
+```
+uv run --active python code/src/text/ilharco_automodelforsequenceclassification/finetune_fp.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction seed=1,2,3
+```
+
+Submitit parallel sweep (all datasets):
+```
+uv run --active python code/src/text/ilharco_automodelforsequenceclassification/finetune_fp.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction seed=1,2,3
+```
+
+### QAT finetuning — [code/src/text/ilharco_automodelforsequenceclassification/finetune_qat.py](code/src/text/ilharco_automodelforsequenceclassification/finetune_qat.py)
+Config: [config/src/text/ilharco_automodelforsequenceclassification/finetune_qat.yaml](config/src/text/ilharco_automodelforsequenceclassification/finetune_qat.yaml). Requires `qat.bits`, `qat.granularity`, `qat.skip_modules`.
+
+Single local run:
+```
+uv run --active python code/src/text/ilharco_automodelforsequenceclassification/finetune_qat.py model_name=google-bert/bert-base-uncased dataset_name=Emotion seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]'
+```
+
+Local sequential sweep (all datasets):
+```
+uv run --active python code/src/text/ilharco_automodelforsequenceclassification/finetune_qat.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classifier]'
+```
+
+Submitit parallel sweep (all datasets):
+```
+uv run --active python code/src/text/ilharco_automodelforsequenceclassification/finetune_qat.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classifier]'
+```
+
+---
+
+## 000_baselines — evaluation scripts
+
+All scripts live in [code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/](code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/) with matching configs in [config/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/](config/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/).
+
+### evaluate_pretrained — [code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained.py](code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained.py)
+Config: [config/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained.yaml](config/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained.yaml). Requires training hyperparameters (`lr`, `wd`, `ls`, `max_grad_norm`) to locate the finetuned head checkpoint.
+
+Single local run:
+```
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained.py model_name=google-bert/bert-base-uncased dataset_name=Emotion batch_size=32 max_length=128 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 seed=2038
+```
+
+Local sequential sweep (all datasets):
+```
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 max_length=128 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 seed=1,2,3
+```
+
+Submitit parallel sweep (all datasets):
+```
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 max_length=128 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 seed=1,2,3
+```
+
+### evaluate_pretrained_ptq — [code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained_ptq.py](code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained_ptq.py)
+Config: [config/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained_ptq.yaml](config/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained_ptq.yaml). Evaluates the pretrained backbone after applying PTQ. Has both `qat.*` (to locate the QAT-trained head checkpoint) and `ptq.*` groups.
+
+Single local run:
+```
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained_ptq.py model_name=google-bert/bert-base-uncased dataset_name=Emotion batch_size=32 max_length=128 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]' ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classifier]'
+```
+
+Local sequential sweep (all datasets):
+```
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained_ptq.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 max_length=128 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classifier]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classifier]'
+```
+
+Submitit parallel sweep (all datasets):
+```
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained_ptq.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 max_length=128 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classifier]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classifier]'
+```
+
+### evaluate_fp — [code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp.py](code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp.py)
+Config: [config/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp.yaml](config/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp.yaml)
+
+Single local run:
+```
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp.py model_name=google-bert/bert-base-uncased dataset_name=Emotion batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=2038
+```
+
+Local sequential sweep (all datasets):
+```
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3
+```
+
+Submitit parallel sweep (all datasets):
+```
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3
+```
+
+### evaluate_fp_ptq — [code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp_ptq.py](code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp_ptq.py)
+Config: [config/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp_ptq.yaml](config/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp_ptq.yaml). Adds a `ptq` group.
+
+Single local run:
+```
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp_ptq.py model_name=google-bert/bert-base-uncased dataset_name=Emotion batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=2038 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classifier]'
+```
+
+Local sequential sweep (all datasets):
+```
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp_ptq.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classifier]'
+```
+
+Submitit parallel sweep (all datasets):
+```
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp_ptq.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classifier]'
+```
+
+### evaluate_qat — [code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat.py](code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat.py)
+Config: [config/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat.yaml](config/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat.yaml). The `qat.*` group must match the training config of the checkpoint being evaluated.
+
+Single local run:
+```
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat.py model_name=google-bert/bert-base-uncased dataset_name=Emotion batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]'
+```
+
+Local sequential sweep (all datasets):
+```
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classifier]'
+```
+
+Submitit parallel sweep (all datasets):
+```
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classifier]'
+```
+
+### evaluate_qat_ptq — [code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat_ptq.py](code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat_ptq.py)
+Config: [config/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat_ptq.yaml](config/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat_ptq.yaml). Has both a `qat` group (to locate the checkpoint) and a `ptq` group (for the PTQ applied at eval time).
+
+Single local run:
+```
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat_ptq.py model_name=google-bert/bert-base-uncased dataset_name=Emotion batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]' ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classifier]'
+```
+
+Local sequential sweep (all datasets):
+```
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat_ptq.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classifier]'
+```
+
+Submitit parallel sweep (all datasets):
+```
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat_ptq.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classifier]'
+```
+
+---
+
+## 001_qat_transfer — QV transfer experiment
+
+### qv_transfer — [code/experiments/text/ilharco_automodelforsequenceclassification/001_qat_transfer/qv_transfer.py](code/experiments/text/ilharco_automodelforsequenceclassification/001_qat_transfer/qv_transfer.py)
+Config: [config/experiments/text/ilharco_automodelforsequenceclassification/001_qat_transfer/qv_transfer.yaml](config/experiments/text/ilharco_automodelforsequenceclassification/001_qat_transfer/qv_transfer.yaml)
+
+Same concept as the vision variants. Uses `source.dataset_names` and `target.dataset_names` (plural — lists of datasets iterated internally by the script). Requires `eval_split` (`val` or `test`) and `max_length`.
+
+Single local run:
+```
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/001_qat_transfer/qv_transfer.py model_name=google-bert/bert-base-uncased batch_size=32 max_length=128 eval_split=val lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 'source.dataset_names=[Emotion]' source.seed=2038 'target.dataset_names=[IMDB]' target.seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]' qv.alpha=1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classifier]'
+```
+
+Local sequential sweep (all source x all target datasets):
+```
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/001_qat_transfer/qv_transfer.py -m model_name=google-bert/bert-base-uncased batch_size=32 max_length=128 eval_split=val lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 'source.dataset_names=[Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction]' source.seed=2038 'target.dataset_names=[Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction]' target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]' qv.alpha=0.25,0.5,0.75,1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classifier]'
+```
+
+Submitit parallel sweep (all source x all target datasets):
+```
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/001_qat_transfer/qv_transfer.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased batch_size=32 max_length=128 eval_split=val lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 'source.dataset_names=[Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction]' source.seed=2038 'target.dataset_names=[Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction]' target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]' qv.alpha=0.25,0.5,0.75,1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classifier]'
+```
+
+### pick_best_alpha — [code/experiments/text/ilharco_automodelforsequenceclassification/001_qat_transfer/pick_best_alpha.py](code/experiments/text/ilharco_automodelforsequenceclassification/001_qat_transfer/pick_best_alpha.py)
+
+Same as the vision variants but uses `--max-length` instead of `--wl`. Restricted alpha sweep: `(0.15, 0.30, 0.45, 0.60, 0.75, 0.90, 1.00, 1.05, 1.20, 1.35, 1.50)`. Output modes: `table`, `json`, `commands`, `commands-bg`, `commands-sbatch`.
+
+```
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/001_qat_transfer/pick_best_alpha.py --model-name google-bert/bert-base-uncased --seed 2038 --lr 1e-5 --wd 0.01 --ls 0.0 --max-grad-norm 1.0 --batch-size 32 --max-length 128 --bits 4 --granularity channel --skip-modules classifier --slurm-timeout 120 --slurm-job-name pick_best --output table
+```
+
+---
+
+## Visualizations (argparse, no Hydra, no Slurm)
+
+### qv_transfer_heatmap — [code/visualizations/text/ilharco_automodelforsequenceclassification/001_qat_transfer/qv_transfer_heatmap.py](code/visualizations/text/ilharco_automodelforsequenceclassification/001_qat_transfer/qv_transfer_heatmap.py)
+```
+uv run --active python code/visualizations/text/ilharco_automodelforsequenceclassification/001_qat_transfer/qv_transfer_heatmap.py --model-name google-bert/bert-base-uncased --seed 2038 --optim adamw --lr 1e-5 --wd 0.01 --ls 0.0 --max-grad-norm 1.0 --batch-size 32 --max-length 128 --bits 4 --granularity channel --skip-modules classifier --qv-alpha 1.0
+```
+
+### qv_transfer_heatmap_best_sf — [code/visualizations/text/ilharco_automodelforsequenceclassification/001_qat_transfer/qv_transfer_heatmap_best_sf.py](code/visualizations/text/ilharco_automodelforsequenceclassification/001_qat_transfer/qv_transfer_heatmap_best_sf.py)
+```
+uv run --active python code/visualizations/text/ilharco_automodelforsequenceclassification/001_qat_transfer/qv_transfer_heatmap_best_sf.py --model-name google-bert/bert-base-uncased --seed 2038 --optim adamw --lr 1e-5 --wd 0.01 --ls 0.0 --max-grad-norm 1.0 --batch-size 32 --max-length 128 --bits 4 --granularity channel --skip-modules classifier --qv-alpha 1.0
+```
+
+Local sequential loop over `qv.alpha` values:
+```
+for alpha in 0.25 0.5 0.75 1.0; do uv run --active python code/visualizations/text/ilharco_automodelforsequenceclassification/001_qat_transfer/qv_transfer_heatmap.py --model-name google-bert/bert-base-uncased --seed 2038 --optim adamw --lr 1e-5 --wd 0.01 --ls 0.0 --max-grad-norm 1.0 --batch-size 32 --max-length 128 --bits 4 --granularity channel --skip-modules classifier --qv-alpha $alpha; done
+```
+
+---
+
+# sentence_transformers
+
+> **Work in progress.** Only the FP finetuning script exists so far. No config, experiments, or visualizations have been added yet.
+
+### FP finetuning — [code/src/text/sentence_transformers/finetune_fp.py](code/src/text/sentence_transformers/finetune_fp.py)
+
+This script is available but does not yet have a matching Hydra config or experiment pipeline.
+
+---
+
 # Notes
 
 - **Always launch from the repo root.** Hydra config search paths use `${oc.env:PWD}` and will not resolve otherwise.
 - **List-valued overrides** (e.g. `skip_modules`) must be quoted to protect brackets from the shell: `'qat.skip_modules=[classification_head]'`.
 - **Tuning the Slurm job** without editing YAML: append `hydra.launcher.timeout_min=...`, `hydra.launcher.mem_gb=...`, `hydra.launcher.cpus_per_task=...`, etc.
 - **Output layout**: single runs land under `hydra.run.dir`; sweeps (both local and submitit) land under `hydra.sweep.dir` with per-combo `subdir`s defined in each experiment's YAML. Submitit additionally writes per-job metadata under `${hydra.sweep.dir}/.submitit/%j`.
-- **Environment variables** required at runtime (loaded via `.env`): `CHECKPOINT_BASE_PATH`, `HEAD_BASE_PATH`, `EVALUATION_BASE_PATH`, `TORCH_NUM_WORKERS`.
+- **Environment variables**: see the [Getting Started](#getting-started) section for the full list and their purposes.
+- **Text vs vision parameter differences**: text scripts use `max_length` (no `wl`), default `batch_size=32`, and `skip_modules=classifier`. Vision scripts use `wl` (warmup length), default `batch_size=128`, and `skip_modules` varies by family (`classification_head` for hf_clip/open_clip, `head` for timm).
