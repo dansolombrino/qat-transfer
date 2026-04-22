@@ -267,7 +267,7 @@ def main(cfg: DictConfig):
         "pretrained_ptq",
         sanitize_timm_model_name(cfg.model_name),
         cfg.dataset_name,
-        f"ptq_skip={skip_modules_tag}",
+        f"ptq=bits={cfg.ptq.bits}_gran={cfg.ptq.granularity}_skip={skip_modules_tag}",
         f"seed={cfg.seed}",
     )
 

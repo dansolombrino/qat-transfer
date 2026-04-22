@@ -227,7 +227,7 @@ def main(cfg: DictConfig):
         sanitize_hf_model_name(cfg.model_name),
         cfg.dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}_ml={cfg.max_length}",
-        f"ptq_skip={skip_modules_tag}",
+        f"ptq=bits={cfg.ptq.bits}_gran={cfg.ptq.granularity}_skip={skip_modules_tag}",
         f"seed={cfg.seed}",
     )
 

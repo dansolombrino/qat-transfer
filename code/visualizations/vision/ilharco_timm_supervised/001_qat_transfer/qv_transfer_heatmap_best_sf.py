@@ -174,10 +174,6 @@ def _ptq_frag(bits, gran, skip_modules):
     return f"ptq=bits={bits}_gran={gran}_skip={_skip_tag(skip_modules)}"
 
 
-def _ptq_skip_frag(skip_modules):
-    return f"ptq_skip={_skip_tag(skip_modules)}"
-
-
 # ---------------------------------------------------------------------------
 # Per-baseline path builders
 # ---------------------------------------------------------------------------
@@ -188,10 +184,10 @@ def _pretrained_path(model_dir, dataset, seed):
     )
 
 
-def _pretrained_ptq_path(model_dir, dataset, seed, ptq_skip_frag):
+def _pretrained_ptq_path(model_dir, dataset, seed, ptq_frag):
     return os.path.join(
         EVAL_ROOT_BASELINES, "pretrained_ptq", model_dir, dataset,
-        ptq_skip_frag, f"seed={seed}", "eval_results.json",
+        ptq_frag, f"seed={seed}", "eval_results.json",
     )
 
 
@@ -202,10 +198,10 @@ def _fp_path(model_dir, dataset, seed, optim_frag):
     )
 
 
-def _fp_ptq_path(model_dir, dataset, seed, optim_frag, ptq_skip_frag):
+def _fp_ptq_path(model_dir, dataset, seed, optim_frag, ptq_frag):
     return os.path.join(
         EVAL_ROOT_BASELINES, "fp_ptq", model_dir, dataset,
-        optim_frag, ptq_skip_frag, f"seed={seed}", "eval_results.json",
+        optim_frag, ptq_frag, f"seed={seed}", "eval_results.json",
     )
 
 
@@ -216,10 +212,10 @@ def _qat_path(model_dir, dataset, seed, optim_frag, qat_frag):
     )
 
 
-def _qat_ptq_path(model_dir, dataset, seed, optim_frag, qat_frag, ptq_skip_frag):
+def _qat_ptq_path(model_dir, dataset, seed, optim_frag, qat_frag, ptq_frag):
     return os.path.join(
         EVAL_ROOT_BASELINES, "qat_ptq", model_dir, dataset,
-        optim_frag, qat_frag, ptq_skip_frag, f"seed={seed}", "eval_results.json",
+        optim_frag, qat_frag, ptq_frag, f"seed={seed}", "eval_results.json",
     )
 
 
@@ -258,7 +254,6 @@ def load_data(args):
                               args.max_grad_norm, args.batch_size)
     qat_frag    = _qat_frag(args.bits, args.granularity, args.skip_modules)
     ptq_frag    = _ptq_frag(args.bits, args.granularity, args.skip_modules)
-    pskip_frag  = _ptq_skip_frag(args.skip_modules)
 
     datasets = sorted(DATASET_NAME_TO_EPOCHS.keys())
 
@@ -270,7 +265,7 @@ def load_data(args):
                 TEST_ACC_KEY,
             ),
             "pretrained_ptq": _load_value(
-                _pretrained_ptq_path(model_dir, target_dataset, args.seed, pskip_frag),
+                _pretrained_ptq_path(model_dir, target_dataset, args.seed, ptq_frag),
                 TEST_ACC_KEY,
             ),
             "fp": _load_value(
@@ -278,7 +273,7 @@ def load_data(args):
                 TEST_ACC_KEY,
             ),
             "fp_ptq": _load_value(
-                _fp_ptq_path(model_dir, target_dataset, args.seed, optim_frag, pskip_frag),
+                _fp_ptq_path(model_dir, target_dataset, args.seed, optim_frag, ptq_frag),
                 TEST_ACC_KEY,
             ),
             "qat": _load_value(
@@ -287,7 +282,7 @@ def load_data(args):
             ),
             "qat_ptq": _load_value(
                 _qat_ptq_path(model_dir, target_dataset, args.seed,
-                              optim_frag, qat_frag, pskip_frag),
+                              optim_frag, qat_frag, ptq_frag),
                 TEST_ACC_KEY,
             ),
             "random": (
