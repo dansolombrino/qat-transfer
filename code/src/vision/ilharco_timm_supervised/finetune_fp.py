@@ -99,6 +99,8 @@ def main(cfg: DictConfig) -> None:
     )
 
     classifier.to(device=device)
+    if cfg.model_name == "swin_base_patch4_window7_224.ms_in22k_ft_in1k":
+        classifier.model.set_grad_checkpointing(enable=True)
 
     if IS_SLURM:
         log.info("state_dict keys: %s", list(classifier.state_dict().keys()))
