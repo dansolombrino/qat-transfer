@@ -162,7 +162,10 @@ def main(cfg: DictConfig) -> None:
     )
 
     classifier.to(device=device)
-    if cfg.model_name == "swin_base_patch4_window7_224.ms_in22k_ft_in1k":
+    if cfg.model_name in [
+        "swin_base_patch4_window7_224.ms_in22k_ft_in1k",
+        "deit3_large_patch16_224.fb_in1k"
+    ]:
         classifier.model.set_grad_checkpointing(enable=True)
 
     # Enable quantization-aware training: wraps nn.Linear layers in QATLinear
