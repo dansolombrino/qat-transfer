@@ -135,7 +135,7 @@ def main(cfg: DictConfig) -> None:
     if cfg.model_name not in SUPPORTED_MODELS:
         raise ValueError(f"Unsupported model_name={cfg.model_name!r}. Supported: {sorted(SUPPORTED_MODELS)}")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(f"cuda:{cfg.gpu}" if torch.cuda.is_available() else "cpu")
 
     checkpoint_base_path = os.environ["CHECKPOINT_BASE_PATH"]
     num_workers = int(os.environ["TORCH_NUM_WORKERS"])

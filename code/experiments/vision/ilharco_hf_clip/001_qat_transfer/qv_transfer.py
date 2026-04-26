@@ -568,7 +568,7 @@ def main(cfg: DictConfig):
     if eval_split not in ("val", "test"):
         raise ValueError(f"Unsupported eval_split: {eval_split!r}. Must be 'val' or 'test'.")
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = torch.device(f"cuda:{cfg.gpu}" if torch.cuda.is_available() else "cpu")
 
     total_pairs = len(source_dataset_names) * len(target_dataset_names)
     pair_idx = 0

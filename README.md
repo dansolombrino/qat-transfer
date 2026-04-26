@@ -165,7 +165,7 @@ uv run --active python code/test/text/data/dataloading.py --dataset-name Emotion
 
 ### Vision modeling — [code/test/vision/modeling.py](code/test/vision/modeling.py)
 ```
-uv run --active python code/test/vision/modeling.py --model-name openai/clip-vit-base-patch32 --dataset-name CIFAR10 --batch-size 8 --num-workers 2 --max-batches 2
+uv run --active python code/test/vision/modeling.py --model-name openai/clip-vit-base-patch32 --dataset-name CIFAR10 --batch-size 8 --num-workers 2 --max-batches 2 --gpu 0
 ```
 
 ---
@@ -179,17 +179,17 @@ Config: [config/src/vision/ilharco_hf_clip/finetune_fp.yaml](config/src/vision/i
 
 Single local run:
 ```
-uv run --active python code/src/vision/ilharco_hf_clip/finetune_fp.py model_name=openai/clip-vit-base-patch16 dataset_name=CIFAR10 seed=2038
+uv run --active python code/src/vision/ilharco_hf_clip/finetune_fp.py model_name=openai/clip-vit-base-patch16 dataset_name=CIFAR10 seed=2038 gpu=0
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/src/vision/ilharco_hf_clip/finetune_fp.py -m model_name=openai/clip-vit-base-patch16 dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3
+uv run --active python code/src/vision/ilharco_hf_clip/finetune_fp.py -m model_name=openai/clip-vit-base-patch16 dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3 gpu=0
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/src/vision/ilharco_hf_clip/finetune_fp.py -m hydra/launcher=submitit_slurm model_name=openai/clip-vit-base-patch16 dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3
+uv run --active python code/src/vision/ilharco_hf_clip/finetune_fp.py -m hydra/launcher=submitit_slurm model_name=openai/clip-vit-base-patch16 dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3 gpu=0
 ```
 
 ### QAT finetuning — [code/src/vision/ilharco_hf_clip/finetune_qat.py](code/src/vision/ilharco_hf_clip/finetune_qat.py)
@@ -197,17 +197,17 @@ Config: [config/src/vision/ilharco_hf_clip/finetune_qat.yaml](config/src/vision/
 
 Single local run:
 ```
-uv run --active python code/src/vision/ilharco_hf_clip/finetune_qat.py model_name=openai/clip-vit-base-patch16 dataset_name=CIFAR10 seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]'
+uv run --active python code/src/vision/ilharco_hf_clip/finetune_qat.py model_name=openai/clip-vit-base-patch16 dataset_name=CIFAR10 seed=2038 gpu=0 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]'
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/src/vision/ilharco_hf_clip/finetune_qat.py -m model_name=openai/clip-vit-base-patch16 dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classification_head]'
+uv run --active python code/src/vision/ilharco_hf_clip/finetune_qat.py -m model_name=openai/clip-vit-base-patch16 dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3 gpu=0 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classification_head]'
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/src/vision/ilharco_hf_clip/finetune_qat.py -m hydra/launcher=submitit_slurm model_name=openai/clip-vit-base-patch16 dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classification_head]'
+uv run --active python code/src/vision/ilharco_hf_clip/finetune_qat.py -m hydra/launcher=submitit_slurm model_name=openai/clip-vit-base-patch16 dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3 gpu=0 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classification_head]'
 ```
 
 > The user's feedback memory notes: `finetune_*` scripts are GPU-intensive and long-running — do not launch them casually.
@@ -223,17 +223,17 @@ Config: [config/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_pretra
 
 Single local run:
 ```
-uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_pretrained.py model_name=openai/clip-vit-base-patch16 dataset_name=CIFAR10 batch_size=128 seed=2038
+uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_pretrained.py model_name=openai/clip-vit-base-patch16 dataset_name=CIFAR10 batch_size=128 seed=2038 gpu=0
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_pretrained.py -m model_name=openai/clip-vit-base-patch16 dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 seed=1,2,3
+uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_pretrained.py -m model_name=openai/clip-vit-base-patch16 dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 seed=1,2,3 gpu=0
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_pretrained.py -m hydra/launcher=submitit_slurm model_name=openai/clip-vit-base-patch16 dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 seed=1,2,3
+uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_pretrained.py -m hydra/launcher=submitit_slurm model_name=openai/clip-vit-base-patch16 dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 seed=1,2,3 gpu=0
 ```
 
 ### evaluate_fp — [code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp.py](code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp.py)
@@ -241,17 +241,17 @@ Config: [config/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp.yam
 
 Single local run:
 ```
-uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp.py model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038
+uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp.py model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp.py -m model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3
+uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp.py -m model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp.py -m hydra/launcher=submitit_slurm model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3
+uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp.py -m hydra/launcher=submitit_slurm model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0
 ```
 
 ### evaluate_fp_ptq — [code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp_ptq.py](code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp_ptq.py)
@@ -259,17 +259,17 @@ Config: [config/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp_ptq
 
 Single local run:
 ```
-uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp_ptq.py model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp_ptq.py model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]'
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp_ptq.py -m model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp_ptq.py -m model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp_ptq.py -m hydra/launcher=submitit_slurm model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp_ptq.py -m hydra/launcher=submitit_slurm model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
 ```
 
 ### evaluate_fp_ptq_bias_norm_emb_from_pt — [code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp_ptq_bias_norm_emb_from_pt.py](code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp_ptq_bias_norm_emb_from_pt.py)
@@ -277,17 +277,17 @@ Config: [config/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp_ptq
 
 Single local run:
 ```
-uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp_ptq_bias_norm_emb_from_pt.py model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp_ptq_bias_norm_emb_from_pt.py model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]'
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp_ptq_bias_norm_emb_from_pt.py -m model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp_ptq_bias_norm_emb_from_pt.py -m model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp_ptq_bias_norm_emb_from_pt.py -m hydra/launcher=submitit_slurm model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_fp_ptq_bias_norm_emb_from_pt.py -m hydra/launcher=submitit_slurm model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
 ```
 
 ### evaluate_qat — [code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_qat.py](code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_qat.py)
@@ -295,17 +295,17 @@ Config: [config/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_qat.ya
 
 Single local run:
 ```
-uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_qat.py model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_qat.py model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]'
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_qat.py -m model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_qat.py -m model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classification_head]'
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_qat.py -m hydra/launcher=submitit_slurm model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_qat.py -m hydra/launcher=submitit_slurm model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classification_head]'
 ```
 
 ### evaluate_qat_ptq — [code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_qat_ptq.py](code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_qat_ptq.py)
@@ -313,17 +313,17 @@ Config: [config/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_qat_pt
 
 Single local run:
 ```
-uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_qat_ptq.py model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_qat_ptq.py model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]'
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_qat_ptq.py -m model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_qat_ptq.py -m model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_qat_ptq.py -m hydra/launcher=submitit_slurm model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_hf_clip/000_baselines/evaluate_qat_ptq.py -m hydra/launcher=submitit_slurm model_name=openai/clip-vit-base-patch16 pretrained=true dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
 ```
 
 ---
@@ -337,17 +337,17 @@ Requires three checkpoints to already exist on disk: `FP_source`, `QAT_source`, 
 
 Single local run:
 ```
-uv run --active python code/experiments/vision/ilharco_hf_clip/001_qat_transfer/qv_transfer.py model_name=openai/clip-vit-base-patch16 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 source.dataset_name=CIFAR10 source.seed=2038 target.dataset_name=CIFAR100 target.seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' qv.alpha=1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_hf_clip/001_qat_transfer/qv_transfer.py model_name=openai/clip-vit-base-patch16 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 source.dataset_name=CIFAR10 source.seed=2038 target.dataset_name=CIFAR100 target.seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' qv.alpha=1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]' gpu=0
 ```
 
 Local sequential sweep (all source × all target datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_hf_clip/001_qat_transfer/qv_transfer.py -m model_name=openai/clip-vit-base-patch16 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 source.dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet source.seed=2038 target.dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' qv.alpha=0.25,0.5,0.75,1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_hf_clip/001_qat_transfer/qv_transfer.py -m model_name=openai/clip-vit-base-patch16 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 source.dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet source.seed=2038 target.dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' qv.alpha=0.25,0.5,0.75,1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]' gpu=0
 ```
 
 Submitit parallel sweep (all source × all target datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_hf_clip/001_qat_transfer/qv_transfer.py -m hydra/launcher=submitit_slurm model_name=openai/clip-vit-base-patch16 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 source.dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet source.seed=2038 target.dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' qv.alpha=0.25,0.5,0.75,1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_hf_clip/001_qat_transfer/qv_transfer.py -m hydra/launcher=submitit_slurm model_name=openai/clip-vit-base-patch16 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 source.dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet source.seed=2038 target.dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' qv.alpha=0.25,0.5,0.75,1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]' gpu=0
 ```
 
 ---
@@ -396,17 +396,17 @@ Config: [config/src/vision/ilharco_timm_supervised/finetune_fp.yaml](config/src/
 
 Single local run:
 ```
-uv run --active python code/src/vision/ilharco_timm_supervised/finetune_fp.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 seed=2038
+uv run --active python code/src/vision/ilharco_timm_supervised/finetune_fp.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 seed=2038 gpu=0
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/src/vision/ilharco_timm_supervised/finetune_fp.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3
+uv run --active python code/src/vision/ilharco_timm_supervised/finetune_fp.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3 gpu=0
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/src/vision/ilharco_timm_supervised/finetune_fp.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3
+uv run --active python code/src/vision/ilharco_timm_supervised/finetune_fp.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3 gpu=0
 ```
 
 ### QAT finetuning — [code/src/vision/ilharco_timm_supervised/finetune_qat.py](code/src/vision/ilharco_timm_supervised/finetune_qat.py)
@@ -414,17 +414,17 @@ Config: [config/src/vision/ilharco_timm_supervised/finetune_qat.yaml](config/src
 
 Single local run:
 ```
-uv run --active python code/src/vision/ilharco_timm_supervised/finetune_qat.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[head]'
+uv run --active python code/src/vision/ilharco_timm_supervised/finetune_qat.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 seed=2038 gpu=0 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[head]'
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/src/vision/ilharco_timm_supervised/finetune_qat.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[head]'
+uv run --active python code/src/vision/ilharco_timm_supervised/finetune_qat.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3 gpu=0 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[head]'
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/src/vision/ilharco_timm_supervised/finetune_qat.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[head]'
+uv run --active python code/src/vision/ilharco_timm_supervised/finetune_qat.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3 gpu=0 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[head]'
 ```
 
 ---
@@ -438,17 +438,17 @@ Config: [config/experiments/vision/ilharco_timm_supervised/000_baselines/evaluat
 
 Single local run:
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_pretrained.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038
+uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_pretrained.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_pretrained.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3
+uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_pretrained.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_pretrained.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3
+uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_pretrained.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0
 ```
 
 ### evaluate_pretrained_ptq — [code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_pretrained_ptq.py](code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_pretrained_ptq.py)
@@ -456,17 +456,17 @@ Config: [config/experiments/vision/ilharco_timm_supervised/000_baselines/evaluat
 
 Single local run:
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_pretrained_ptq.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[head]' ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[head]'
+uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_pretrained_ptq.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[head]' ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[head]'
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_pretrained_ptq.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[head]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[head]'
+uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_pretrained_ptq.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[head]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[head]'
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_pretrained_ptq.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[head]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[head]'
+uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_pretrained_ptq.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[head]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[head]'
 ```
 
 ### evaluate_fp — [code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_fp.py](code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_fp.py)
@@ -474,17 +474,17 @@ Config: [config/experiments/vision/ilharco_timm_supervised/000_baselines/evaluat
 
 Single local run:
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_fp.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038
+uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_fp.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_fp.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3
+uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_fp.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_fp.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3
+uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_fp.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0
 ```
 
 ### evaluate_fp_ptq — [code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_fp_ptq.py](code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_fp_ptq.py)
@@ -492,17 +492,17 @@ Config: [config/experiments/vision/ilharco_timm_supervised/000_baselines/evaluat
 
 Single local run:
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_fp_ptq.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[head]'
+uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_fp_ptq.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[head]'
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_fp_ptq.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[head]'
+uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_fp_ptq.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[head]'
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_fp_ptq.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[head]'
+uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_fp_ptq.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[head]'
 ```
 
 ### evaluate_qat — [code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_qat.py](code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_qat.py)
@@ -510,17 +510,17 @@ Config: [config/experiments/vision/ilharco_timm_supervised/000_baselines/evaluat
 
 Single local run:
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_qat.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[head]'
+uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_qat.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[head]'
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_qat.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[head]'
+uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_qat.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[head]'
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_qat.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[head]'
+uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_qat.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[head]'
 ```
 
 ### evaluate_qat_ptq — [code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_qat_ptq.py](code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_qat_ptq.py)
@@ -528,17 +528,17 @@ Config: [config/experiments/vision/ilharco_timm_supervised/000_baselines/evaluat
 
 Single local run:
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_qat_ptq.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[head]' ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[head]'
+uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_qat_ptq.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[head]' ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[head]'
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_qat_ptq.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[head]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[head]'
+uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_qat_ptq.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[head]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[head]'
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_qat_ptq.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[head]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[head]'
+uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_qat_ptq.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[head]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[head]'
 ```
 
 ---
@@ -552,17 +552,17 @@ Same concept as the hf_clip variant but uses `source.dataset_names` (plural — 
 
 Single local run:
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised/001_qat_transfer/qv_transfer.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 'source.dataset_names=[CIFAR10]' source.seed=2038 target.dataset_name=CIFAR100 target.seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[head]' qv.alpha=1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[head]'
+uv run --active python code/experiments/vision/ilharco_timm_supervised/001_qat_transfer/qv_transfer.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 'source.dataset_names=[CIFAR10]' source.seed=2038 target.dataset_name=CIFAR100 target.seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[head]' qv.alpha=1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[head]' gpu=0
 ```
 
 Local sequential sweep (all source × all target datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised/001_qat_transfer/qv_transfer.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 'source.dataset_names=[Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet]' source.seed=2038 target.dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[head]' qv.alpha=0.25,0.5,0.75,1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[head]'
+uv run --active python code/experiments/vision/ilharco_timm_supervised/001_qat_transfer/qv_transfer.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 'source.dataset_names=[Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet]' source.seed=2038 target.dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[head]' qv.alpha=0.25,0.5,0.75,1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[head]' gpu=0
 ```
 
 Submitit parallel sweep (all source × all target datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised/001_qat_transfer/qv_transfer.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 'source.dataset_names=[Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet]' source.seed=2038 target.dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[head]' qv.alpha=0.25,0.5,0.75,1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[head]'
+uv run --active python code/experiments/vision/ilharco_timm_supervised/001_qat_transfer/qv_transfer.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 'source.dataset_names=[Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet]' source.seed=2038 target.dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[head]' qv.alpha=0.25,0.5,0.75,1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[head]' gpu=0
 ```
 
 ### pick_best_alpha — [code/experiments/vision/ilharco_timm_supervised/001_qat_transfer/pick_best_alpha.py](code/experiments/vision/ilharco_timm_supervised/001_qat_transfer/pick_best_alpha.py)
@@ -607,17 +607,17 @@ Config: [config/src/vision/ilharco_open_clip/finetune_fp.yaml](config/src/vision
 
 Single local run:
 ```
-uv run --active python code/src/vision/ilharco_open_clip/finetune_fp.py model_name=ViT-B-32 pretrained=openai dataset_name=CIFAR10 seed=2038
+uv run --active python code/src/vision/ilharco_open_clip/finetune_fp.py model_name=ViT-B-32 pretrained=openai dataset_name=CIFAR10 seed=2038 gpu=0
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/src/vision/ilharco_open_clip/finetune_fp.py -m model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3
+uv run --active python code/src/vision/ilharco_open_clip/finetune_fp.py -m model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3 gpu=0
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/src/vision/ilharco_open_clip/finetune_fp.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3
+uv run --active python code/src/vision/ilharco_open_clip/finetune_fp.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3 gpu=0
 ```
 
 ### QAT finetuning — [code/src/vision/ilharco_open_clip/finetune_qat.py](code/src/vision/ilharco_open_clip/finetune_qat.py)
@@ -625,17 +625,17 @@ Config: [config/src/vision/ilharco_open_clip/finetune_qat.yaml](config/src/visio
 
 Single local run:
 ```
-uv run --active python code/src/vision/ilharco_open_clip/finetune_qat.py model_name=ViT-B-32 pretrained=openai dataset_name=CIFAR10 seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]'
+uv run --active python code/src/vision/ilharco_open_clip/finetune_qat.py model_name=ViT-B-32 pretrained=openai dataset_name=CIFAR10 seed=2038 gpu=0 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]'
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/src/vision/ilharco_open_clip/finetune_qat.py -m model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classification_head]'
+uv run --active python code/src/vision/ilharco_open_clip/finetune_qat.py -m model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3 gpu=0 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classification_head]'
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/src/vision/ilharco_open_clip/finetune_qat.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classification_head]'
+uv run --active python code/src/vision/ilharco_open_clip/finetune_qat.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3 gpu=0 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classification_head]'
 ```
 
 ---
@@ -649,17 +649,17 @@ Config: [config/experiments/vision/ilharco_open_clip/000_baselines/evaluate_pret
 
 Single local run:
 ```
-uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_pretrained.py model_name=ViT-B-32 pretrained=openai dataset_name=CIFAR10 batch_size=128 seed=2038
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_pretrained.py model_name=ViT-B-32 pretrained=openai dataset_name=CIFAR10 batch_size=128 seed=2038 gpu=0
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_pretrained.py -m model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 seed=1,2,3
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_pretrained.py -m model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 seed=1,2,3 gpu=0
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_pretrained.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 seed=1,2,3
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_pretrained.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 seed=1,2,3 gpu=0
 ```
 
 ### evaluate_fp — [code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp.py](code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp.py)
@@ -667,17 +667,17 @@ Config: [config/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp.y
 
 Single local run:
 ```
-uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp.py model_name=ViT-B-32 pretrained=openai dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp.py model_name=ViT-B-32 pretrained=openai dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp.py -m model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp.py -m model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0
 ```
 
 ### evaluate_fp_ptq — [code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp_ptq.py](code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp_ptq.py)
@@ -685,17 +685,17 @@ Config: [config/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp_p
 
 Single local run:
 ```
-uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp_ptq.py model_name=ViT-B-32 pretrained=openai dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp_ptq.py model_name=ViT-B-32 pretrained=openai dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]'
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp_ptq.py -m model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp_ptq.py -m model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp_ptq.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp_ptq.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
 ```
 
 ### evaluate_qat — [code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat.py](code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat.py)
@@ -703,17 +703,17 @@ Config: [config/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat.
 
 Single local run:
 ```
-uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat.py model_name=ViT-B-32 pretrained=openai dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat.py model_name=ViT-B-32 pretrained=openai dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]'
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat.py -m model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat.py -m model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classification_head]'
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classification_head]'
 ```
 
 ### evaluate_qat_ptq — [code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat_ptq.py](code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat_ptq.py)
@@ -721,17 +721,17 @@ Config: [config/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat_
 
 Single local run:
 ```
-uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat_ptq.py model_name=ViT-B-32 pretrained=openai dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat_ptq.py model_name=ViT-B-32 pretrained=openai dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]'
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat_ptq.py -m model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat_ptq.py -m model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat_ptq.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_qat_ptq.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classification_head]'
 ```
 
 ---
@@ -745,17 +745,17 @@ Same concept as the other vision variants. Uses `source.dataset_names` and `targ
 
 Single local run:
 ```
-uv run --active python code/experiments/vision/ilharco_open_clip/001_qat_transfer/qv_transfer.py model_name=ViT-B-32 pretrained=openai batch_size=128 eval_split=val lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 'source.dataset_names=[CIFAR10]' source.seed=2038 'target.dataset_names=[CIFAR100]' target.seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' qv.alpha=1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_open_clip/001_qat_transfer/qv_transfer.py model_name=ViT-B-32 pretrained=openai batch_size=128 eval_split=val lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 'source.dataset_names=[CIFAR10]' source.seed=2038 'target.dataset_names=[CIFAR100]' target.seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' qv.alpha=1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]' gpu=0
 ```
 
 Local sequential sweep (all source x all target datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_open_clip/001_qat_transfer/qv_transfer.py -m model_name=ViT-B-32 pretrained=openai batch_size=128 eval_split=val lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 'source.dataset_names=[Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet]' source.seed=2038 'target.dataset_names=[Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet]' target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' qv.alpha=0.25,0.5,0.75,1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_open_clip/001_qat_transfer/qv_transfer.py -m model_name=ViT-B-32 pretrained=openai batch_size=128 eval_split=val lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 'source.dataset_names=[Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet]' source.seed=2038 'target.dataset_names=[Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet]' target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' qv.alpha=0.25,0.5,0.75,1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]' gpu=0
 ```
 
 Submitit parallel sweep (all source x all target datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_open_clip/001_qat_transfer/qv_transfer.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai batch_size=128 eval_split=val lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 'source.dataset_names=[Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet]' source.seed=2038 'target.dataset_names=[Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet]' target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' qv.alpha=0.25,0.5,0.75,1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]'
+uv run --active python code/experiments/vision/ilharco_open_clip/001_qat_transfer/qv_transfer.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai batch_size=128 eval_split=val lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 'source.dataset_names=[Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet]' source.seed=2038 'target.dataset_names=[Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet]' target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' qv.alpha=0.25,0.5,0.75,1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]' gpu=0
 ```
 
 ### pick_best_alpha — [code/experiments/vision/ilharco_open_clip/001_qat_transfer/pick_best_alpha.py](code/experiments/vision/ilharco_open_clip/001_qat_transfer/pick_best_alpha.py)
@@ -798,17 +798,17 @@ Config: [config/src/vision/ilharco_timm_supervised_frozen_biases_patch_embedding
 
 Single local run:
 ```
-uv run --active python code/src/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/finetune_fp.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 seed=2038
+uv run --active python code/src/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/finetune_fp.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 seed=2038 gpu=0
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/src/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/finetune_fp.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3
+uv run --active python code/src/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/finetune_fp.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3 gpu=0
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/src/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/finetune_fp.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3
+uv run --active python code/src/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/finetune_fp.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet seed=1,2,3 gpu=0
 ```
 
 ---
@@ -822,17 +822,17 @@ Config: [config/experiments/vision/ilharco_timm_supervised_frozen_biases_patch_e
 
 Single local run:
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/000_baselines/evaluate_fp_ptq.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[head]'
+uv run --active python code/experiments/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/000_baselines/evaluate_fp_ptq.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[head]'
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/000_baselines/evaluate_fp_ptq.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[head]'
+uv run --active python code/experiments/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/000_baselines/evaluate_fp_ptq.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[head]'
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/000_baselines/evaluate_fp_ptq.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[head]'
+uv run --active python code/experiments/vision/ilharco_timm_supervised_frozen_biases_patch_embeddings_norms_cls_head/000_baselines/evaluate_fp_ptq.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[head]'
 ```
 
 ---
@@ -854,17 +854,17 @@ Config: [config/src/text/ilharco_automodelforsequenceclassification/finetune_fp.
 
 Single local run:
 ```
-uv run --active python code/src/text/ilharco_automodelforsequenceclassification/finetune_fp.py model_name=google-bert/bert-base-uncased dataset_name=Emotion seed=2038
+uv run --active python code/src/text/ilharco_automodelforsequenceclassification/finetune_fp.py model_name=google-bert/bert-base-uncased dataset_name=Emotion seed=2038 gpu=0
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/src/text/ilharco_automodelforsequenceclassification/finetune_fp.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction seed=1,2,3
+uv run --active python code/src/text/ilharco_automodelforsequenceclassification/finetune_fp.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction seed=1,2,3 gpu=0
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/src/text/ilharco_automodelforsequenceclassification/finetune_fp.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction seed=1,2,3
+uv run --active python code/src/text/ilharco_automodelforsequenceclassification/finetune_fp.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction seed=1,2,3 gpu=0
 ```
 
 ### QAT finetuning — [code/src/text/ilharco_automodelforsequenceclassification/finetune_qat.py](code/src/text/ilharco_automodelforsequenceclassification/finetune_qat.py)
@@ -872,17 +872,17 @@ Config: [config/src/text/ilharco_automodelforsequenceclassification/finetune_qat
 
 Single local run:
 ```
-uv run --active python code/src/text/ilharco_automodelforsequenceclassification/finetune_qat.py model_name=google-bert/bert-base-uncased dataset_name=Emotion seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]'
+uv run --active python code/src/text/ilharco_automodelforsequenceclassification/finetune_qat.py model_name=google-bert/bert-base-uncased dataset_name=Emotion seed=2038 gpu=0 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]'
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/src/text/ilharco_automodelforsequenceclassification/finetune_qat.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classifier]'
+uv run --active python code/src/text/ilharco_automodelforsequenceclassification/finetune_qat.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction seed=1,2,3 gpu=0 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classifier]'
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/src/text/ilharco_automodelforsequenceclassification/finetune_qat.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classifier]'
+uv run --active python code/src/text/ilharco_automodelforsequenceclassification/finetune_qat.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction seed=1,2,3 gpu=0 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classifier]'
 ```
 
 ---
@@ -896,17 +896,17 @@ Config: [config/experiments/text/ilharco_automodelforsequenceclassification/000_
 
 Single local run:
 ```
-uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained.py model_name=google-bert/bert-base-uncased dataset_name=Emotion batch_size=32 max_length=128 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 seed=2038
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained.py model_name=google-bert/bert-base-uncased dataset_name=Emotion batch_size=32 max_length=128 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 seed=2038 gpu=0
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 max_length=128 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 seed=1,2,3
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 max_length=128 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 seed=1,2,3 gpu=0
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 max_length=128 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 seed=1,2,3
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 max_length=128 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 seed=1,2,3 gpu=0
 ```
 
 ### evaluate_pretrained_ptq — [code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained_ptq.py](code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained_ptq.py)
@@ -914,17 +914,17 @@ Config: [config/experiments/text/ilharco_automodelforsequenceclassification/000_
 
 Single local run:
 ```
-uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained_ptq.py model_name=google-bert/bert-base-uncased dataset_name=Emotion batch_size=32 max_length=128 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]' ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classifier]'
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained_ptq.py model_name=google-bert/bert-base-uncased dataset_name=Emotion batch_size=32 max_length=128 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 seed=2038 gpu=0 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]' ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classifier]'
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained_ptq.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 max_length=128 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classifier]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classifier]'
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained_ptq.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 max_length=128 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 seed=1,2,3 gpu=0 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classifier]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classifier]'
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained_ptq.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 max_length=128 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classifier]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classifier]'
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_pretrained_ptq.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 max_length=128 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 seed=1,2,3 gpu=0 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classifier]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classifier]'
 ```
 
 ### evaluate_fp — [code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp.py](code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp.py)
@@ -932,17 +932,17 @@ Config: [config/experiments/text/ilharco_automodelforsequenceclassification/000_
 
 Single local run:
 ```
-uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp.py model_name=google-bert/bert-base-uncased dataset_name=Emotion batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=2038
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp.py model_name=google-bert/bert-base-uncased dataset_name=Emotion batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=2038 gpu=0
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3 gpu=0
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3 gpu=0
 ```
 
 ### evaluate_fp_ptq — [code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp_ptq.py](code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp_ptq.py)
@@ -950,17 +950,17 @@ Config: [config/experiments/text/ilharco_automodelforsequenceclassification/000_
 
 Single local run:
 ```
-uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp_ptq.py model_name=google-bert/bert-base-uncased dataset_name=Emotion batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=2038 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classifier]'
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp_ptq.py model_name=google-bert/bert-base-uncased dataset_name=Emotion batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=2038 gpu=0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classifier]'
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp_ptq.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classifier]'
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp_ptq.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3 gpu=0 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classifier]'
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp_ptq.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classifier]'
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_fp_ptq.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3 gpu=0 ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classifier]'
 ```
 
 ### evaluate_qat — [code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat.py](code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat.py)
@@ -968,17 +968,17 @@ Config: [config/experiments/text/ilharco_automodelforsequenceclassification/000_
 
 Single local run:
 ```
-uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat.py model_name=google-bert/bert-base-uncased dataset_name=Emotion batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]'
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat.py model_name=google-bert/bert-base-uncased dataset_name=Emotion batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=2038 gpu=0 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]'
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classifier]'
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3 gpu=0 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classifier]'
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classifier]'
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3 gpu=0 qat.bits=2,4,8 qat.granularity=tensor,channel 'qat.skip_modules=[classifier]'
 ```
 
 ### evaluate_qat_ptq — [code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat_ptq.py](code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat_ptq.py)
@@ -986,17 +986,17 @@ Config: [config/experiments/text/ilharco_automodelforsequenceclassification/000_
 
 Single local run:
 ```
-uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat_ptq.py model_name=google-bert/bert-base-uncased dataset_name=Emotion batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]' ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classifier]'
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat_ptq.py model_name=google-bert/bert-base-uncased dataset_name=Emotion batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=2038 gpu=0 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]' ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classifier]'
 ```
 
 Local sequential sweep (all datasets):
 ```
-uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat_ptq.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classifier]'
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat_ptq.py -m model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3 gpu=0 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classifier]'
 ```
 
 Submitit parallel sweep (all datasets):
 ```
-uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat_ptq.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classifier]'
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/000_baselines/evaluate_qat_ptq.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased dataset_name=Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction batch_size=32 lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 max_length=128 seed=1,2,3 gpu=0 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]' ptq.bits=2,4,8 ptq.granularity=tensor,channel 'ptq.skip_modules=[classifier]'
 ```
 
 ---
@@ -1010,17 +1010,17 @@ Same concept as the vision variants. Uses `source.dataset_names` and `target.dat
 
 Single local run:
 ```
-uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/001_qat_transfer/qv_transfer.py model_name=google-bert/bert-base-uncased batch_size=32 max_length=128 eval_split=val lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 'source.dataset_names=[Emotion]' source.seed=2038 'target.dataset_names=[IMDB]' target.seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]' qv.alpha=1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classifier]'
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/001_qat_transfer/qv_transfer.py model_name=google-bert/bert-base-uncased batch_size=32 max_length=128 eval_split=val lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 'source.dataset_names=[Emotion]' source.seed=2038 'target.dataset_names=[IMDB]' target.seed=2038 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]' qv.alpha=1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classifier]' gpu=0
 ```
 
 Local sequential sweep (all source x all target datasets):
 ```
-uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/001_qat_transfer/qv_transfer.py -m model_name=google-bert/bert-base-uncased batch_size=32 max_length=128 eval_split=val lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 'source.dataset_names=[Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction]' source.seed=2038 'target.dataset_names=[Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction]' target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]' qv.alpha=0.25,0.5,0.75,1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classifier]'
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/001_qat_transfer/qv_transfer.py -m model_name=google-bert/bert-base-uncased batch_size=32 max_length=128 eval_split=val lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 'source.dataset_names=[Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction]' source.seed=2038 'target.dataset_names=[Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction]' target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]' qv.alpha=0.25,0.5,0.75,1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classifier]' gpu=0
 ```
 
 Submitit parallel sweep (all source x all target datasets):
 ```
-uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/001_qat_transfer/qv_transfer.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased batch_size=32 max_length=128 eval_split=val lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 'source.dataset_names=[Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction]' source.seed=2038 'target.dataset_names=[Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction]' target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]' qv.alpha=0.25,0.5,0.75,1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classifier]'
+uv run --active python code/experiments/text/ilharco_automodelforsequenceclassification/001_qat_transfer/qv_transfer.py -m hydra/launcher=submitit_slurm model_name=google-bert/bert-base-uncased batch_size=32 max_length=128 eval_split=val lr=1e-5 wd=0.01 ls=0.0 max_grad_norm=1.0 'source.dataset_names=[Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction]' source.seed=2038 'target.dataset_names=[Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveIntent,MassiveScenario,MTOPDomain,MTOPIntent,ToxicConversations,TweetSentimentExtraction]' target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classifier]' qv.alpha=0.25,0.5,0.75,1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classifier]' gpu=0
 ```
 
 ### pick_best_alpha — [code/experiments/text/ilharco_automodelforsequenceclassification/001_qat_transfer/pick_best_alpha.py](code/experiments/text/ilharco_automodelforsequenceclassification/001_qat_transfer/pick_best_alpha.py)

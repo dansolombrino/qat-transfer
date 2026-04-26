@@ -46,6 +46,7 @@ def test_dataset_forward(
     batch_size: int,
     num_workers: int,
     max_batches: int,
+    gpu: int,
 ):
     assert dataset_name in registry, (
         f"Unsupported dataset: {dataset_name}. Supported: {sorted(registry.keys())}"
@@ -64,7 +65,7 @@ def test_dataset_forward(
         seed=SPLIT_SEED,
     )
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(f"cuda:{gpu}" if torch.cuda.is_available() else "cpu")
     classifier.to(device)
     classifier.eval()
 
@@ -100,6 +101,8 @@ def main():
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--max-batches", type=int, default=2,
                         help="Max number of batches per dataset (0 = all).")
+    parser.add_argument("--gpu", type=int, required=True,
+                        help="CUDA device index.")
 
     args = parser.parse_args()
 
@@ -122,6 +125,7 @@ def main():
             batch_size=args.batch_size,
             num_workers=args.num_workers,
             max_batches=args.max_batches,
+            gpu=args.gpu,
         )
 
 

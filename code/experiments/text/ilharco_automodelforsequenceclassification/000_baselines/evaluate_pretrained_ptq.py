@@ -106,7 +106,7 @@ def build_model_and_tokenizer(model_name: str, num_labels: int, device: torch.de
 def main(cfg: DictConfig):
     set_seed(cfg.seed)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(f"cuda:{cfg.gpu}" if torch.cuda.is_available() else "cpu")
 
     base_epochs = DATASET_NAME_TO_EPOCHS[cfg.dataset_name]
     epochs = min(base_epochs, cfg.limit_num_epochs) if cfg.limit_num_epochs is not None else base_epochs

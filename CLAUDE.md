@@ -158,6 +158,7 @@ if __name__ == "__main__":
 model_name: ???
 dataset_name: ???
 seed: ???
+gpu: ???
 batch_size: 128
 lr: 1e-5
 # ... other hyperparameters ...
@@ -477,8 +478,13 @@ import plotly.graph_objects as go
 
 ## Device handling
 
+Every GPU-using script requires a mandatory `gpu` parameter (int, no default) specifying the CUDA device index.
+
+- **Hydra scripts:** `gpu: ???` in YAML config, accessed as `cfg.gpu`
+- **Argparse scripts:** `--gpu` required CLI arg (type=int)
+
 ```python
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device(f"cuda:{cfg.gpu}" if torch.cuda.is_available() else "cpu")
 model.to(device=device, dtype=torch.float32)
 ```
 

@@ -674,7 +674,7 @@ def main(cfg: DictConfig):
     if eval_split not in ("val", "test"):
         raise ValueError(f"Unsupported eval_split: {eval_split!r}. Must be 'val' or 'test'.")
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = torch.device(f"cuda:{cfg.gpu}" if torch.cuda.is_available() else "cpu")
 
     head_module = MODEL_NAME_TO_HEAD_MODULE[cfg.model_name]
     head_prefix = head_module + "."

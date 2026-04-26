@@ -57,7 +57,7 @@ def main(cfg: DictConfig) -> None:
         pprint(dict(cfg), expand_all=True)
     set_seed(cfg.seed)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(f"cuda:{cfg.gpu}" if torch.cuda.is_available() else "cpu")
     print(f"{device=}")
 
     checkpoint_base_path = os.environ["CHECKPOINT_BASE_PATH"]
