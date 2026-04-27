@@ -5,6 +5,7 @@ from typing import List
 import torch
 import torch.nn as nn
 from torch.nn import Parameter
+from tqdm import tqdm
 
 from .quant_modules import QuantConv2d, QuantLinear, QuantMatMul
 
@@ -274,6 +275,7 @@ def apply_repqvit_(
     w_bits: int,
     a_bits: int,
     skip_modules: frozenset,
+    tqdm_kw: dict = None,
 ) -> List[str]:
     """
     Apply RepQ-ViT post-training quantization to a timm ViT/DeiT/Swin model
@@ -293,36 +295,91 @@ def apply_repqvit_(
         w_bits:       Bit-width for weights.
         a_bits:       Bit-width for activations.
         skip_modules: Frozenset of child attribute names to leave unquantized.
+        tqdm_kw:      Extra kwargs forwarded to tqdm (e.g. disable, colour).
 
     Returns:
         List of fully-qualified names of every module that was quantized.
     """
+    if tqdm_kw is None:
+        tqdm_kw = {}
+
     device = next(model.parameters()).device
 
+    steps = [
+        "Inject MatMul modules",
+        "Wrap modules with quantized counterparts",
+        "Initial calibration forward pass",
+        "Scale reparameterization",
+        "Re-calibration forward pass",
+    ]
+    step_bar = tqdm(steps, desc="RepQ-ViT", leave=False, **tqdm_kw)
+
     # Step 1
+    step_bar.set_postfix_str(steps[0])
     inject_matmul_modules_(model)
+    step_bar.update(1)
 
     # Step 2
+    step_bar.set_postfix_str(steps[1])
     wq_params = {'n_bits': w_bits, 'channel_wise': True}
     aq_params = {'n_bits': a_bits, 'channel_wise': False}
     quantized_names = _wrap_modules_(model, aq_params, wq_params, skip_modules)
+    step_bar.update(1)
+
+    # Build name→module mapping for hook-based progress bars
+    quant_types = (QuantConv2d, QuantLinear, QuantMatMul)
+    quant_modules = {
+        name: m for name, m in model.named_modules() if isinstance(m, quant_types)
+    }
 
     # Step 3 — initial calibration
+    step_bar.set_postfix_str(steps[2])
     _set_quant_state_(model, input_quant=True, weight_quant=True)
     model.eval()
     calib_data = calib_data.to(device)
+    calib_bar = tqdm(total=len(quant_modules), desc="Calibrating (init)", leave=False, **tqdm_kw)
+    hooks = []
+    for name, m in quant_modules.items():
+        def _make_hook(mod_name):
+            def _hook(module, input, output):
+                calib_bar.set_postfix_str(mod_name)
+                calib_bar.update(1)
+            return _hook
+        hooks.append(m.register_forward_hook(_make_hook(name)))
     with torch.no_grad():
         model(calib_data)
+    for h in hooks:
+        h.remove()
+    calib_bar.close()
+    step_bar.update(1)
 
     # Step 4 — scale reparameterization
+    step_bar.set_postfix_str(steps[3])
     # Reparameterization operates on the inner timm model (image_classifier.model)
     timm_model = model.model if hasattr(model, 'model') else model
     with torch.no_grad():
         _scale_reparameterize_(timm_model)
+    step_bar.update(1)
 
     # Step 5 — re-calibration (resets weight quantizers after reparameterization)
+    step_bar.set_postfix_str(steps[4])
     _set_quant_state_(model, input_quant=True, weight_quant=True)
+    recalib_bar = tqdm(total=len(quant_modules), desc="Calibrating (re-init)", leave=False, **tqdm_kw)
+    hooks = []
+    for name, m in quant_modules.items():
+        def _make_hook(mod_name):
+            def _hook(module, input, output):
+                recalib_bar.set_postfix_str(mod_name)
+                recalib_bar.update(1)
+            return _hook
+        hooks.append(m.register_forward_hook(_make_hook(name)))
     with torch.no_grad():
         model(calib_data)
+    for h in hooks:
+        h.remove()
+    recalib_bar.close()
+    step_bar.update(1)
+
+    step_bar.close()
 
     return quantized_names

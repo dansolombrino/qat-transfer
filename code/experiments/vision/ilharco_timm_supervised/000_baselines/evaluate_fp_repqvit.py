@@ -115,9 +115,28 @@ def main(cfg: DictConfig):
     else:
         pprint(dict(cfg), expand_all=True)
 
+    pipeline_steps = [
+        "Loading checkpoint",
+        "Creating dataset",
+        "Preparing calibration data",
+        "RepQ-ViT quantization",
+        "Evaluating (test)",
+        "Saving results",
+    ]
+    pipeline_color = random_tqdm_color()
+    pipeline_bar = tqdm(
+        pipeline_steps,
+        desc="Pipeline",
+        colour=pipeline_color,
+        leave=True,
+        **TQDM_KW,
+    )
+
     ############################################################################
     # BEGIN checkpoint loading
     ############################################################################
+
+    pipeline_bar.set_postfix_str(pipeline_steps[0])
 
     checkpoint_base_path = os.environ['CHECKPOINT_BASE_PATH']
 
@@ -154,6 +173,8 @@ def main(cfg: DictConfig):
     if cfg.log_to_file:
         log.info(f"image_classifier:\n{image_classifier}")
 
+    pipeline_bar.update(1)
+
     ############################################################################
     # END checkpoint loading
     ############################################################################
@@ -164,6 +185,8 @@ def main(cfg: DictConfig):
     # BEGIN dataset creation
     ############################################################################
 
+    pipeline_bar.set_postfix_str(pipeline_steps[1])
+
     dataset = get_dataset(
         dataset_name=cfg.dataset_name,
         preprocess_train=image_classifier.train_preprocess,
@@ -172,6 +195,8 @@ def main(cfg: DictConfig):
         num_workers=int(os.environ['TORCH_NUM_WORKERS']),
         seed=cfg.seed,
     )
+
+    pipeline_bar.update(1)
 
     ############################################################################
     # END dataset creation
@@ -183,8 +208,10 @@ def main(cfg: DictConfig):
     # BEGIN calibration data
     ############################################################################
 
+    pipeline_bar.set_postfix_str(pipeline_steps[2])
+
     calib_loader = DataLoader(
-        dataset.train_dataset,
+        dataset.val_dataset,
         batch_size=cfg.repqvit.calib_batch_size,
         shuffle=False,
         num_workers=int(os.environ['TORCH_NUM_WORKERS']),
@@ -194,7 +221,9 @@ def main(cfg: DictConfig):
         calib_data = batch['images']
         break
 
-    print(f"\nCalibration batch: {calib_data.shape} (calib_batch_size={cfg.repqvit.calib_batch_size})")
+    print(f"\nCalibration batch (val split): {calib_data.shape} (calib_batch_size={cfg.repqvit.calib_batch_size})")
+
+    pipeline_bar.update(1)
 
     ############################################################################
     # END calibration data
@@ -205,6 +234,8 @@ def main(cfg: DictConfig):
     ############################################################################
     # BEGIN RepQ-ViT quantization
     ############################################################################
+
+    pipeline_bar.set_postfix_str(pipeline_steps[3])
 
     skip_modules = frozenset(cfg.repqvit.skip_modules)
 
@@ -219,6 +250,7 @@ def main(cfg: DictConfig):
         w_bits=cfg.repqvit.w_bits,
         a_bits=cfg.repqvit.a_bits,
         skip_modules=skip_modules,
+        tqdm_kw=TQDM_KW,
     )
 
     print(f"\nQuantized modules ({len(quantized_names)}):")
@@ -229,6 +261,8 @@ def main(cfg: DictConfig):
     if cfg.log_to_file:
         log.info(f"Quantized modules ({len(quantized_names)}): {quantized_names}")
 
+    pipeline_bar.update(1)
+
     ############################################################################
     # END RepQ-ViT quantization
     ############################################################################
@@ -238,6 +272,8 @@ def main(cfg: DictConfig):
     ############################################################################
     # BEGIN evaluation
     ############################################################################
+
+    pipeline_bar.set_postfix_str(pipeline_steps[4])
 
     test_accuracy = evaluate(
         dataset=dataset,
@@ -252,6 +288,8 @@ def main(cfg: DictConfig):
     random_chance = 1.0 / num_classes
     print(f"    random chance baseline : {random_chance}  (1 / {num_classes} classes)\n")
 
+    pipeline_bar.update(1)
+
     ############################################################################
     # END evaluation
     ############################################################################
@@ -261,6 +299,8 @@ def main(cfg: DictConfig):
     ############################################################################
     # BEGIN save results
     ############################################################################
+
+    pipeline_bar.set_postfix_str(pipeline_steps[5])
 
     evaluation_base_path = os.environ['EVALUATION_BASE_PATH']
 
@@ -316,6 +356,9 @@ def main(cfg: DictConfig):
         json.dump(results, f, indent=2)
 
     print(f"\nResults saved to: {eval_results_path}")
+
+    pipeline_bar.update(1)
+    pipeline_bar.close()
 
     ############################################################################
     # END save results
