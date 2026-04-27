@@ -83,10 +83,11 @@ DATASET_NAME_TO_NUM_CLASSES = {
     "ImageNet":      1000,
 }
 
-QV_METRIC_KEYS = {
-    "fp_head_ptq":  "test_accuracy_fp_head_ptq",
-    "qat_head_ptq": "test_accuracy_qat_head_ptq",
-}
+def _qv_metric_keys(eval_split):
+    return {
+        "fp_head_ptq":  f"{eval_split}_accuracy_fp_head_ptq",
+        "qat_head_ptq": f"{eval_split}_accuracy_qat_head_ptq",
+    }
 
 QV_METRIC_LABELS = {
     "fp_head_ptq":  "FP Head",
@@ -118,7 +119,8 @@ def parse_args():
     parser.add_argument("--batch-size",     required=True, type=int)
 
     # quantization path-fragment components
-    parser.add_argument("--bits",           required=True, type=int)
+    parser.add_argument("--qat-bits",       required=True, type=int)
+    parser.add_argument("--ptq-bits",       required=True, type=int)
     parser.add_argument("--granularity",    required=True, choices=["tensor", "channel"])
     parser.add_argument("--skip-modules",   required=True, nargs="+",
                         help="One or more module names to skip during quantization "
@@ -126,6 +128,10 @@ def parse_args():
 
     # qv path-fragment component
     parser.add_argument("--qv-alpha",       required=True, type=float)
+
+    # eval split
+    parser.add_argument("--eval-split",     default="test", choices=["val", "test"],
+                        help="Which split the experiment was evaluated on (default: test).")
 
     return parser.parse_args()
 
@@ -202,12 +208,13 @@ def _qat_ptq_path(model_dir, dataset, seed, optim_frag, qat_frag, ptq_frag):
 
 
 def _qv_transfer_path(model_dir, qv_dataset, target_dataset, seed,
-                       optim_frag, qat_frag, ptq_frag, qv_frag):
+                       optim_frag, qat_frag, ptq_frag, qv_frag, eval_split):
     return os.path.join(
         EVAL_ROOT_QV, model_dir,
         f"src={qv_dataset}_seed={seed}",
         f"tgt={target_dataset}_seed={seed}",
         optim_frag, qat_frag, ptq_frag, qv_frag,
+        f"split={eval_split}",
         "eval_results.json",
     )
 
@@ -234,9 +241,11 @@ def load_data(args):
     model_dir   = sanitize_timm_model_name(args.model_name)
     optim_frag  = _optim_frag(args.optim, args.lr, args.wd, args.ls, args.wl,
                               args.max_grad_norm, args.batch_size)
-    qat_frag    = _qat_frag(args.bits, args.granularity, args.skip_modules)
-    ptq_frag    = _ptq_frag(args.bits, args.granularity, args.skip_modules)
+    qat_frag    = _qat_frag(args.qat_bits, args.granularity, args.skip_modules)
+    ptq_frag    = _ptq_frag(args.ptq_bits, args.granularity, args.skip_modules)
     qv_frag     = _qv_frag(args.qv_alpha)
+    eval_split  = args.eval_split
+    qv_metric_keys = _qv_metric_keys(eval_split)
 
     datasets = sorted(DATASET_NAME_TO_EPOCHS.keys(), key=str.lower)
 
@@ -278,11 +287,11 @@ def load_data(args):
         for qv_dataset in datasets:
             qv_path = _qv_transfer_path(
                 model_dir, qv_dataset, target_dataset, args.seed,
-                optim_frag, qat_frag, ptq_frag, qv_frag,
+                optim_frag, qat_frag, ptq_frag, qv_frag, eval_split,
             )
             data[target_dataset]["qv_transfer"][qv_dataset] = {
                 metric_tag: _load_value(qv_path, metric_key)
-                for metric_tag, metric_key in QV_METRIC_KEYS.items()
+                for metric_tag, metric_key in qv_metric_keys.items()
             }
 
     return data, model_dir, optim_frag, qat_frag, qv_frag
@@ -412,7 +421,7 @@ def plot_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag, metric_ta
     title = (
         f"QV Transfer+PTQ ({head_label})<br>"
         f"<sup>{args.model_name} | seed={args.seed} | optim={args.optim} | "
-        f"bits={args.bits} | granularity={args.granularity} | skip={skip_str} | "
+        f"qat_bits={args.qat_bits} | ptq_bits={args.ptq_bits} | granularity={args.granularity} | skip={skip_str} | "
         f"alpha={args.qv_alpha}</sup>"
     )
 
@@ -447,6 +456,7 @@ def plot_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag, metric_ta
     out_dir = os.path.join(
         "plots", "vision", "ilharco_timm_supervised", "001_qat_transfer", "qv_transfer_heatmap",
         model_dir, f"seed={args.seed}", optim_frag, qat_frag, qv_frag,
+        f"split={args.eval_split}",
     )
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"heatmap_qv_transfer_{metric_tag}.png")
@@ -541,7 +551,7 @@ def plot_difference_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag
     title = (
         f"QV Transfer ({head_label}, QAT+PTQ) \u2212 {BASELINE_METHOD_LABELS[subtractor]}<br>"
         f"<sup>{args.model_name} | seed={args.seed} | optim={args.optim} | "
-        f"bits={args.bits} | granularity={args.granularity} | skip={skip_str} | "
+        f"qat_bits={args.qat_bits} | ptq_bits={args.ptq_bits} | granularity={args.granularity} | skip={skip_str} | "
         f"alpha={args.qv_alpha}</sup>"
     )
 
@@ -578,6 +588,7 @@ def plot_difference_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag
     out_dir = os.path.join(
         "plots", "vision", "ilharco_timm_supervised", "001_qat_transfer", "qv_transfer_heatmap",
         model_dir, f"seed={args.seed}", optim_frag, qat_frag, qv_frag,
+        f"split={args.eval_split}",
     )
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"heatmap_qv_transfer_{metric_tag}_minus_{subtractor}.png")
@@ -592,7 +603,7 @@ def main():
     args = parse_args()
     data, model_dir, optim_frag, qat_frag, qv_frag = load_data(args)
     common = (data, args, model_dir, optim_frag, qat_frag, qv_frag)
-    for metric_tag in QV_METRIC_KEYS:
+    for metric_tag in _qv_metric_keys(args.eval_split):
         plot_heatmap(*common, metric_tag=metric_tag)
         plot_difference_heatmap(*common, metric_tag=metric_tag, subtractor="fp_ptq")
 

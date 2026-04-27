@@ -105,7 +105,8 @@ def parse_args():
     parser.add_argument("--max-grad-norm",  required=True, type=float)
     parser.add_argument("--batch-size",     required=True, type=int)
 
-    parser.add_argument("--bits",           required=True, type=int)
+    parser.add_argument("--qat-bits",       required=True, type=int)
+    parser.add_argument("--ptq-bits",       required=True, type=int)
     parser.add_argument("--granularity",    required=True, choices=["tensor", "channel"])
     parser.add_argument("--skip-modules",   required=True, nargs="+",
                         help="One or more module names to skip during quantization "
@@ -219,8 +220,8 @@ def load_data(args):
     model_dir   = sanitize_open_clip_model_name(args.model_name, args.pretrained)
     optim_frag  = _optim_frag(args.optim, args.lr, args.wd, args.ls, args.wl,
                               args.max_grad_norm, args.batch_size)
-    qat_frag    = _qat_frag(args.bits, args.granularity, args.skip_modules)
-    ptq_frag    = _ptq_frag(args.bits, args.granularity, args.skip_modules)
+    qat_frag    = _qat_frag(args.qat_bits, args.granularity, args.skip_modules)
+    ptq_frag    = _ptq_frag(args.ptq_bits, args.granularity, args.skip_modules)
     qv_frag     = _qv_frag(args.qv_alpha)
     qv_metric_key = f"{args.eval_split}_accuracy_patched_qat_ptq"
 
@@ -390,7 +391,7 @@ def plot_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag):
     title = (
         f"QV Transfer+PTQ ({args.eval_split})<br>"
         f"<sup>{args.model_name}/{args.pretrained} | seed={args.seed} | optim={args.optim} | "
-        f"bits={args.bits} | granularity={args.granularity} | skip={skip_str} | "
+        f"qat_bits={args.qat_bits} | ptq_bits={args.ptq_bits} | granularity={args.granularity} | skip={skip_str} | "
         f"alpha={args.qv_alpha}</sup>"
     )
 
@@ -519,7 +520,7 @@ def plot_difference_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag
     title = (
         f"QV Transfer (QAT+PTQ, {args.eval_split}) \u2212 {BASELINE_METHOD_LABELS[subtractor]}<br>"
         f"<sup>{args.model_name}/{args.pretrained} | seed={args.seed} | optim={args.optim} | "
-        f"bits={args.bits} | granularity={args.granularity} | skip={skip_str} | "
+        f"qat_bits={args.qat_bits} | ptq_bits={args.ptq_bits} | granularity={args.granularity} | skip={skip_str} | "
         f"alpha={args.qv_alpha}</sup>"
     )
 

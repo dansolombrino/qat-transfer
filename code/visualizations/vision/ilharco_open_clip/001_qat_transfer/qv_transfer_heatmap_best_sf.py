@@ -96,7 +96,7 @@ HEATMAP_COLORSCALE_DIVERGING  = "RdYlGn"
 
 # Allowed QV scaling factors for the restricted sweep. Any qv=alpha=* directory
 # on disk whose alpha is not in this set is silently ignored.
-ALLOWED_ALPHAS = (0.15, 0.30, 0.45, 0.60, 0.75, 0.90, 1.05, 1.20, 1.35, 1.50)
+ALLOWED_ALPHAS = (0.15, 0.30, 0.45, 0.60, 0.75, 0.90, 1.00, 1.05, 1.20, 1.35, 1.50)
 _ALPHA_TOL = 1e-9
 
 
@@ -125,7 +125,8 @@ def parse_args():
     parser.add_argument("--batch-size",     required=True, type=int)
 
     # quantization path-fragment components
-    parser.add_argument("--bits",           required=True, type=int)
+    parser.add_argument("--qat-bits",       required=True, type=int)
+    parser.add_argument("--ptq-bits",       required=True, type=int)
     parser.add_argument("--granularity",    required=True, choices=["tensor", "channel"])
     parser.add_argument("--skip-modules",   required=True, nargs="+",
                         help="One or more module names to skip during quantization "
@@ -231,8 +232,8 @@ def load_data(args):
     model_dir   = sanitize_open_clip_model_name(args.model_name, args.pretrained)
     optim_frag  = _optim_frag(args.optim, args.lr, args.wd, args.ls, args.wl,
                               args.max_grad_norm, args.batch_size)
-    qat_frag    = _qat_frag(args.bits, args.granularity, args.skip_modules)
-    ptq_frag    = _ptq_frag(args.bits, args.granularity, args.skip_modules)
+    qat_frag    = _qat_frag(args.qat_bits, args.granularity, args.skip_modules)
+    ptq_frag    = _ptq_frag(args.ptq_bits, args.granularity, args.skip_modules)
 
     datasets = sorted(DATASET_NAME_TO_EPOCHS.keys())
 
@@ -454,7 +455,7 @@ def plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag, qat_
     title = (
         f"QV Transfer (QAT+PTQ, Best Alpha) \u2212 FP+PTQ<br>"
         f"<sup>{args.model_name}/{args.pretrained} | seed={args.seed} | optim={args.optim} | "
-        f"bits={args.bits} | granularity={args.granularity} | skip={skip_str} | "
+        f"qat_bits={args.qat_bits} | ptq_bits={args.ptq_bits} | granularity={args.granularity} | skip={skip_str} | "
         f"alpha=best</sup>"
     )
 
@@ -491,6 +492,7 @@ def plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag, qat_
     out_dir = os.path.join(
         "plots", "vision", "ilharco_open_clip", "001_qat_transfer", "qv_transfer_heatmap",
         model_dir, f"seed={args.seed}", optim_frag, qat_frag, "qv=alpha=best",
+        "split=test",
     )
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(

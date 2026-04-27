@@ -107,7 +107,8 @@ def parse_args():
     parser.add_argument("--max-length",     required=True, type=int)
 
     # quantization path-fragment components
-    parser.add_argument("--bits",           required=True, type=int)
+    parser.add_argument("--qat-bits",       required=True, type=int)
+    parser.add_argument("--ptq-bits",       required=True, type=int)
     parser.add_argument("--granularity",    required=True, choices=["tensor", "channel"])
     parser.add_argument("--skip-modules",   required=True, nargs="+",
                         help="One or more module names to skip during quantization "
@@ -222,8 +223,8 @@ def load_data(args):
     model_dir   = sanitize_hf_model_name(args.model_name)
     optim_frag  = _optim_frag(args.optim, args.lr, args.wd, args.ls,
                               args.max_grad_norm, args.batch_size, args.max_length)
-    qat_frag    = _qat_frag(args.bits, args.granularity, args.skip_modules)
-    ptq_frag    = _ptq_frag(args.bits, args.granularity, args.skip_modules)
+    qat_frag    = _qat_frag(args.qat_bits, args.granularity, args.skip_modules)
+    ptq_frag    = _ptq_frag(args.ptq_bits, args.granularity, args.skip_modules)
     qv_frag     = _qv_frag(args.qv_alpha)
 
     datasets = sorted(DATASET_NAME_TO_EPOCHS.keys(), key=str.lower)
@@ -396,7 +397,7 @@ def plot_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag, metric_ta
     title = (
         f"QV Transfer+PTQ ({head_label})<br>"
         f"<sup>{args.model_name} | seed={args.seed} | optim={args.optim} | "
-        f"bits={args.bits} | granularity={args.granularity} | skip={skip_str} | "
+        f"qat_bits={args.qat_bits} | ptq_bits={args.ptq_bits} | granularity={args.granularity} | skip={skip_str} | "
         f"alpha={args.qv_alpha}</sup>"
     )
 
@@ -527,7 +528,7 @@ def plot_difference_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag
     title = (
         f"QV Transfer ({head_label}, QAT+PTQ) \u2212 {BASELINE_METHOD_LABELS[subtractor]}<br>"
         f"<sup>{args.model_name} | seed={args.seed} | optim={args.optim} | "
-        f"bits={args.bits} | granularity={args.granularity} | skip={skip_str} | "
+        f"qat_bits={args.qat_bits} | ptq_bits={args.ptq_bits} | granularity={args.granularity} | skip={skip_str} | "
         f"alpha={args.qv_alpha}</sup>"
     )
 
