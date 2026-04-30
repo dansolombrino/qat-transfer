@@ -1,9 +1,10 @@
 from copy import deepcopy
 from types import MethodType
-from typing import List
+from typing import List, Optional
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.nn import Parameter
 from tqdm import tqdm
 
@@ -71,53 +72,130 @@ def _swin_window_attention_forward(self, x: torch.Tensor, mask=None) -> torch.Te
     return x
 
 
+def _open_clip_mha_forward(
+    self,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    key_padding_mask: Optional[torch.Tensor] = None,
+    need_weights: bool = False,
+    attn_mask: Optional[torch.Tensor] = None,
+    is_causal: bool = False,
+):
+    """Patched forward for nn.MultiheadAttention in open_clip ResidualAttentionBlock.
+
+    Replaces F.multi_head_attention_forward with explicit matmul1/matmul2
+    so that RepQ-ViT can quantize each matrix multiplication independently.
+    Supports optional input/weight quantization via attached quantizers.
+    """
+    B, L, D = query.shape
+    head_dim = D // self.num_heads
+    scale = head_dim ** -0.5
+
+    # QKV projection with optional quantization
+    x = query
+    if getattr(self, 'use_input_quant', False):
+        x = self.input_quantizer(x)
+    w = self.in_proj_weight
+    if getattr(self, 'use_weight_quant', False):
+        w = self.weight_quantizer(w)
+    qkv = F.linear(x, w, self.in_proj_bias)
+
+    # Split into q, k, v and reshape for multi-head
+    q, k, v = qkv.chunk(3, dim=-1)
+    q = q.reshape(B, L, self.num_heads, head_dim).transpose(1, 2)  # (B, H, L, hd)
+    k = k.reshape(B, L, self.num_heads, head_dim).transpose(1, 2)
+    v = v.reshape(B, L, self.num_heads, head_dim).transpose(1, 2)
+
+    # Pre-softmax attention (matmul1)
+    attn = self.matmul1(q, k.transpose(-2, -1)) * scale
+    if attn_mask is not None:
+        attn = attn + attn_mask
+    attn = attn.softmax(dim=-1)
+
+    # Post-softmax attention (matmul2)
+    x = self.matmul2(attn, v)
+
+    # Reshape back and output projection
+    x = x.transpose(1, 2).reshape(B, L, D)
+    x = self.out_proj(x)
+
+    return x, None
+
+
 # ---------------------------------------------------------------------------
 # Step 1 — inject MatMul modules into Attention layers
 # ---------------------------------------------------------------------------
 
-def inject_matmul_modules_(model: nn.Module) -> None:
-    """Replace @ in timm Attention/WindowAttention with explicit MatMul modules."""
-    try:
-        from timm.models.vision_transformer import Attention
-    except ImportError:
-        Attention = None
-    try:
-        from timm.models.swin_transformer import WindowAttention
-    except ImportError:
-        WindowAttention = None
+def inject_matmul_modules_(model: nn.Module, family: str = "timm") -> None:
+    """Replace @ in attention layers with explicit MatMul modules.
 
-    for module in model.modules():
-        if Attention is not None and type(module) is Attention:
-            module.fused_attn = False  # force explicit matmul so QuantMatMul can wrap it
-            module.matmul1 = MatMul()
-            module.matmul2 = MatMul()
-            module.forward = MethodType(_vit_attention_forward, module)
-        elif WindowAttention is not None and type(module) is WindowAttention:
-            module.fused_attn = False
-            module.matmul1 = MatMul()
-            module.matmul2 = MatMul()
-            module.forward = MethodType(_swin_window_attention_forward, module)
+    Args:
+        model:  The top-level nn.Module.
+        family: ``"timm"`` for timm ViT/Swin, ``"open_clip"`` for open_clip
+                ResidualAttentionBlock with nn.MultiheadAttention.
+    """
+    if family == "timm":
+        try:
+            from timm.models.vision_transformer import Attention
+        except ImportError:
+            Attention = None
+        try:
+            from timm.models.swin_transformer import WindowAttention
+        except ImportError:
+            WindowAttention = None
+
+        for module in model.modules():
+            if Attention is not None and type(module) is Attention:
+                module.fused_attn = False
+                module.matmul1 = MatMul()
+                module.matmul2 = MatMul()
+                module.forward = MethodType(_vit_attention_forward, module)
+            elif WindowAttention is not None and type(module) is WindowAttention:
+                module.fused_attn = False
+                module.matmul1 = MatMul()
+                module.matmul2 = MatMul()
+                module.forward = MethodType(_swin_window_attention_forward, module)
+
+    elif family == "open_clip":
+        for module in model.modules():
+            if isinstance(module, nn.MultiheadAttention):
+                module.matmul1 = MatMul()
+                module.matmul2 = MatMul()
+                module.forward = MethodType(_open_clip_mha_forward, module)
+
+    else:
+        raise ValueError(f"Unknown family={family!r}. Supported: 'timm', 'open_clip'")
 
 
 # ---------------------------------------------------------------------------
 # Step 2 — recursively wrap Conv2d / Linear / MatMul with quantized versions
 # ---------------------------------------------------------------------------
 
+_TIMM_CHANNEL_WISE_NAMES = frozenset(('qkv', 'fc1', 'reduction'))
+
+
 def _wrap_modules_(
     model: nn.Module,
     aq_params: dict,
     wq_params: dict,
     skip_modules: frozenset,
+    channel_wise_names: frozenset = _TIMM_CHANNEL_WISE_NAMES,
     _prefix: str = "",
 ) -> List[str]:
     """
     Recursively replace nn.Conv2d, nn.Linear, and MatMul with their quantized
-    counterparts. Skips any child whose *attribute name* is in skip_modules.
+    counterparts.  For nn.MultiheadAttention modules (open_clip), attach
+    quantizers directly instead of replacing the module.
 
-    QKV, FC1, and reduction projections receive channel-wise activation
-    quantization; all other linears receive tensor-wise activation quantization.
+    Skips any child whose *attribute name* is in *skip_modules*.
+
+    Linears whose name is in *channel_wise_names* receive channel-wise
+    activation quantization; all others receive tensor-wise.
     Post-softmax matmul (matmul2) receives log-sqrt(2) activation quantization.
     """
+    from .quantizer import UniformQuantizer
+
     aq_channel = deepcopy(aq_params)
     aq_channel['channel_wise'] = True
 
@@ -142,9 +220,21 @@ def _wrap_modules_(
             setattr(model, name, new_m)
             quantized.append(full)
 
+        elif isinstance(m, nn.MultiheadAttention):
+            # open_clip: attach quantizers for fused in_proj_weight directly
+            m.input_quantizer = UniformQuantizer(**aq_channel)
+            m.weight_quantizer = UniformQuantizer(**wq_params)
+            m.use_input_quant = False
+            m.use_weight_quant = False
+            quantized.append(full)
+            # Recurse into MHA children (out_proj, matmul1, matmul2)
+            quantized.extend(
+                _wrap_modules_(m, aq_params, wq_params, skip_modules,
+                               channel_wise_names, _prefix=full + ".")
+            )
+
         elif isinstance(m, nn.Linear):
-            # QKV / first MLP linear / Swin downsampling: channel-wise activation quant
-            if name in ('qkv', 'fc1', 'reduction'):
+            if name in channel_wise_names:
                 new_m = QuantLinear(m.in_features, m.out_features, aq_channel, wq_params)
             else:
                 new_m = QuantLinear(m.in_features, m.out_features, aq_params, wq_params)
@@ -161,7 +251,8 @@ def _wrap_modules_(
 
         else:
             quantized.extend(
-                _wrap_modules_(m, aq_params, wq_params, skip_modules, _prefix=full + ".")
+                _wrap_modules_(m, aq_params, wq_params, skip_modules,
+                               channel_wise_names, _prefix=full + ".")
             )
 
     return quantized
@@ -175,17 +266,29 @@ def _set_quant_state_(model: nn.Module, input_quant: bool, weight_quant: bool) -
     for m in model.modules():
         if isinstance(m, (QuantConv2d, QuantLinear, QuantMatMul)):
             m.set_quant_state(input_quant, weight_quant)
+        elif isinstance(m, nn.MultiheadAttention) and hasattr(m, 'use_input_quant'):
+            m.use_input_quant = input_quant
+            m.use_weight_quant = weight_quant
 
 
 # ---------------------------------------------------------------------------
 # Step 4 — scale reparameterization (RepQ-ViT core contribution)
 # ---------------------------------------------------------------------------
 
-def _scale_reparameterize_(timm_model: nn.Module) -> None:
+def _scale_reparameterize_(inner_model: nn.Module, family: str = "timm") -> None:
+    """Dispatch scale reparameterization based on model family."""
+    if family == "timm":
+        _scale_reparameterize_timm_(inner_model)
+    elif family == "open_clip":
+        _scale_reparameterize_open_clip_(inner_model)
+    else:
+        raise ValueError(f"Unknown family={family!r}")
+
+
+def _scale_reparameterize_timm_(timm_model: nn.Module) -> None:
     """
-    RepQ-ViT scale reparameterization (matches original test_quant.py).
-    Iterates ViT/DeiT `blocks` or Swin `layers` and handles all three patterns
-    in one pass:
+    RepQ-ViT scale reparameterization for timm ViT/DeiT/Swin.
+    Iterates ``blocks`` or ``layers`` and handles all three patterns:
         block.norm1         -> block.attn.qkv     (channel-wise activation quant)
         block.norm2         -> block.mlp.fc1      (channel-wise activation quant)
         patch_merging.norm  -> patch_merging.reduction
@@ -227,6 +330,49 @@ def _scale_reparameterize_(timm_model: nn.Module) -> None:
         _reparam_norm_and_linear_(module, next_module)
 
 
+def _scale_reparameterize_open_clip_(open_clip_model: nn.Module) -> None:
+    """
+    RepQ-ViT scale reparameterization for open_clip VisionTransformer.
+    Iterates ``visual.transformer.resblocks`` and handles two patterns per block:
+        block.ln_1  -> block.attn   (MHA with channel-wise input quant on in_proj_weight)
+        block.ln_2  -> block.mlp.c_fc  (channel-wise activation quant)
+    """
+    visual = getattr(open_clip_model, 'visual', None)
+    if visual is None:
+        return
+    transformer = getattr(visual, 'transformer', None)
+    if transformer is None:
+        return
+    resblocks = getattr(transformer, 'resblocks', None)
+    if resblocks is None:
+        return
+
+    for block in resblocks:
+        # ln_1 -> attn (MHA with attached quantizers)
+        ln_1 = getattr(block, 'ln_1', None)
+        attn = getattr(block, 'attn', None)
+        if (
+            ln_1 is not None
+            and isinstance(attn, nn.MultiheadAttention)
+            and hasattr(attn, 'input_quantizer')
+            and attn.input_quantizer.inited
+            and attn.input_quantizer.channel_wise
+        ):
+            _reparam_norm_and_mha_(ln_1, attn)
+
+        # ln_2 -> mlp.c_fc (QuantLinear)
+        ln_2 = getattr(block, 'ln_2', None)
+        mlp = getattr(block, 'mlp', None)
+        c_fc = getattr(mlp, 'c_fc', None) if mlp is not None else None
+        if (
+            ln_2 is not None
+            and isinstance(c_fc, QuantLinear)
+            and c_fc.input_quantizer.inited
+            and c_fc.input_quantizer.channel_wise
+        ):
+            _reparam_norm_and_linear_(ln_2, c_fc)
+
+
 def _reparam_norm_and_linear_(norm: nn.Module, linear: QuantLinear) -> None:
     """
     Absorb per-channel activation scales r (and offsets b) from the calibrated
@@ -265,9 +411,77 @@ def _reparam_norm_and_linear_(norm: nn.Module, linear: QuantLinear) -> None:
     linear.weight_quantizer.inited = False
 
 
+def _reparam_norm_and_mha_(norm: nn.Module, mha: nn.MultiheadAttention) -> None:
+    """
+    Absorb per-channel activation scales from the calibrated channel-wise
+    quantizer attached to *mha* into *norm*'s weight/bias and *mha*'s
+    ``in_proj_weight`` / ``in_proj_bias``, then switch to tensor-wise.
+
+    Same maths as :func:`_reparam_norm_and_linear_` but operates on the MHA's
+    fused ``in_proj_weight`` parameter instead of an nn.Linear's weight.
+    """
+    act_delta = mha.input_quantizer.delta.reshape(-1)               # (C,)
+    act_zero_point = mha.input_quantizer.zero_point.reshape(-1)     # (C,)
+    act_min = -act_zero_point * act_delta                            # per-channel min
+
+    target_delta = act_delta.mean()
+    target_zero_point = act_zero_point.mean()
+    target_min = -target_zero_point * target_delta
+
+    r = act_delta / target_delta         # per-channel scale ratio   (C,)
+    b = act_min / r - target_min         # per-channel bias offset   (C,)
+
+    # Absorb into LayerNorm: divide weight and bias by r, subtract b from bias
+    norm.weight.data = norm.weight.data / r
+    norm.bias.data = norm.bias.data / r - b
+
+    # Absorb into in_proj_weight: multiply along input dimension (dim=1)
+    # in_proj_weight shape: (3*D, D), r shape: (D,) → broadcast on dim=1
+    mha.in_proj_weight.data = mha.in_proj_weight.data * r.unsqueeze(0)
+    bias_correction = (mha.in_proj_weight.data @ b.reshape(-1, 1)).reshape(-1)
+    if mha.in_proj_bias is not None:
+        mha.in_proj_bias.data = mha.in_proj_bias.data + bias_correction
+    else:
+        mha.in_proj_bias = Parameter(bias_correction)
+
+    # Switch input quantizer to tensor-wise with the mean scale
+    mha.input_quantizer.channel_wise = False
+    mha.input_quantizer.delta = target_delta
+    mha.input_quantizer.zero_point = target_zero_point
+    # Reset weight quantizer so it re-calibrates in the next forward pass
+    mha.weight_quantizer.inited = False
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+def _get_inner_model(model: nn.Module, family: str) -> nn.Module:
+    """Navigate from the top-level classifier to the inner backbone model."""
+    if family == "timm":
+        # ImageClassifier.model (timm model)
+        return model.model if hasattr(model, 'model') else model
+    elif family == "open_clip":
+        # ImageClassifier.image_encoder.model (open_clip CLIP model)
+        encoder = getattr(model, 'image_encoder', None)
+        if encoder is not None:
+            return getattr(encoder, 'model', model)
+        return model
+    else:
+        raise ValueError(f"Unknown family={family!r}")
+
+
+def _get_quant_modules(model: nn.Module) -> dict:
+    """Collect all quantized modules (including MHA with attached quantizers)."""
+    quant_types = (QuantConv2d, QuantLinear, QuantMatMul)
+    result = {}
+    for name, m in model.named_modules():
+        if isinstance(m, quant_types):
+            result[name] = m
+        elif isinstance(m, nn.MultiheadAttention) and hasattr(m, 'input_quantizer'):
+            result[name] = m
+    return result
+
 
 def apply_repqvit_(
     model: nn.Module,
@@ -275,11 +489,12 @@ def apply_repqvit_(
     w_bits: int,
     a_bits: int,
     skip_modules: frozenset,
+    family: str = "timm",
+    channel_wise_names: frozenset = None,
     tqdm_kw: dict = None,
 ) -> List[str]:
     """
-    Apply RepQ-ViT post-training quantization to a timm ViT/DeiT/Swin model
-    wrapped in an ImageClassifier.
+    Apply RepQ-ViT post-training quantization.
 
     Steps:
       1. Inject MatMul modules into Attention layers.
@@ -290,18 +505,24 @@ def apply_repqvit_(
       5. Re-calibration — re-initialises weight quantizers after reparameterization.
 
     Args:
-        model:        The nn.Module (e.g. ImageClassifier).
-        calib_data:   A calibration batch of images, shape (N, C, H, W).
-        w_bits:       Bit-width for weights.
-        a_bits:       Bit-width for activations.
-        skip_modules: Frozenset of child attribute names to leave unquantized.
-        tqdm_kw:      Extra kwargs forwarded to tqdm (e.g. disable, colour).
+        model:              The top-level nn.Module (e.g. ImageClassifier).
+        calib_data:         A calibration batch of images, shape (N, C, H, W).
+        w_bits:             Bit-width for weights.
+        a_bits:             Bit-width for activations.
+        skip_modules:       Frozenset of child attribute names to leave unquantized.
+        family:             ``"timm"`` or ``"open_clip"``.
+        channel_wise_names: Frozenset of nn.Linear child names that receive
+                            channel-wise activation quantization.  Defaults to
+                            ``{'qkv', 'fc1', 'reduction'}`` for timm.
+        tqdm_kw:            Extra kwargs forwarded to tqdm (e.g. disable, colour).
 
     Returns:
         List of fully-qualified names of every module that was quantized.
     """
     if tqdm_kw is None:
         tqdm_kw = {}
+    if channel_wise_names is None:
+        channel_wise_names = _TIMM_CHANNEL_WISE_NAMES
 
     device = next(model.parameters()).device
 
@@ -316,21 +537,19 @@ def apply_repqvit_(
 
     # Step 1
     step_bar.set_postfix_str(steps[0])
-    inject_matmul_modules_(model)
+    inject_matmul_modules_(model, family=family)
     step_bar.update(1)
 
     # Step 2
     step_bar.set_postfix_str(steps[1])
     wq_params = {'n_bits': w_bits, 'channel_wise': True}
     aq_params = {'n_bits': a_bits, 'channel_wise': False}
-    quantized_names = _wrap_modules_(model, aq_params, wq_params, skip_modules)
+    quantized_names = _wrap_modules_(model, aq_params, wq_params, skip_modules,
+                                     channel_wise_names)
     step_bar.update(1)
 
     # Build name→module mapping for hook-based progress bars
-    quant_types = (QuantConv2d, QuantLinear, QuantMatMul)
-    quant_modules = {
-        name: m for name, m in model.named_modules() if isinstance(m, quant_types)
-    }
+    quant_modules = _get_quant_modules(model)
 
     # Step 3 — initial calibration
     step_bar.set_postfix_str(steps[2])
@@ -355,10 +574,9 @@ def apply_repqvit_(
 
     # Step 4 — scale reparameterization
     step_bar.set_postfix_str(steps[3])
-    # Reparameterization operates on the inner timm model (image_classifier.model)
-    timm_model = model.model if hasattr(model, 'model') else model
+    inner_model = _get_inner_model(model, family)
     with torch.no_grad():
-        _scale_reparameterize_(timm_model)
+        _scale_reparameterize_(inner_model, family=family)
     step_bar.update(1)
 
     # Step 5 — re-calibration (resets weight quantizers after reparameterization)

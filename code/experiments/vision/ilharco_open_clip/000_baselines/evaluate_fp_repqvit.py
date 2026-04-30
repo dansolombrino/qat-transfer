@@ -12,17 +12,17 @@ load_dotenv()
 
 log = logging.getLogger(__name__)
 
-from src.vision.ilharco_timm_supervised.modeling import ImageClassifier
+from src.vision.ilharco_open_clip.modeling import ImageClassifier, ImageEncoder
+from src.vision.ilharco_open_clip.heads import get_classification_head
 from src.vision.data.registry import get_dataset
 from src.vision.data.common import (
-    DATASET_NAME_TO_NUM_CLASSES,
     DATASET_NAME_TO_EPOCHS,
     maybe_dictionarize,
 )
 from src.vision.utils import (
     accuracy,
     random_tqdm_color,
-    sanitize_timm_model_name,
+    sanitize_open_clip_model_name,
     set_seed,
 )
 from src.repqvit import apply_repqvit_
@@ -94,7 +94,7 @@ def evaluate(
 
 
 @hydra.main(
-    config_path="../../../../../config/experiments/vision/ilharco_timm_supervised/000_baselines",
+    config_path="../../../../../config/experiments/vision/ilharco_open_clip/000_baselines",
     config_name="evaluate_fp_repqvit",
     version_base=None,
 )
@@ -102,13 +102,15 @@ def main(cfg: DictConfig):
 
     set_seed(cfg.seed)
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = torch.device(f"cuda:{cfg.gpu}" if torch.cuda.is_available() else "cpu")
 
     epochs = (
         DATASET_NAME_TO_EPOCHS[cfg.dataset_name]
         if cfg.limit_num_epochs is None
         else cfg.limit_num_epochs
     )
+
+    sanitized_model = sanitize_open_clip_model_name(cfg.model_name, cfg.pretrained)
 
     if IS_SLURM:
         log.info("cfg:\n%s", dict(cfg))
@@ -118,6 +120,7 @@ def main(cfg: DictConfig):
     pipeline_steps = [
         "Loading checkpoint",
         "Creating dataset",
+        "Building classifier",
         "Preparing calibration data",
         "RepQ-ViT quantization",
         "Evaluating (test)",
@@ -144,9 +147,9 @@ def main(cfg: DictConfig):
     checkpoint_dir_parts = [
         checkpoint_base_path,
         "vision",
-        "ilharco_timm_supervised",
+        "ilharco_open_clip",
         "fp_dryrun" if is_dryrun else "fp",
-        sanitize_timm_model_name(cfg.model_name),
+        sanitized_model,
         cfg.dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
         f"seed={cfg.seed}",
@@ -156,22 +159,21 @@ def main(cfg: DictConfig):
         lne = cfg.limit_num_epochs if cfg.limit_num_epochs is not None else "all"
         checkpoint_dir_parts.append(f"lnb={lnb}_lne={lne}")
     checkpoint_dir = os.path.join(*checkpoint_dir_parts)
-    classifier_path = os.path.join(checkpoint_dir, f"classifier_epoch_{epochs}.pt")
-    head_path = os.path.join(checkpoint_dir, f"head_epoch_{epochs}.pt")
+    checkpoint_path = os.path.join(checkpoint_dir, f"epoch_{epochs}.pt")
 
-    print(f"\nLoading encoder from: {classifier_path}")
-    image_classifier = ImageClassifier.load(
+    print(f"\nLoading encoder from: {checkpoint_path}")
+    image_encoder = ImageEncoder.load(
         model_name=cfg.model_name,
-        num_classes=DATASET_NAME_TO_NUM_CLASSES[cfg.dataset_name],
-        filename=classifier_path,
+        pretrained=cfg.pretrained,
+        filename=checkpoint_path,
     )
-    image_classifier.to(device)
+    image_encoder.to(device)
 
-    print(f"\n\nimage_classifier:")
-    pprint(image_classifier, expand_all=True)
+    print(f"\n\nimage_encoder:")
+    pprint(image_encoder, expand_all=True)
     print(f"\n\n")
     if cfg.log_to_file:
-        log.info(f"image_classifier:\n{image_classifier}")
+        log.info(f"image_encoder:\n{image_encoder}")
 
     pipeline_bar.update(1)
 
@@ -189,8 +191,8 @@ def main(cfg: DictConfig):
 
     dataset = get_dataset(
         dataset_name=cfg.dataset_name,
-        preprocess_train=image_classifier.train_preprocess,
-        preprocess_inference=image_classifier.val_preprocess,
+        preprocess_train=image_encoder.train_preprocess,
+        preprocess_inference=image_encoder.val_preprocess,
         batch_size=cfg.batch_size,
         num_workers=int(os.environ['TORCH_NUM_WORKERS']),
         seed=cfg.seed,
@@ -205,10 +207,46 @@ def main(cfg: DictConfig):
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     ############################################################################
-    # BEGIN calibration data
+    # BEGIN classifier creation
     ############################################################################
 
     pipeline_bar.set_postfix_str(pipeline_steps[2])
+
+    head_base_path = os.environ['HEAD_BASE_PATH']
+
+    classification_head = get_classification_head(
+        model_name=cfg.model_name,
+        pretrained=cfg.pretrained,
+        dataset_name=cfg.dataset_name,
+        save_dir=head_base_path,
+        device=device,
+    )
+
+    image_classifier = ImageClassifier(
+        image_encoder=image_encoder,
+        classification_head=classification_head,
+    )
+    image_classifier.to(device)
+
+    print(f"\n\nimage_classifier:")
+    pprint(image_classifier, expand_all=True)
+    print(f"\n\n")
+    if cfg.log_to_file:
+        log.info(f"image_classifier:\n{image_classifier}")
+
+    pipeline_bar.update(1)
+
+    ############################################################################
+    # END classifier creation
+    ############################################################################
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    ############################################################################
+    # BEGIN calibration data
+    ############################################################################
+
+    pipeline_bar.set_postfix_str(pipeline_steps[3])
 
     calib_loader = DataLoader(
         dataset.val_dataset,
@@ -235,7 +273,7 @@ def main(cfg: DictConfig):
     # BEGIN RepQ-ViT quantization
     ############################################################################
 
-    pipeline_bar.set_postfix_str(pipeline_steps[3])
+    pipeline_bar.set_postfix_str(pipeline_steps[4])
 
     skip_modules = frozenset(cfg.repqvit.skip_modules)
 
@@ -250,7 +288,8 @@ def main(cfg: DictConfig):
         w_bits=cfg.repqvit.w_bits,
         a_bits=cfg.repqvit.a_bits,
         skip_modules=skip_modules,
-        family="timm",
+        family="open_clip",
+        channel_wise_names=frozenset(("c_fc",)),
         tqdm_kw=TQDM_KW,
     )
 
@@ -274,7 +313,7 @@ def main(cfg: DictConfig):
     # BEGIN evaluation
     ############################################################################
 
-    pipeline_bar.set_postfix_str(pipeline_steps[4])
+    pipeline_bar.set_postfix_str(pipeline_steps[5])
 
     test_accuracy = evaluate(
         dataset=dataset,
@@ -301,7 +340,7 @@ def main(cfg: DictConfig):
     # BEGIN save results
     ############################################################################
 
-    pipeline_bar.set_postfix_str(pipeline_steps[5])
+    pipeline_bar.set_postfix_str(pipeline_steps[6])
 
     evaluation_base_path = os.environ['EVALUATION_BASE_PATH']
 
@@ -314,11 +353,11 @@ def main(cfg: DictConfig):
     eval_dir = os.path.join(
         evaluation_base_path,
         "vision",
-        "ilharco_timm_supervised",
+        "ilharco_open_clip",
         "000_baselines",
         "vision",
         "fp_repqvit",
-        sanitize_timm_model_name(cfg.model_name),
+        sanitized_model,
         cfg.dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
         f"repqvit=wbits={cfg.repqvit.w_bits}_abits={cfg.repqvit.a_bits}_skip={skip_modules_tag}_cbs={cfg.repqvit.calib_batch_size}",
@@ -327,6 +366,7 @@ def main(cfg: DictConfig):
 
     results = {
         "model_name": cfg.model_name,
+        "pretrained": cfg.pretrained,
         "dataset_name": cfg.dataset_name,
         "batch_size": cfg.batch_size,
         "lr": cfg.lr,
@@ -342,8 +382,7 @@ def main(cfg: DictConfig):
         "test_accuracy": test_accuracy,
         "random_chance": random_chance,
         "num_classes": num_classes,
-        "encoder_path": classifier_path,
-        "head_path": head_path,
+        "checkpoint_path": checkpoint_path,
         "repqvit_w_bits": cfg.repqvit.w_bits,
         "repqvit_a_bits": cfg.repqvit.a_bits,
         "repqvit_skip_modules": list(cfg.repqvit.skip_modules),

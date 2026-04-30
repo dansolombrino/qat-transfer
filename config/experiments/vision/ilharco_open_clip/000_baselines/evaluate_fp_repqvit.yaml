@@ -1,0 +1,27 @@
+hydra:
+  searchpath:
+    - file://${oc.env:PWD}/config
+  sweep:
+    dir: logs/config/experiments/vision/ilharco_open_clip/000_baselines/evaluate_fp_repqvit
+    subdir: ${model_name}__${pretrained}/${dataset_name}/optim=adamw_lr=${lr}_wd=${wd}_ls=${ls}_wl=${wl}_mgn=${max_grad_norm}_bs=${batch_size}/seed=${seed}
+
+model_name: ???
+pretrained: ???
+dataset_name: ???
+batch_size: ???
+lr: ???
+wd: ???
+ls: ???
+wl: ???
+max_grad_norm: ???
+seed: ???
+gpu: ???
+limit_num_epochs: null
+limit_num_batches: null
+log_to_file: false
+
+repqvit:
+  skip_modules: ???  # list of child-module attribute names to exclude, e.g. [classification_head]
+  w_bits: ???        # int — weight quantization bit-width
+  a_bits: ???        # int — activation quantization bit-width
+  calib_batch_size: ???  # int — number of calibration samples (one batch from val set)
