@@ -3,7 +3,7 @@ hydra:
     - file://${oc.env:PWD}/config
   sweep:
     dir: logs/config/experiments/text/ilharco_automodelforsequenceclassification/001_qat_transfer/qv_transfer
-    subdir: ${sanitize_hf:${model_name}}/seed=${target.seed}/qat=bits=${qat.bits}_gran=${qat.granularity}/ptq=bits=${ptq.bits}_gran=${ptq.granularity}/qv=alpha=${qv.alpha}
+    subdir: ${sanitize_hf:${model_name}}/seed=${target.seed}/qat=bits=${qat.bits}_gran=${qat.granularity}/ptq=bits=${ptq.bits}_gran=${ptq.granularity}/qv=alpha=${qv.alpha}_metric=${qv.best_metric}
 
 model_name: ???
 batch_size: ???
@@ -39,7 +39,8 @@ qat:
   skip_modules: ???  # list of child-module attribute names that were skipped during QAT training, e.g. [classifier]
 
 qv:
-  alpha: ???         # float scaling coefficient applied to the QV when patching FP_target
+  alpha: ???         # float scaling coefficient, or "best" to read from best_alpha_*.json on disk
+  best_metric: null  # metric key for best_alpha lookup; required when alpha=best (e.g. val_accuracy_fp_head_ptq)
 
 # FINAL eval PTQ of the patched model.
 ptq:
