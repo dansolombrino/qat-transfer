@@ -97,7 +97,7 @@ def parse_args():
                    help="SLURM job name")
 
     p.add_argument("--output",        default="table",
-                   choices=["table", "json", "commands", "commands-bg", "commands-sbatch"],
+                   choices=["table", "json", "commands", "commands-bg", "commands-sbatch", "disk"],
                    help="Output format (default: table)")
 
     return p.parse_args()
@@ -177,7 +177,7 @@ def find_best_alphas(args):
                     pass
                 else:
                     if not _is_allowed_alpha(alpha_val):
-                        alpha_val = None
+                        continue
 
         if src_dataset is None or tgt_dataset is None or alpha_val is None:
             print(f"  [SKIP] could not parse: {fpath}", file=sys.stderr)
@@ -316,6 +316,32 @@ def output_commands_sbatch(best, args):
             print(_sbatch_wrap(inner, args))
 
 
+def output_disk(best, args):
+    model_dir = sanitize_open_clip_model_name(args.model_name, args.pretrained)
+    optim = _optim_frag(args.lr, args.wd, args.ls, args.wl, args.max_grad_norm, args.batch_size)
+    qat = _qat_frag(args.bits, args.granularity, args.skip_modules)
+    ptq = _ptq_frag(args.bits, args.granularity, args.skip_modules)
+
+    written = 0
+    for src in sorted(best.keys(), key=str.lower):
+        for tgt in sorted(best[src].keys(), key=str.lower):
+            entry = best[src][tgt]
+            best_alpha_dir = os.path.join(
+                EVAL_ROOT_QV, model_dir,
+                f"src={src}_seed={args.seed}",
+                f"tgt={tgt}_seed={args.seed}",
+                optim, qat, ptq,
+            )
+            os.makedirs(best_alpha_dir, exist_ok=True)
+            best_alpha_path = os.path.join(best_alpha_dir, "best_alpha.json")
+            payload = {METRIC_KEY: {"alpha": entry["alpha"], "acc": entry["acc"]}}
+            with open(best_alpha_path, "w") as f:
+                json.dump(payload, f, indent=2)
+            written += 1
+
+    print(f"Wrote {written} best_alpha.json file(s).", file=sys.stderr)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -337,6 +363,8 @@ def main():
         output_commands(best, args, bg=True)
     elif args.output == "commands-sbatch":
         output_commands_sbatch(best, args)
+    elif args.output == "disk":
+        output_disk(best, args)
 
 
 if __name__ == "__main__":

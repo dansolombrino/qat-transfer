@@ -103,6 +103,53 @@ def _qat_ckpt_path(cfg: DictConfig, dataset_name: str, seed: int, epochs: int) -
     )
 
 
+def _resolve_alpha(cfg, source_dataset_name, target_dataset_name):
+    """Return the numeric alpha to use.
+
+    If cfg.qv.alpha is ``"best"``, reads best_alpha.json from disk.
+    Otherwise returns ``float(cfg.qv.alpha)``.  Returns ``None`` when
+    the best_alpha.json file is missing (caller should skip the pair).
+    """
+    raw = str(cfg.qv.alpha)
+    if raw != "best":
+        return float(raw)
+
+    evaluation_base_path = os.environ["EVALUATION_BASE_PATH"]
+    sanitized_model = sanitize_open_clip_model_name(cfg.model_name, cfg.pretrained)
+    qat_skip_tag = "-".join(sorted(cfg.qat.skip_modules)) if len(cfg.qat.skip_modules) > 0 else "none"
+    ptq_skip_tag = "-".join(sorted(cfg.ptq.skip_modules)) if len(cfg.ptq.skip_modules) > 0 else "none"
+
+    best_alpha_path = os.path.join(
+        evaluation_base_path,
+        "vision", "ilharco_open_clip", "001_qat_transfer", "vision", "qv_transfer",
+        sanitized_model,
+        f"src={source_dataset_name}_seed={cfg.source.seed}",
+        f"tgt={target_dataset_name}_seed={cfg.target.seed}",
+        f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
+        f"qat=bits={cfg.qat.bits}_gran={cfg.qat.granularity}_skip={qat_skip_tag}",
+        f"ptq=bits={cfg.ptq.bits}_gran={cfg.ptq.granularity}_skip={ptq_skip_tag}",
+        "best_alpha.json",
+    )
+
+    if not os.path.exists(best_alpha_path):
+        return None
+
+    with open(best_alpha_path) as f:
+        data = json.load(f)
+
+    metric_key = cfg.qv.get("best_metric", None)
+    if metric_key is None:
+        if len(data) == 1:
+            metric_key = next(iter(data))
+        else:
+            raise ValueError(
+                f"best_alpha.json has {len(data)} metrics but qv.best_metric is not set. "
+                f"Available: {list(data.keys())}"
+            )
+
+    return float(data[metric_key]["alpha"])
+
+
 def evaluate(
     dataset,
     model: torch.nn.Module,
@@ -272,7 +319,19 @@ def _run_pair(
     # BEGIN patched-model assembly
     ############################################################################
 
-    alpha = float(cfg.qv.alpha)
+    alpha = _resolve_alpha(cfg, source_dataset_name, target_dataset_name)
+    if alpha is None:
+        if IS_SLURM:
+            log.warning(
+                "Skipping source=%s target=%s: best_alpha.json not found",
+                source_dataset_name, target_dataset_name,
+            )
+        else:
+            print(
+                f"Warning: Skipping source={source_dataset_name} "
+                f"target={target_dataset_name}: best_alpha.json not found"
+            )
+        return
     patched = {}
     with torch.no_grad():
         for k, v_tgt in fp_tgt_sd.items():

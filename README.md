@@ -741,7 +741,7 @@ uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/e
 ### qv_transfer — [code/experiments/vision/ilharco_open_clip/001_qat_transfer/qv_transfer.py](code/experiments/vision/ilharco_open_clip/001_qat_transfer/qv_transfer.py)
 Config: [config/experiments/vision/ilharco_open_clip/001_qat_transfer/qv_transfer.yaml](config/experiments/vision/ilharco_open_clip/001_qat_transfer/qv_transfer.yaml)
 
-Same concept as the other vision variants. Uses `source.dataset_names` and `target.dataset_names` (plural — lists of datasets iterated internally by the script). Requires `eval_split` (`val` or `test`).
+Same concept as the other vision variants. Uses `source.dataset_names` and `target.dataset_names` (plural — lists of datasets iterated internally by the script). Requires `eval_split` (`val` or `test`). Supports `qv.alpha=best` to read the best alpha per (source, target) pair from `best_alpha.json` files written by `pick_best_alpha.py --output disk`.
 
 Single local run:
 ```
@@ -758,12 +758,23 @@ Submitit parallel sweep (all source x all target datasets):
 uv run --active python code/experiments/vision/ilharco_open_clip/001_qat_transfer/qv_transfer.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai batch_size=128 eval_split=val lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 'source.dataset_names=[Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet]' source.seed=2038 'target.dataset_names=[Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet]' target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' qv.alpha=0.25,0.5,0.75,1.0 ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]' gpu=0
 ```
 
+Test-set evaluation with best alpha (requires `pick_best_alpha.py --output disk` first):
+```
+uv run --active python code/experiments/vision/ilharco_open_clip/001_qat_transfer/qv_transfer.py -m hydra/launcher=submitit_slurm model_name=ViT-B-32 pretrained=openai batch_size=128 eval_split=test lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 'source.dataset_names=[Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet]' source.seed=2038 'target.dataset_names=[Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet]' target.seed=1,2,3 qat.bits=3 qat.granularity=channel 'qat.skip_modules=[classification_head]' qv.alpha=best ptq.bits=3 ptq.granularity=channel 'ptq.skip_modules=[classification_head]' gpu=0
+```
+
 ### pick_best_alpha — [code/experiments/vision/ilharco_open_clip/001_qat_transfer/pick_best_alpha.py](code/experiments/vision/ilharco_open_clip/001_qat_transfer/pick_best_alpha.py)
 
-Same as the timm_supervised variant but adds `--pretrained`. Restricted alpha sweep: `(0.15, 0.30, 0.45, 0.60, 0.75, 0.90, 1.00, 1.05, 1.20, 1.35, 1.50)`. Output modes: `table`, `json`, `commands`, `commands-bg`, `commands-sbatch`.
+Same as the timm_supervised variant but adds `--pretrained`. Restricted alpha sweep: `(0.15, 0.30, 0.45, 0.60, 0.75, 0.90, 1.00, 1.05, 1.20, 1.35, 1.50)`. Output modes: `table`, `json`, `commands`, `commands-bg`, `commands-sbatch`, `disk`.
 
+Show best alphas as a table:
 ```
 uv run --active python code/experiments/vision/ilharco_open_clip/001_qat_transfer/pick_best_alpha.py --model-name ViT-B-32 --pretrained openai --seed 2038 --lr 1e-5 --wd 0.1 --ls 0.0 --wl 500 --max-grad-norm 1.0 --batch-size 128 --bits 4 --granularity channel --skip-modules classification_head --slurm-timeout 120 --slurm-job-name pick_best --output table
+```
+
+Write best alphas to disk (one `best_alpha.json` per (source, target) pair, used by `qv.alpha=best`):
+```
+uv run --active python code/experiments/vision/ilharco_open_clip/001_qat_transfer/pick_best_alpha.py --model-name ViT-B-32 --pretrained openai --seed 2038 --lr 1e-5 --wd 0.1 --ls 0.0 --wl 500 --max-grad-norm 1.0 --batch-size 128 --bits 4 --granularity channel --skip-modules classification_head --slurm-timeout 120 --slurm-job-name pick_best --output disk
 ```
 
 ---

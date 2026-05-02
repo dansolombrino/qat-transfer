@@ -40,7 +40,8 @@ qat:
   skip_modules: ???  # list of child-module attribute names that were skipped during QAT training, e.g. [classification_head]
 
 qv:
-  alpha: ???         # float scaling coefficient applied to the QV when patching FP_target
+  alpha: ???         # float scaling coefficient, or "best" to read from best_alpha.json on disk
+  best_metric: null  # metric key for best_alpha.json lookup (null = auto-detect sole key)
 
 # FINAL eval PTQ of the patched model.
 ptq:
