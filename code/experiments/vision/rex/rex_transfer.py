@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 import hydra
@@ -18,7 +19,11 @@ from omegaconf import DictConfig
 from tqdm import tqdm
 
 from src.quantization import apply_ptq_, fake_quantize_tensor
-from src.vision.data.common import DATASET_NAME_TO_EPOCHS, DATASET_NAME_TO_NUM_CLASSES, maybe_dictionarize
+from src.vision.data.common import (
+    DATASET_NAME_TO_EPOCHS,
+    DATASET_NAME_TO_NUM_CLASSES,
+    maybe_dictionarize,
+)
 from src.vision.data.registry import get_dataset
 from src.vision.ilharco_hf_clip.heads import get_classification_head as get_hf_classification_head
 from src.vision.ilharco_hf_clip.modeling import (
@@ -60,6 +65,23 @@ def _resolve_skip_modules(
     model_family: str,
     force_head_exclusion: bool = False,
 ) -> frozenset[str]:
+    """
+    Resolve the set of modules to skip during rex transfer.
+
+    Args:
+        configured: User-configured sequence of module names to skip. If None,
+            uses default skip modules for the model family.
+        model_family: The model family (e.g., 'resnet', 'vit') used to determine
+            default skip modules.
+        force_head_exclusion: If True, always includes default skip modules in
+            the result. If False, uses configured modules as-is when provided.
+
+    Returns:
+        A frozenset of module names that should be skipped during rex transfer.
+        If configured is None, returns the default skip modules for the model family.
+        If force_head_exclusion is True, returns the union of configured and default
+        modules. Otherwise returns configured modules when provided.
+    """
     default = set(_default_skip_modules(model_family))
     if configured is None:
         return frozenset(default)
@@ -127,6 +149,30 @@ def _load_classifier(
     checkpoint_path: str,
     device: torch.device,
 ) -> nn.Module:
+    """
+    Load a classification model based on the specified model family configuration.
+    
+    Supports loading classifiers for different model families:
+    - "ilharco_hf_clip": Loads a Hugging Face CLIP-based image classifier with a 
+      dataset-specific classification head. The head is looked up first in the 
+      configured location, then in a derived path based on checkpoint storage root if needed.
+    - "ilharco_timm_supervised": Loads a TIMM-based image classifier.
+    
+    Args:
+        cfg (DictConfig): Configuration object containing model family, model name, 
+            head base path, and checkpoint roots.
+        dataset_name (str): Name of the dataset used to locate the appropriate 
+            classification head.
+        checkpoint_path (str): Path to the model checkpoint file to load.
+        device (torch.device): Device on which to load the model.
+    
+    Returns:
+        nn.Module: A loaded image classifier module (HFImageClassifier or 
+            TimmImageClassifier).
+    
+    Raises:
+        ValueError: If the specified model_family in cfg is not supported.
+    """
     if cfg.model_family == "ilharco_hf_clip":
         configured_head_base_path = str(cfg.head_base_path)
         expected_head_path = os.path.join(
@@ -179,17 +225,6 @@ def _load_classifier(
     raise ValueError(f"Unsupported model_family: {cfg.model_family}")
 
 
-def _build_dataset(cfg: DictConfig, dataset_name: str, classifier: nn.Module):
-    return get_dataset(
-        dataset_name=dataset_name,
-        preprocess_train=classifier.train_preprocess,
-        preprocess_inference=classifier.val_preprocess,
-        batch_size=cfg.batch_size,
-        num_workers=int(cfg.num_workers),
-        seed=cfg.target.seed,
-    )
-
-
 def _evaluate(
     dataset,
     model: nn.Module,
@@ -200,9 +235,7 @@ def _evaluate(
     loader = dataset.test_loader
     num_batches = len(loader)
     effective_num_batches = (
-        min(limit_num_batches, num_batches)
-        if limit_num_batches is not None
-        else num_batches
+        min(limit_num_batches, num_batches) if limit_num_batches is not None else num_batches
     )
 
     model.to(device=device)
@@ -228,7 +261,7 @@ def _evaluate(
             inputs = batch["images"].to(device=device)
             labels = batch["labels"].to(device=device, dtype=torch.long)
             logits = model(inputs)
-            top1, = accuracy(logits, labels, topk=(1,))
+            (top1,) = accuracy(logits, labels, topk=(1,))
             correct += top1
             total += labels.size(0)
             batch_bar.set_postfix(acc=f"{100.0 * correct / max(total, 1):.2f}%")
@@ -457,7 +490,11 @@ def _build_eval_dir(
             f"_skip={_skip_tag(ptq_skip_modules)}"
         ),
     ]
-    if cfg.limit_num_batches is not None or cfg.source.limit_num_epochs is not None or cfg.target.limit_num_epochs is not None:
+    if (
+        cfg.limit_num_batches is not None
+        or cfg.source.limit_num_epochs is not None
+        or cfg.target.limit_num_epochs is not None
+    ):
         lnb = cfg.limit_num_batches if cfg.limit_num_batches is not None else "all"
         src_lne = cfg.source.limit_num_epochs if cfg.source.limit_num_epochs is not None else "all"
         tgt_lne = cfg.target.limit_num_epochs if cfg.target.limit_num_epochs is not None else "all"
@@ -466,6 +503,47 @@ def _build_eval_dir(
 
 
 @hydra.main(
+    """
+    Main entry point for REx transfer evaluation.
+
+    This function orchestrates a comprehensive transfer evaluation pipeline
+    that tests weight displacement transfer (REx) across multiple source-target dataset
+    pairs with various alpha blending coefficients. It evaluates both full-precision (FP)
+    and post-training quantized (PTQ) model variants.
+
+    Args:
+        cfg (DictConfig): Hydra configuration containing:
+            - target: Target dataset configuration (dataset_names, seed, limit_num_epochs)
+            - source: Source dataset configuration (dataset_names, seed, limit_num_epochs)
+            - alphas: List of blending coefficients for displacement transfer
+            - rex: REx configuration (bits, order, sparsity, granularity, skip_modules)
+            - ptq: PTQ configuration (bits, granularity, skip_modules)
+            - model_family: Model architecture family identifier
+            - model_name: Specific model name
+            - num_workers: Number of data loading workers
+            - batch_size: Training/evaluation batch size
+            - lr: Learning rate
+            - wd: Weight decay
+            - ls: Label smoothing
+            - wl: Weight loss
+            - max_grad_norm: Maximum gradient norm
+            - limit_num_batches: Limit evaluation batches for testing
+            - skip_missing_pairs: Whether to skip missing checkpoint pairs
+
+    Returns:
+        None. Results are saved as JSON files to the evaluation directory.
+
+    Raises:
+        ValueError: If dataset_names or alphas lists are empty
+        FileNotFoundError: If required checkpoint files are missing and skip_missing_pairs is False
+        RuntimeError: If no source->target pairs produce valid results
+
+    Side Effects:
+        - Sets random seed for reproducibility
+        - Creates evaluation directories and writes JSON result files
+        - Manages GPU memory by moving tensors to CPU and clearing cache
+        - Prints progress and result summaries to stdout
+    """
     config_path="../../../../config/experiments/vision/rex",
     config_name="rex_transfer",
     version_base=None,
@@ -476,7 +554,11 @@ def main(cfg: DictConfig):
     cfg.num_workers = int(os.environ.get("TORCH_NUM_WORKERS", cfg.num_workers))
 
     source_datasets = [str(x) for x in cfg.source.dataset_names]
+    if len(source_datasets) == 0:
+        raise ValueError("cfg.source.dataset_names must contain at least one value")
     target_datasets = [str(x) for x in cfg.target.dataset_names]
+    if len(target_datasets) == 0:
+        raise ValueError("cfg.target.dataset_names must contain at least one value")
     alphas = [float(x) for x in cfg.alphas]
     if len(alphas) == 0:
         raise ValueError("cfg.alphas must contain at least one value")
@@ -497,6 +579,11 @@ def main(cfg: DictConfig):
     produced_pairs = 0
     skipped_pairs = 0
     total_pairs = len(source_datasets) * len(target_datasets)
+    print(
+        f"Starting REx transfer evaluation: total_pairs={total_pairs}, "
+        f"rex_skip_modules={sorted(rex_skip_modules)}, "
+        f"ptq_skip_modules={sorted(ptq_skip_modules)}"
+    )
 
     for target_dataset_name in target_datasets:
         target_epochs = _resolve_epochs(
@@ -517,7 +604,7 @@ def main(cfg: DictConfig):
                 continue
             raise FileNotFoundError(msg)
 
-        print(f"\n[Target] {target_dataset_name}")
+        print(f"\n[Target] {target_dataset_name} trained for {target_epochs} epochs")
         print(f"Loading target checkpoint: {target_checkpoint_path}")
 
         target_classifier = _load_classifier(
@@ -527,10 +614,13 @@ def main(cfg: DictConfig):
             device=device,
         ).to("cpu")
 
-        target_dataset = _build_dataset(
-            cfg=cfg,
+        target_dataset = get_dataset(
             dataset_name=target_dataset_name,
-            classifier=target_classifier,
+            preprocess_train=target_classifier.train_preprocess,
+            preprocess_inference=target_classifier.val_preprocess,
+            batch_size=cfg.batch_size,
+            num_workers=int(cfg.num_workers),
+            seed=cfg.target.seed,
         )
 
         target_fp_accuracy = _evaluate(
@@ -586,7 +676,7 @@ def main(cfg: DictConfig):
 
             print(
                 f"\n[Pair] source={source_dataset_name} -> target={target_dataset_name}\n"
-                f"Loading source checkpoint: {source_checkpoint_path}"
+                f"Loading source checkpoint: {source_checkpoint_path} trained for {source_epochs} epochs"
             )
 
             source_classifier = _load_classifier(

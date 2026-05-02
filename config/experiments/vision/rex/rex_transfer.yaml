@@ -16,7 +16,7 @@ wl: 500
 max_grad_norm: 1.0
 
 limit_num_batches: null
-num_workers: 4
+num_workers: 6
 head_base_path: ${oc.env:HEAD_BASE_PATH,heads}
 skip_missing_pairs: true
 
@@ -37,13 +37,13 @@ checkpoint_roots:
   timm_supervised_fp: /media/hdd1_4TB/dansolombrino/cache/PARA/Projects/quantization/qat-transfer/storage/checkpoints/vision/ilharco_timm_supervised/fp
 
 rex:
-  bits: 4
+  bits: 3
   order: 2
   sparsity: 0.5
   granularity: channel
   skip_modules: null
 
 ptq:
-  bits: 4
+  bits: 3
   granularity: channel
   skip_modules: null
