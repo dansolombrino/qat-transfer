@@ -18,7 +18,7 @@ import torch.nn as nn
 from omegaconf import DictConfig
 from tqdm import tqdm
 
-from src.quantization import apply_ptq_, fake_quantize_tensor
+from src.quantization import RexLinear, apply_ptq_, fake_quantize_tensor
 from src.vision.data.common import (
     DATASET_NAME_TO_EPOCHS,
     DATASET_NAME_TO_NUM_CLASSES,
@@ -151,25 +151,25 @@ def _load_classifier(
 ) -> nn.Module:
     """
     Load a classification model based on the specified model family configuration.
-    
+
     Supports loading classifiers for different model families:
-    - "ilharco_hf_clip": Loads a Hugging Face CLIP-based image classifier with a 
-      dataset-specific classification head. The head is looked up first in the 
+    - "ilharco_hf_clip": Loads a Hugging Face CLIP-based image classifier with a
+      dataset-specific classification head. The head is looked up first in the
       configured location, then in a derived path based on checkpoint storage root if needed.
     - "ilharco_timm_supervised": Loads a TIMM-based image classifier.
-    
+
     Args:
-        cfg (DictConfig): Configuration object containing model family, model name, 
+        cfg (DictConfig): Configuration object containing model family, model name,
             head base path, and checkpoint roots.
-        dataset_name (str): Name of the dataset used to locate the appropriate 
+        dataset_name (str): Name of the dataset used to locate the appropriate
             classification head.
         checkpoint_path (str): Path to the model checkpoint file to load.
         device (torch.device): Device on which to load the model.
-    
+
     Returns:
-        nn.Module: A loaded image classifier module (HFImageClassifier or 
+        nn.Module: A loaded image classifier module (HFImageClassifier or
             TimmImageClassifier).
-    
+
     Raises:
         ValueError: If the specified model_family in cfg is not supported.
     """
@@ -280,24 +280,23 @@ def _sparsify_by_output_channel(weight: torch.Tensor, sparsity: float) -> torch.
 
     out_channels = weight.shape[0]
     keep_fraction = 1.0 - sparsity
-    keep_channels = int(round(keep_fraction * out_channels))
-    keep_channels = max(0, min(out_channels, keep_channels))
-
-    if keep_channels == out_channels:
+    if keep_fraction >= 1.0:
         return weight
-    if keep_channels == 0:
+    if keep_fraction <= 0.0:
         return torch.zeros_like(weight)
 
-    channel_norms = weight.abs().flatten(start_dim=1).sum(dim=1)
-    topk_indices = torch.topk(
-        channel_norms,
-        k=keep_channels,
-        largest=True,
-        sorted=False,
-    ).indices
+    channel_norms = torch.linalg.vector_norm(
+        weight.flatten(start_dim=1),
+        ord=2,
+        dim=1,
+    )
+    threshold = torch.quantile(channel_norms, sparsity)
+    mask = channel_norms > threshold
+    if mask.all():
+        return weight
+    if not mask.any():
+        return torch.zeros_like(weight)
 
-    mask = torch.zeros(out_channels, dtype=torch.bool, device=weight.device)
-    mask[topk_indices] = True
     view_shape = [out_channels] + [1] * (weight.ndim - 1)
     return weight * mask.view(view_shape)
 
@@ -309,23 +308,44 @@ def _rex_expand_weight(
     order: int,
     sparsity: float,
 ) -> torch.Tensor:
+    terms = _rex_expand_terms(
+        weight=weight,
+        bits=bits,
+        granularity=granularity,
+        order=order,
+        sparsity=sparsity,
+    )
+    return torch.stack(terms, dim=0).sum(dim=0)
+
+
+def _rex_expand_terms(
+    weight: torch.Tensor,
+    bits: int,
+    granularity: str,
+    order: int,
+    sparsity: float,
+) -> List[torch.Tensor]:
     if order < 1:
         raise ValueError(f"order must be >= 1, got {order}")
 
     residual = weight
-    expanded = torch.zeros_like(weight)
+    terms: List[torch.Tensor] = []
 
     for k in range(order):
-        quantized_residual = fake_quantize_tensor(residual, bits, granularity)
-        if k > 0:
-            quantized_residual = _sparsify_by_output_channel(
-                quantized_residual,
-                sparsity,
+        if k == 0:
+            quantized_residual = fake_quantize_tensor(residual, bits, granularity)
+            residual = residual - quantized_residual
+        else:
+            masked_residual = _sparsify_by_output_channel(residual, sparsity)
+            quantized_residual = fake_quantize_tensor(
+                masked_residual,
+                bits,
+                granularity,
             )
-        expanded = expanded + quantized_residual
-        residual = residual - quantized_residual
+            residual = masked_residual - quantized_residual
+        terms.append(quantized_residual)
 
-    return expanded
+    return terms
 
 
 def apply_rex_ptq_(
@@ -358,6 +378,55 @@ def apply_rex_ptq_(
         else:
             quantized.extend(
                 apply_rex_ptq_(
+                    model=module,
+                    bits=bits,
+                    granularity=granularity,
+                    order=order,
+                    sparsity=sparsity,
+                    skip_modules=skip_modules,
+                    _prefix=full + ".",
+                )
+            )
+
+    return quantized
+
+
+def apply_rex_ptq_terms_(
+    model: nn.Module,
+    bits: int,
+    granularity: str,
+    order: int,
+    sparsity: float,
+    skip_modules: frozenset[str],
+    _prefix: str = "",
+) -> List[str]:
+    quantized: List[str] = []
+
+    for name, module in model.named_children():
+        if name in skip_modules:
+            continue
+        full = f"{_prefix}{name}"
+        if isinstance(module, nn.Linear):
+            with torch.no_grad():
+                terms = _rex_expand_terms(
+                    weight=module.weight,
+                    bits=bits,
+                    granularity=granularity,
+                    order=order,
+                    sparsity=sparsity,
+                )
+                base_weight = terms[0]
+                correction_terms = terms[1:]
+                rex_linear = RexLinear(
+                    base_weight=base_weight,
+                    correction_terms=correction_terms,
+                    bias=module.bias,
+                )
+            setattr(model, name, rex_linear)
+            quantized.append(full)
+        else:
+            quantized.extend(
+                apply_rex_ptq_terms_(
                     model=module,
                     bits=bits,
                     granularity=granularity,
@@ -503,6 +572,11 @@ def _build_eval_dir(
 
 
 @hydra.main(
+    config_path="../../../../config/experiments/vision/rex",
+    config_name="rex_transfer",
+    version_base=None,
+)
+def main(cfg: DictConfig):
     """
     Main entry point for REx transfer evaluation.
 
@@ -544,11 +618,6 @@ def _build_eval_dir(
         - Manages GPU memory by moving tensors to CPU and clearing cache
         - Prints progress and result summaries to stdout
     """
-    config_path="../../../../config/experiments/vision/rex",
-    config_name="rex_transfer",
-    version_base=None,
-)
-def main(cfg: DictConfig):
     set_seed(int(cfg.target.seed))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     cfg.num_workers = int(os.environ.get("TORCH_NUM_WORKERS", cfg.num_workers))
@@ -623,13 +692,25 @@ def main(cfg: DictConfig):
             seed=cfg.target.seed,
         )
 
+        target_eval_classifier = copy.deepcopy(target_classifier).to("cpu")
+        apply_rex_ptq_terms_(
+            model=target_eval_classifier,
+            bits=int(cfg.rex.bits),
+            granularity=cfg.rex.granularity,
+            order=int(cfg.rex.order),
+            sparsity=float(cfg.rex.sparsity),
+            skip_modules=rex_skip_modules,
+        )
         target_fp_accuracy = _evaluate(
             dataset=target_dataset,
-            model=target_classifier,
+            model=target_eval_classifier,
             device=device,
             limit_num_batches=cfg.limit_num_batches,
-            desc=f"Target FP ({target_dataset_name})",
+            desc=f"Target REx ({target_dataset_name})",
         )
+        del target_eval_classifier
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         target_fp_ptq_model = copy.deepcopy(target_classifier).to("cpu")
         target_fp_ptq_layers = apply_ptq_(
@@ -707,16 +788,28 @@ def main(cfg: DictConfig):
                 )
                 patched_classifier.load_state_dict(patched_state_dict)
 
+                patched_eval_classifier = copy.deepcopy(patched_classifier).to("cpu")
+                apply_rex_ptq_terms_(
+                    model=patched_eval_classifier,
+                    bits=int(cfg.rex.bits),
+                    granularity=cfg.rex.granularity,
+                    order=int(cfg.rex.order),
+                    sparsity=float(cfg.rex.sparsity),
+                    skip_modules=rex_skip_modules,
+                )
                 patched_fp_accuracy = _evaluate(
                     dataset=target_dataset,
-                    model=patched_classifier,
+                    model=patched_eval_classifier,
                     device=device,
                     limit_num_batches=cfg.limit_num_batches,
                     desc=(
-                        f"REx transfer FP src={source_dataset_name} "
+                        f"REx transfer src={source_dataset_name} "
                         f"tgt={target_dataset_name} a={alpha:g}"
                     ),
                 )
+                del patched_eval_classifier
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
                 patched_ptq_layers = apply_ptq_(
                     model=patched_classifier,

@@ -17,7 +17,7 @@ import torch.nn as nn
 from omegaconf import DictConfig
 from tqdm import tqdm
 
-from src.quantization import apply_ptq_, fake_quantize_tensor
+from src.quantization import RexLinear, apply_ptq_, fake_quantize_tensor
 from src.vision.data.common import DATASET_NAME_TO_EPOCHS, DATASET_NAME_TO_NUM_CLASSES, maybe_dictionarize
 from src.vision.data.registry import get_dataset
 from src.vision.ilharco_hf_clip.heads import get_classification_head as get_hf_classification_head
@@ -201,31 +201,27 @@ def _sparsify_by_output_channel(weight: torch.Tensor, sparsity: float) -> torch.
         return torch.zeros_like(weight)
 
     if weight.ndim < 2:
-        keep_fraction = 1.0 - sparsity
-        if keep_fraction <= 0.0:
-            return torch.zeros_like(weight)
         return weight
 
     out_channels = weight.shape[0]
     keep_fraction = 1.0 - sparsity
-    keep_channels = int(round(keep_fraction * out_channels))
-    keep_channels = max(0, min(out_channels, keep_channels))
-
-    if keep_channels == out_channels:
+    if keep_fraction >= 1.0:
         return weight
-    if keep_channels == 0:
+    if keep_fraction <= 0.0:
         return torch.zeros_like(weight)
 
-    channel_norms = weight.abs().flatten(start_dim=1).sum(dim=1)
-    topk_indices = torch.topk(
-        channel_norms,
-        k=keep_channels,
-        largest=True,
-        sorted=False,
-    ).indices
+    channel_norms = torch.linalg.vector_norm(
+        weight.flatten(start_dim=1),
+        ord=2,
+        dim=1,
+    )
+    threshold = torch.quantile(channel_norms, sparsity)
+    mask = channel_norms > threshold
+    if mask.all():
+        return weight
+    if not mask.any():
+        return torch.zeros_like(weight)
 
-    mask = torch.zeros(out_channels, dtype=torch.bool, device=weight.device)
-    mask[topk_indices] = True
     view_shape = [out_channels] + [1] * (weight.ndim - 1)
     return weight * mask.view(view_shape)
 
@@ -237,22 +233,44 @@ def _rex_expand_weight(
     order: int,
     sparsity: float,
 ) -> torch.Tensor:
+    terms = _rex_expand_terms(
+        weight=weight,
+        bits=bits,
+        granularity=granularity,
+        order=order,
+        sparsity=sparsity,
+    )
+    return torch.stack(terms, dim=0).sum(dim=0)
+
+
+def _rex_expand_terms(
+    weight: torch.Tensor,
+    bits: int,
+    granularity: str,
+    order: int,
+    sparsity: float,
+) -> List[torch.Tensor]:
     if order < 1:
         raise ValueError(f"order must be >= 1, got {order}")
 
     residual = weight
-    expanded = torch.zeros_like(weight)
+    terms: List[torch.Tensor] = []
 
     for k in range(order):
-        quantized_residual = fake_quantize_tensor(residual, bits, granularity)
-        if k > 0:
-            quantized_residual = _sparsify_by_output_channel(
-                quantized_residual, sparsity
+        if k == 0:
+            quantized_residual = fake_quantize_tensor(residual, bits, granularity)
+            residual = residual - quantized_residual
+        else:
+            masked_residual = _sparsify_by_output_channel(residual, sparsity)
+            quantized_residual = fake_quantize_tensor(
+                masked_residual,
+                bits,
+                granularity,
             )
-        expanded = expanded + quantized_residual
-        residual = residual - quantized_residual
+            residual = masked_residual - quantized_residual
+        terms.append(quantized_residual)
 
-    return expanded
+    return terms
 
 
 def apply_rex_ptq_(
@@ -285,6 +303,55 @@ def apply_rex_ptq_(
         else:
             quantized.extend(
                 apply_rex_ptq_(
+                    model=module,
+                    bits=bits,
+                    granularity=granularity,
+                    order=order,
+                    sparsity=sparsity,
+                    skip_modules=skip_modules,
+                    _prefix=full + ".",
+                )
+            )
+
+    return quantized
+
+
+def apply_rex_ptq_terms_(
+    model: nn.Module,
+    bits: int,
+    granularity: str,
+    order: int,
+    sparsity: float,
+    skip_modules: frozenset[str],
+    _prefix: str = "",
+) -> List[str]:
+    quantized: List[str] = []
+
+    for name, module in model.named_children():
+        if name in skip_modules:
+            continue
+        full = f"{_prefix}{name}"
+        if isinstance(module, nn.Linear):
+            with torch.no_grad():
+                terms = _rex_expand_terms(
+                    weight=module.weight,
+                    bits=bits,
+                    granularity=granularity,
+                    order=order,
+                    sparsity=sparsity,
+                )
+                base_weight = terms[0]
+                correction_terms = terms[1:]
+                rex_linear = RexLinear(
+                    base_weight=base_weight,
+                    correction_terms=correction_terms,
+                    bias=module.bias,
+                )
+            setattr(model, name, rex_linear)
+            quantized.append(full)
+        else:
+            quantized.extend(
+                apply_rex_ptq_terms_(
                     model=module,
                     bits=bits,
                     granularity=granularity,
@@ -395,7 +462,7 @@ def main(cfg: DictConfig):
         for sparsity in cfg.rex.sparsity:
             sparsity = float(sparsity)
             rex_model = copy.deepcopy(base_classifier).to("cpu")
-            rex_layers = apply_rex_ptq_(
+            rex_layers = apply_rex_ptq_terms_(
                 model=rex_model,
                 bits=bits,
                 granularity=cfg.rex.granularity,

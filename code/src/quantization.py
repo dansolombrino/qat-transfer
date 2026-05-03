@@ -281,6 +281,56 @@ class QuantizedLinear(nn.Module):
         return dequantize_tensor(self.int_weight, self.scale)
 
 
+class RexLinear(nn.Module):
+
+    """
+    Inference-time wrapper that stores a base quantized weight plus
+    K-1 correction terms and sums them on forward.
+    """
+
+    def __init__(
+        self,
+        base_weight: torch.Tensor,
+        correction_terms: List[torch.Tensor],
+        bias: Optional[torch.Tensor],
+    ):
+        super().__init__()
+        if base_weight.ndim != 2:
+            raise ValueError("RexLinear expects a 2D weight tensor")
+
+        self.in_features = base_weight.shape[1]
+        self.out_features = base_weight.shape[0]
+
+        self.register_buffer("base_weight", base_weight)
+        if len(correction_terms) == 0:
+            corrections = torch.empty(
+                (0, *base_weight.shape),
+                dtype=base_weight.dtype,
+                device=base_weight.device,
+            )
+        else:
+            corrections = torch.stack(correction_terms, dim=0)
+        self.register_buffer("correction_terms", corrections)
+
+        if bias is not None:
+            self.register_buffer("bias", bias)
+        else:
+            self.bias = None
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        weight = self.base_weight
+        if self.correction_terms.numel() > 0:
+            weight = weight + self.correction_terms.sum(dim=0)
+        return F.linear(x, weight, self.bias)
+
+    @property
+    def weight(self) -> torch.Tensor:
+        weight = self.base_weight
+        if self.correction_terms.numel() > 0:
+            weight = weight + self.correction_terms.sum(dim=0)
+        return weight
+
+
 # =============================================================================
 # Model-level enable / disable / convert helpers (all mutate the model in-place)
 # =============================================================================
