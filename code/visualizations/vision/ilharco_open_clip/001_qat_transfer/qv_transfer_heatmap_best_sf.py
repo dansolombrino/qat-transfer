@@ -17,10 +17,8 @@ annotated with a trailing '*' in the cell text.
 """
 
 import argparse
-import glob
 import json
 import os
-import re
 import sys
 
 from pathlib import Path
@@ -87,21 +85,14 @@ DATASET_NAME_TO_NUM_CLASSES = {
     "ImageNet":      1000,
 }
 
-VAL_METRIC_KEY  = "val_accuracy_patched_qat_ptq"
+BEST_ALPHA_FILE = "best_alpha.json"
+BEST_ALPHA_KEY  = "val_accuracy_patched_qat_ptq"
+
 TEST_METRIC_KEY = "test_accuracy_patched_qat_ptq"
 TEST_ACC_KEY    = "test_accuracy"
 
 HEATMAP_COLORSCALE_SEQUENTIAL = "Viridis"
 HEATMAP_COLORSCALE_DIVERGING  = "RdYlGn"
-
-# Allowed QV scaling factors for the restricted sweep. Any qv=alpha=* directory
-# on disk whose alpha is not in this set is silently ignored.
-ALLOWED_ALPHAS = (0.15, 0.30, 0.45, 0.60, 0.75, 0.90, 1.00, 1.05, 1.20, 1.35, 1.50)
-_ALPHA_TOL = 1e-9
-
-
-def _is_allowed_alpha(alpha: float) -> bool:
-    return any(abs(alpha - a) < _ALPHA_TOL for a in ALLOWED_ALPHAS)
 
 
 # ---------------------------------------------------------------------------
@@ -274,35 +265,14 @@ def load_data(args):
                 optim_frag, qat_frag, ptq_frag,
             )
 
-            # Auto-discover all available alpha val results for this cell.
-            val_pattern = os.path.join(cell_prefix, "qv=alpha=*", "split=val", "eval_results.json")
-            val_files   = sorted(glob.glob(val_pattern))
-
-            best_val_acc   = None
             best_alpha_val = None
+            best_alpha_path = os.path.join(cell_prefix, BEST_ALPHA_FILE)
+            if os.path.exists(best_alpha_path):
+                with open(best_alpha_path) as f:
+                    info = json.load(f).get(BEST_ALPHA_KEY)
+                    if info is not None:
+                        best_alpha_val = info["alpha"]
 
-            for val_file in val_files:
-                alpha_dir = os.path.basename(os.path.dirname(os.path.dirname(val_file)))
-                m = re.match(r"^qv=alpha=(.+)$", alpha_dir)
-                if m is None:
-                    continue
-                try:
-                    alpha_val = float(m.group(1))
-                except ValueError:
-                    continue
-
-                if not _is_allowed_alpha(alpha_val):
-                    continue
-
-                acc = _load_value(val_file, VAL_METRIC_KEY)
-                if acc is None:
-                    continue
-
-                if best_val_acc is None or acc > best_val_acc:
-                    best_val_acc   = acc
-                    best_alpha_val = alpha_val
-
-            # Load test result for the val-selected best alpha.
             best_alpha_acc = None
             if best_alpha_val is not None:
                 test_path = os.path.join(
@@ -311,7 +281,7 @@ def load_data(args):
                 )
                 best_alpha_acc = _load_value(test_path, TEST_METRIC_KEY)
             else:
-                print(f"  [NO VAL ALPHA FILES] {val_pattern}", file=sys.stderr)
+                print(f"  [NO BEST ALPHA] {best_alpha_path}", file=sys.stderr)
 
             data[target_dataset]["qv_transfer"][qv_dataset] = {
                 "best_alpha_acc": best_alpha_acc,

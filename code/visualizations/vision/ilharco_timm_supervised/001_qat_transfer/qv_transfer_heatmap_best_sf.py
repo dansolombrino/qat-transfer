@@ -17,10 +17,8 @@ annotated with a trailing '*' in the cell text.
 """
 
 import argparse
-import glob
 import json
 import os
-import re
 import sys
 
 from pathlib import Path
@@ -88,7 +86,12 @@ DATASET_NAME_TO_NUM_CLASSES = {
     "ImageNet":      1000,
 }
 
-VAL_METRIC_KEYS = {
+BEST_ALPHA_FILES = {
+    "fp_head_ptq":  "best_alpha_fp_head_ptq.json",
+    "qat_head_ptq": "best_alpha_qat_head_ptq.json",
+}
+
+BEST_ALPHA_KEYS = {
     "fp_head_ptq":  "val_accuracy_fp_head_ptq",
     "qat_head_ptq": "val_accuracy_qat_head_ptq",
 }
@@ -107,15 +110,6 @@ TEST_ACC_KEY  = "test_accuracy"
 
 HEATMAP_COLORSCALE_SEQUENTIAL = "Viridis"
 HEATMAP_COLORSCALE_DIVERGING  = "RdYlGn"
-
-# Allowed QV scaling factors for the restricted sweep. Any qv=alpha=* directory
-# on disk whose alpha is not in this set is silently ignored.
-ALLOWED_ALPHAS = (0.15, 0.30, 0.45, 0.60, 0.75, 0.90, 1.00, 1.05, 1.20, 1.35, 1.50)
-_ALPHA_TOL = 1e-9
-
-
-def _is_allowed_alpha(alpha: float) -> bool:
-    return any(abs(alpha - a) < _ALPHA_TOL for a in ALLOWED_ALPHAS)
 
 
 # ---------------------------------------------------------------------------
@@ -299,41 +293,16 @@ def load_data(args):
                 optim_frag, qat_frag, ptq_frag,
             )
 
-            # Auto-discover all available alpha val results for this cell.
-            val_pattern = os.path.join(cell_prefix, "qv=alpha=*", "split=val", "eval_results.json")
-            val_files   = sorted(glob.glob(val_pattern))
-
-            # Track best alpha on val independently per metric.
-            best = {mt: {"val_acc": None, "alpha": None} for mt in VAL_METRIC_KEYS}
-
-            for val_file in val_files:
-                alpha_dir = os.path.basename(os.path.dirname(os.path.dirname(val_file)))
-                m = re.match(r"^qv=alpha=(.+)$", alpha_dir)
-                if m is None:
-                    continue
-                try:
-                    alpha_val = float(m.group(1))
-                except ValueError:
-                    continue
-
-                if not _is_allowed_alpha(alpha_val):
-                    continue
-
-                for metric_tag, val_key in VAL_METRIC_KEYS.items():
-                    acc = _load_value(val_file, val_key)
-                    if acc is None:
-                        continue
-                    if best[metric_tag]["val_acc"] is None or acc > best[metric_tag]["val_acc"]:
-                        best[metric_tag]["val_acc"] = acc
-                        best[metric_tag]["alpha"]   = alpha_val
-
-            if not val_files:
-                print(f"  [NO VAL ALPHA FILES] {val_pattern}", file=sys.stderr)
-
-            # Load test results for the val-selected best alpha (per metric).
             cell_data = {}
-            for metric_tag in VAL_METRIC_KEYS:
-                best_alpha = best[metric_tag]["alpha"]
+            for metric_tag in TEST_METRIC_KEYS:
+                best_alpha = None
+                best_alpha_path = os.path.join(cell_prefix, BEST_ALPHA_FILES[metric_tag])
+                if os.path.exists(best_alpha_path):
+                    with open(best_alpha_path) as f:
+                        info = json.load(f).get(BEST_ALPHA_KEYS[metric_tag])
+                        if info is not None:
+                            best_alpha = info["alpha"]
+
                 test_acc = None
                 if best_alpha is not None:
                     test_path = os.path.join(
@@ -341,6 +310,9 @@ def load_data(args):
                         "split=test", "eval_results.json",
                     )
                     test_acc = _load_value(test_path, TEST_METRIC_KEYS[metric_tag])
+                else:
+                    print(f"  [NO BEST ALPHA] {best_alpha_path}", file=sys.stderr)
+
                 cell_data[metric_tag] = {
                     "best_alpha_acc": test_acc,
                     "best_alpha_val": best_alpha,
@@ -540,7 +512,7 @@ def plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag,
 def main():
     args = parse_args()
     data, model_dir, optim_frag, qat_frag = load_data(args)
-    for metric_tag in VAL_METRIC_KEYS:
+    for metric_tag in TEST_METRIC_KEYS:
         plot_best_alpha_minus_fp_ptq_heatmap(
             data, args, model_dir, optim_frag, qat_frag, metric_tag,
         )
