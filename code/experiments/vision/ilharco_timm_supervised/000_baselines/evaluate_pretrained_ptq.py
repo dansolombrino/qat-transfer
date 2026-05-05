@@ -170,8 +170,20 @@ def main(cfg: DictConfig):
     )
     head_path = os.path.join(head_dir, f"head_epoch_{epochs}.pt")
 
-    print(f"\nLoading QAT head from: {head_path}")
-    finetuned_head = torch.load(head_path, map_location=device, weights_only=False)
+    if os.path.exists(head_path):
+        print(f"\nLoading QAT head from: {head_path}")
+        finetuned_head = torch.load(head_path, map_location=device, weights_only=False)
+    else:
+        classifier_path = os.path.join(head_dir, f"classifier_epoch_{epochs}.pt")
+        print(f"\nhead file not found, extracting head from: {classifier_path}")
+        sd = torch.load(classifier_path, map_location=device, weights_only=False)
+        head_weight = sd["model.head.weight"]
+        head_bias = sd["model.head.bias"]
+        finetuned_head = torch.nn.Linear(head_weight.shape[1], head_weight.shape[0])
+        finetuned_head.weight = torch.nn.Parameter(head_weight)
+        finetuned_head.bias = torch.nn.Parameter(head_bias)
+        del sd
+
     image_classifier.model.head = finetuned_head
 
     print(f"\n\nimage_classifier (after head swap):")
