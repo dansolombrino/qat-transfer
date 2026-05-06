@@ -1,10 +1,10 @@
-"""Radar plot: FP+PTQ vs QAT Transfer+PTQ vs QAT+PTQ (timm supervised)
+"""Radar plot: FT+PTQ vs QV Patching+PTQ vs QAT+PTQ (timm supervised)
 
 Two or three radar plots side-by-side (one per model scale).
 Each radar has 22 axes (one per vision dataset) and three webs:
 
-    1. FP+PTQ baseline          (000_baselines/fp_ptq)
-    2. QAT Transfer+PTQ         (001_qat_transfer, best donor != target, best alpha)
+    1. FT+PTQ baseline          (000_baselines/fp_ptq)
+    2. QV Patching+PTQ         (001_qat_transfer, best donor != target, best alpha)
     3. QAT+PTQ                  (000_baselines/qat_ptq)
 
 Output: PDF with LaTeX fonts (paper-ready).
@@ -43,10 +43,42 @@ from src.vision.utils import sanitize_timm_model_name
 EVAL_ROOT_BASELINES = "evaluations/vision/ilharco_timm_supervised/000_baselines/vision"
 EVAL_ROOT_QV        = "evaluations/vision/ilharco_timm_supervised/001_qat_transfer/vision/qv_transfer"
 
-BEST_ALPHA_FILE = "best_alpha_qat_head_ptq.json"
-BEST_ALPHA_KEY  = "val_accuracy_qat_head_ptq"
-TEST_METRIC_KEY = "test_accuracy_qat_head_ptq"
+DATASET_ORDER_SWAPS = [("DTD", "TinyImageNet"), ("RenderedSST2", "PCAM")]
+
+
+def _swapped_dataset_order(datasets_dict):
+    """Sorted dataset list with aesthetic swaps applied."""
+    ds = sorted(datasets_dict.keys())
+    for a, b in DATASET_ORDER_SWAPS:
+        if a in ds and b in ds:
+            ia, ib = ds.index(a), ds.index(b)
+            ds[ia], ds[ib] = ds[ib], ds[ia]
+    return ds
+
+
+METRIC_TAGS = {
+    "fp_head_ptq": {
+        "best_alpha_file": "best_alpha_fp_head_ptq.json",
+        "best_alpha_key":  "val_accuracy_fp_head_ptq",
+        "test_metric_key": "test_accuracy_fp_head_ptq",
+    },
+    "qat_head_ptq": {
+        "best_alpha_file": "best_alpha_qat_head_ptq.json",
+        "best_alpha_key":  "val_accuracy_qat_head_ptq",
+        "test_metric_key": "test_accuracy_qat_head_ptq",
+    },
+}
 TEST_ACC_KEY    = "test_accuracy"
+
+MODEL_DISPLAY_NAMES = {
+    "vit_base_patch16_224.orig_in21k": "ViT-B/16",
+    "vit_large_patch16_224.orig_in21k": "ViT-L/16",
+    "vit_huge_patch14_224.orig_in21k": "ViT-H/14",
+    "deit3_base_patch16_224.fb_in1k": "DeiT3-B/16",
+    "deit3_large_patch16_224.fb_in1k": "DeiT3-L/16",
+    "swin_base_patch4_window7_224.ms_in22k_ft_in1k": "Swin-B",
+    "swin_large_patch4_window7_224.ms_in22k_ft_in1k": "Swin-L",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -155,9 +187,13 @@ def _load_value(path, key):
 # ---------------------------------------------------------------------------
 # Data loading — one model
 # ---------------------------------------------------------------------------
-def load_radar_data(model_dir, args, optim_frag, qat_frag, ptq_frag):
+def load_radar_data(model_dir, args, optim_frag, qat_frag, ptq_frag, tag_info):
     """Return {dataset: {"fp_ptq": float, "qat_ptq": float, "qat_transfer_ptq": float}}."""
-    datasets = sorted(DATASET_NAME_TO_EPOCHS.keys())
+    datasets = _swapped_dataset_order(DATASET_NAME_TO_EPOCHS)
+
+    best_alpha_file = tag_info["best_alpha_file"]
+    best_alpha_key  = tag_info["best_alpha_key"]
+    test_metric_key = tag_info["test_metric_key"]
 
     data = {}
     for target_dataset in datasets:
@@ -171,8 +207,9 @@ def load_radar_data(model_dir, args, optim_frag, qat_frag, ptq_frag):
             TEST_ACC_KEY,
         )
 
-        # Best donor (excluding target), best alpha
-        best_transfer_acc = None
+        # Step 1: find the best donor at λ=1
+        best_unit_acc = None
+        best_unit_donor = None
         for qv_dataset in datasets:
             if qv_dataset == target_dataset:
                 continue
@@ -181,23 +218,33 @@ def load_radar_data(model_dir, args, optim_frag, qat_frag, ptq_frag):
                 model_dir, qv_dataset, target_dataset, args.seed,
                 optim_frag, qat_frag, ptq_frag,
             )
-            best_alpha_path = os.path.join(cell_prefix, BEST_ALPHA_FILE)
-            if not os.path.exists(best_alpha_path):
-                continue
-
-            with open(best_alpha_path) as f:
-                info = json.load(f).get(BEST_ALPHA_KEY)
-            if info is None:
-                continue
-
-            best_alpha_val = info["alpha"]
-            test_path = os.path.join(
-                cell_prefix, f"qv=alpha={best_alpha_val}",
+            unit_path = os.path.join(
+                cell_prefix, "qv=alpha=1.0",
                 "split=test", "eval_results.json",
             )
-            acc = _load_value(test_path, TEST_METRIC_KEY)
-            if acc is not None and (best_transfer_acc is None or acc > best_transfer_acc):
-                best_transfer_acc = acc
+            acc = _load_value(unit_path, test_metric_key)
+            if acc is not None and (best_unit_acc is None or acc > best_unit_acc):
+                best_unit_acc = acc
+                best_unit_donor = qv_dataset
+
+        # Step 2: get that donor's best-λ accuracy
+        best_transfer_acc = None
+        if best_unit_donor is not None:
+            cell_prefix = _qv_transfer_cell_prefix(
+                model_dir, best_unit_donor, target_dataset, args.seed,
+                optim_frag, qat_frag, ptq_frag,
+            )
+            best_alpha_path = os.path.join(cell_prefix, best_alpha_file)
+            if os.path.exists(best_alpha_path):
+                with open(best_alpha_path) as f:
+                    info = json.load(f).get(best_alpha_key)
+                if info is not None:
+                    best_alpha_val = info["alpha"]
+                    test_path = os.path.join(
+                        cell_prefix, f"qv=alpha={best_alpha_val}",
+                        "split=test", "eval_results.json",
+                    )
+                    best_transfer_acc = _load_value(test_path, test_metric_key)
 
         data[target_dataset] = {
             "fp_ptq": fp_ptq_acc,
@@ -211,20 +258,20 @@ def load_radar_data(model_dir, args, optim_frag, qat_frag, ptq_frag):
 # ---------------------------------------------------------------------------
 # Radar plot
 # ---------------------------------------------------------------------------
-def plot_radar(all_data, model_labels, args, qat_frag):
-    datasets = sorted(DATASET_NAME_TO_EPOCHS.keys())
+def plot_radar(all_data, model_labels, args, qat_frag, metric_tag):
+    datasets = _swapped_dataset_order(DATASET_NAME_TO_EPOCHS)
     n = len(datasets)
     angles = np.linspace(0, 2 * np.pi, n, endpoint=False).tolist()
     angles.append(angles[0])
 
     web_keys = ["fp_ptq", "qat_transfer_ptq", "qat_ptq"]
-    web_labels = [r"FP$+$PTQ", r"QAT Transfer$+$PTQ", r"QAT$+$PTQ"]
-    web_colors = ["#1f77b4", "#2ca02c", "#d62728"]
+    web_labels = [r"\textbf{FT$+$PTQ}", r"\textbf{QV Patching$+$PTQ}", r"\textbf{QAT$+$PTQ}"]
+    web_colors = ["#e07a5f", "#81b29a", "#3d405b"]
     web_markers = ["o", "s", "^"]
 
     num_models = len(all_data)
-    fig_width = 6 * num_models
-    fig, axes = plt.subplots(1, num_models, figsize=(fig_width, 7),
+    fig_width = 9 * num_models
+    fig, axes = plt.subplots(1, num_models, figsize=(fig_width, 10),
                              subplot_kw=dict(polar=True))
     if num_models == 1:
         axes = [axes]
@@ -241,15 +288,18 @@ def plot_radar(all_data, model_labels, args, qat_frag):
             ax.fill(angles, values, color=color, alpha=0.08)
 
         ax.set_xticks(angles[:-1])
-        ax.set_xticklabels(datasets, fontsize=7)
-        ax.set_title(model_label, fontsize=12, pad=20)
-        ax.tick_params(axis="y", labelsize=6)
+        ax.set_xticklabels(datasets, fontsize=16)
+        ax.tick_params(axis="x", pad=20)
+        ax.set_ylim(top=1.0)
+        display_title = MODEL_DISPLAY_NAMES.get(model_label, model_label)
+        ax.set_title(r"\textbf{" + display_title + "}", fontsize=24, pad=35)
+        ax.tick_params(axis="y", labelsize=14)
 
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", ncol=3, fontsize=10,
-               frameon=False, bbox_to_anchor=(0.5, -0.02))
+    fig.legend(handles, labels, loc="lower center", ncol=3, fontsize=20,
+               frameon=False, bbox_to_anchor=(0.5, 0.02))
 
-    fig.tight_layout(rect=[0, 0.04, 1, 1])
+    fig.tight_layout(rect=[0, 0.02, 1, 1], w_pad=5)
 
     # -- export ---------------------------------------------------------------
     model_tag = "__".join(sanitize_timm_model_name(m) for m in args.model_names)
@@ -258,7 +308,7 @@ def plot_radar(all_data, model_labels, args, qat_frag):
         "radar_plot", model_tag, f"seed={args.seed}", qat_frag,
     )
     os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, "radar_plot.pdf")
+    out_path = os.path.join(out_dir, f"radar_plot_{metric_tag}.pdf")
 
     fig.savefig(out_path, format="pdf", bbox_inches="tight", dpi=300)
     plt.close(fig)
@@ -274,18 +324,19 @@ def main():
     qat_frag = _qat_frag(args)
     ptq_frag = _ptq_frag(args)
 
-    all_data = []
-    model_labels = []
-    for model_name, bs in zip(args.model_names, args.batch_sizes):
-        model_dir = sanitize_timm_model_name(model_name)
-        optim_frag = _optim_frag(args, bs)
-        print(f"Loading data for {model_name} ...")
+    for metric_tag, tag_info in METRIC_TAGS.items():
+        all_data = []
+        model_labels = []
+        for model_name, bs in zip(args.model_names, args.batch_sizes):
+            model_dir = sanitize_timm_model_name(model_name)
+            optim_frag = _optim_frag(args, bs)
+            print(f"Loading data ({metric_tag}) for {model_name} ...")
 
-        data = load_radar_data(model_dir, args, optim_frag, qat_frag, ptq_frag)
-        all_data.append(data)
-        model_labels.append(model_name)
+            data = load_radar_data(model_dir, args, optim_frag, qat_frag, ptq_frag, tag_info)
+            all_data.append(data)
+            model_labels.append(model_name)
 
-    plot_radar(all_data, model_labels, args, qat_frag)
+        plot_radar(all_data, model_labels, args, qat_frag, metric_tag)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,9 @@
-"""Scatterplot: (QAT Transfer+PTQ - FT+PTQ) / QAT+PTQ per dataset.
+"""Vertical grouped bar chart: FT vs QAT vs PTQ baselines (timm supervised).
 
-Dot plot with datasets on the x-axis and the normalised improvement of
-QAT transfer over the FT+PTQ baseline on the y-axis, using QAT+PTQ
-as the reference denominator.
+Per-dataset vertical bars showing test accuracy for three baseline methods:
+    1. FT   — floating-point finetuned          (000_baselines/fp)
+    2. QAT  — quantization-aware trained         (000_baselines/qat)
+    3. PTQ  — FP model + post-training quant     (000_baselines/fp_ptq)
 
 Output: PDF with LaTeX fonts (paper-ready).
 """
@@ -31,21 +32,27 @@ plt.rcParams["font.family"] = "serif"
 import numpy as np
 
 from src.vision.data.common import DATASET_NAME_TO_EPOCHS
-from src.vision.utils import sanitize_open_clip_model_name
+from src.vision.utils import sanitize_timm_model_name
 
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-EVAL_ROOT_BASELINES = "evaluations/vision/ilharco_open_clip/000_baselines/vision"
-EVAL_ROOT_QV        = "evaluations/vision/ilharco_open_clip/001_qat_transfer/vision/qv_transfer"
+EVAL_ROOT_BASELINES = "evaluations/vision/ilharco_timm_supervised/000_baselines/vision"
 
-BEST_ALPHA_FILE = "best_alpha.json"
-BEST_ALPHA_KEY  = "val_accuracy_patched_qat_ptq"
-TEST_METRIC_KEY = "test_accuracy_patched_qat_ptq"
-TEST_ACC_KEY    = "test_accuracy"
+TEST_ACC_KEY = "test_accuracy"
 
 DATASET_ORDER_SWAPS = [("DTD", "TinyImageNet"), ("RenderedSST2", "PCAM")]
+
+MODEL_DISPLAY_NAMES = {
+    "vit_base_patch16_224.orig_in21k": "ViT-B/16",
+    "vit_large_patch16_224.orig_in21k": "ViT-L/16",
+    "vit_huge_patch14_224.orig_in21k": "ViT-H/14",
+    "deit3_base_patch16_224.fb_in1k": "DeiT3-B/16",
+    "deit3_large_patch16_224.fb_in1k": "DeiT3-L/16",
+    "swin_base_patch4_window7_224.ms_in22k_ft_in1k": "Swin-B",
+    "swin_large_patch4_window7_224.ms_in22k_ft_in1k": "Swin-L",
+}
 
 
 def _swapped_dataset_order(datasets_dict):
@@ -64,7 +71,6 @@ def _swapped_dataset_order(datasets_dict):
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-name",      required=True)
-    parser.add_argument("--pretrained-tag",  required=True)
     parser.add_argument("--seed",            required=True, type=int)
 
     parser.add_argument("--optim",           required=True, choices=["adamw", "sgd"])
@@ -81,9 +87,6 @@ def parse_args():
     parser.add_argument("--skip-modules",    required=True, nargs="+",
                         help="One or more module names to skip during quantization "
                              "(no default: must be specified explicitly).")
-
-    parser.add_argument("--eval-split",      default="test", choices=["val", "test"],
-                        help="Which split the qv_transfer results were evaluated on.")
 
     return parser.parse_args()
 
@@ -111,30 +114,24 @@ def _ptq_frag(args):
 # ---------------------------------------------------------------------------
 # Per-baseline path builders
 # ---------------------------------------------------------------------------
+def _fp_path(model_dir, dataset, seed, optim_frag):
+    return os.path.join(
+        EVAL_ROOT_BASELINES, "fp", model_dir, dataset,
+        optim_frag, f"seed={seed}", "eval_results.json",
+    )
+
+
+def _qat_path(model_dir, dataset, seed, optim_frag, qat_frag):
+    return os.path.join(
+        EVAL_ROOT_BASELINES, "qat", model_dir, dataset,
+        optim_frag, qat_frag, f"seed={seed}", "eval_results.json",
+    )
+
+
 def _fp_ptq_path(model_dir, dataset, seed, optim_frag, ptq_frag):
     return os.path.join(
         EVAL_ROOT_BASELINES, "fp_ptq", model_dir, dataset,
         optim_frag, ptq_frag, f"seed={seed}", "eval_results.json",
-    )
-
-
-def _qat_ptq_path(model_dir, dataset, seed, optim_frag, qat_frag, ptq_frag):
-    return os.path.join(
-        EVAL_ROOT_BASELINES, "qat_ptq", model_dir, dataset,
-        optim_frag, qat_frag, ptq_frag, f"seed={seed}", "eval_results.json",
-    )
-
-
-# ---------------------------------------------------------------------------
-# QV transfer path builders
-# ---------------------------------------------------------------------------
-def _qv_transfer_cell_prefix(model_dir, qv_dataset, target_dataset, seed,
-                              optim_frag, qat_frag, ptq_frag):
-    return os.path.join(
-        EVAL_ROOT_QV, model_dir,
-        f"src={qv_dataset}_seed={seed}",
-        f"tgt={target_dataset}_seed={seed}",
-        optim_frag, qat_frag, ptq_frag,
     )
 
 
@@ -157,54 +154,24 @@ def _load_value(path, key):
 # Data loading
 # ---------------------------------------------------------------------------
 def load_data(model_dir, args, optim_frag, qat_frag, ptq_frag):
-    """Return {dataset: {"fp_ptq": float, "qat_ptq": float, "qat_transfer_ptq": float}}."""
+    """Return {dataset: {"ft": float|None, "qat": float|None, "ptq": float|None}}."""
     datasets = _swapped_dataset_order(DATASET_NAME_TO_EPOCHS)
 
     data = {}
-    for target_dataset in datasets:
-        fp_ptq_acc = _load_value(
-            _fp_ptq_path(model_dir, target_dataset, args.seed, optim_frag, ptq_frag),
+    for dataset in datasets:
+        ft_acc = _load_value(
+            _fp_path(model_dir, dataset, args.seed, optim_frag),
             TEST_ACC_KEY,
         )
-        qat_ptq_acc = _load_value(
-            _qat_ptq_path(model_dir, target_dataset, args.seed,
-                          optim_frag, qat_frag, ptq_frag),
+        qat_acc = _load_value(
+            _qat_path(model_dir, dataset, args.seed, optim_frag, qat_frag),
             TEST_ACC_KEY,
         )
-
-        # Best donor (excluding target), best alpha
-        best_transfer_acc = None
-        for qv_dataset in datasets:
-            if qv_dataset == target_dataset:
-                continue
-
-            cell_prefix = _qv_transfer_cell_prefix(
-                model_dir, qv_dataset, target_dataset, args.seed,
-                optim_frag, qat_frag, ptq_frag,
-            )
-            best_alpha_path = os.path.join(cell_prefix, BEST_ALPHA_FILE)
-            if not os.path.exists(best_alpha_path):
-                continue
-
-            with open(best_alpha_path) as f:
-                info = json.load(f).get(BEST_ALPHA_KEY)
-            if info is None:
-                continue
-
-            best_alpha_val = info["alpha"]
-            test_path = os.path.join(
-                cell_prefix, f"qv=alpha={best_alpha_val}",
-                "split=test", "eval_results.json",
-            )
-            acc = _load_value(test_path, TEST_METRIC_KEY)
-            if acc is not None and (best_transfer_acc is None or acc > best_transfer_acc):
-                best_transfer_acc = acc
-
-        data[target_dataset] = {
-            "fp_ptq": fp_ptq_acc,
-            "qat_ptq": qat_ptq_acc,
-            "qat_transfer_ptq": best_transfer_acc,
-        }
+        ptq_acc = _load_value(
+            _fp_ptq_path(model_dir, dataset, args.seed, optim_frag, ptq_frag),
+            TEST_ACC_KEY,
+        )
+        data[dataset] = {"ft": ft_acc, "qat": qat_acc, "ptq": ptq_acc}
 
     return data
 
@@ -212,44 +179,44 @@ def load_data(model_dir, args, optim_frag, qat_frag, ptq_frag):
 # ---------------------------------------------------------------------------
 # Plot
 # ---------------------------------------------------------------------------
-def plot_scatterplot(data, model_dir, args, qat_frag):
+def plot_bar(data, model_dir, model_name, args):
     datasets = _swapped_dataset_order(DATASET_NAME_TO_EPOCHS)
+    n = len(datasets)
 
-    x_labels = []
-    y_values = []
-    for ds in datasets:
-        d = data[ds]
-        if d["fp_ptq"] is None or d["qat_ptq"] is None or d["qat_transfer_ptq"] is None:
-            print(f"  [SKIP] {ds}: missing data", file=sys.stderr)
-            continue
-        if d["qat_ptq"] == 0:
-            print(f"  [SKIP] {ds}: qat_ptq is zero", file=sys.stderr)
-            continue
-        ratio = (d["qat_transfer_ptq"] - d["fp_ptq"]) / d["qat_ptq"]
-        x_labels.append(ds)
-        y_values.append(ratio)
+    bar_width = 0.25
+    x_pos = np.arange(n)
 
-    fig, ax = plt.subplots(figsize=(12, 5))
-    x_pos = np.arange(len(x_labels))
-    ax.scatter(x_pos, y_values, color="#2ca02c", s=50, zorder=3)
-    ax.axhline(y=0, color="gray", linewidth=0.8, linestyle="--", zorder=1)
+    ft_vals = [data[ds]["ft"] if data[ds]["ft"] is not None else 0 for ds in datasets]
+    qat_vals = [data[ds]["qat"] if data[ds]["qat"] is not None else 0 for ds in datasets]
+    ptq_vals = [data[ds]["ptq"] if data[ds]["ptq"] is not None else 0 for ds in datasets]
+
+    fig, ax = plt.subplots(figsize=(14, 3.5))
+
+    ax.bar(x_pos - bar_width, ft_vals, bar_width,
+           label=r"\textbf{FT}", color="#e09f3e")
+    ax.bar(x_pos, qat_vals, bar_width,
+           label=r"\textbf{QAT}", color="#540b0e")
+    ax.bar(x_pos + bar_width, ptq_vals, bar_width,
+           label=r"\textbf{PTQ}", color="#9e2a2b")
 
     ax.set_xticks(x_pos)
-    ax.set_xticklabels(x_labels, rotation=45, ha="right", fontsize=8)
-    ax.set_ylabel(r"$\frac{\mathrm{QAT\ Transfer{+}PTQ} - \mathrm{FT{+}PTQ}}{\mathrm{QAT{+}PTQ}}$",
-                  fontsize=11)
-    ax.set_title(args.model_name.replace("-", "/"), fontsize=12)
-    ax.grid(axis="y", alpha=0.3)
+    ax.set_xticklabels(datasets, fontsize=11, rotation=45, ha="right")
+    ax.set_ylabel(r"Test Accuracy", fontsize=14)
+    ax.set_ylim(0, 1.0)
 
+    display_title = MODEL_DISPLAY_NAMES.get(model_name, model_name)
+    ax.set_title(r"\textbf{" + display_title + "}", fontsize=18)
+
+    ax.legend(fontsize=12, frameon=False, loc="upper center", bbox_to_anchor=(0.5, 1.0), ncol=3)
     fig.tight_layout()
 
     # -- export ---------------------------------------------------------------
     out_dir = os.path.join(
-        "plots", "vision", "ilharco_open_clip", "999_paper_stuff", "001_qat_transfer",
-        "scatterplot", model_dir, f"seed={args.seed}", qat_frag,
+        "plots", "vision", "ilharco_timm_supervised", "999_paper_stuff", "000_baselines",
+        "baseline_bar", model_dir, f"seed={args.seed}",
     )
     os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, "scatterplot.pdf")
+    out_path = os.path.join(out_dir, "baseline_bar.pdf")
 
     fig.savefig(out_path, format="pdf", bbox_inches="tight", dpi=300)
     plt.close(fig)
@@ -262,14 +229,14 @@ def plot_scatterplot(data, model_dir, args, qat_frag):
 def main():
     args = parse_args()
 
-    model_dir = sanitize_open_clip_model_name(args.model_name, args.pretrained_tag)
+    model_dir = sanitize_timm_model_name(args.model_name)
     optim_frag = _optim_frag(args)
     qat_frag = _qat_frag(args)
     ptq_frag = _ptq_frag(args)
 
-    print(f"Loading data for {args.model_name} ({args.pretrained_tag}) ...")
+    print(f"Loading data for {args.model_name} ...")
     data = load_data(model_dir, args, optim_frag, qat_frag, ptq_frag)
-    plot_scatterplot(data, model_dir, args, qat_frag)
+    plot_bar(data, model_dir, args.model_name, args)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,15 @@
-"""Multi-model scatterplot: (QAT Transfer+PTQ - FT+PTQ) / QAT+PTQ per dataset (timm supervised).
+"""Radar plot: FT+PTQ vs QV Patching+PTQ (λ=1) vs QV Patching+PTQ (best λ) vs QAT+PTQ (timm supervised)
 
-All models overlaid on a single plot with different colors/markers.
+Two or three radar plots side-by-side (one per model scale).
+Each radar has 22 axes (one per vision dataset) and four webs:
+
+    1. FT+PTQ baseline          (000_baselines/fp_ptq)
+    2. QV Patching+PTQ (λ=1)   (001_qat_transfer, best donor at λ=1, unit scaling)
+    3. QV Patching+PTQ (best λ) (001_qat_transfer, same donor, best alpha)
+    4. QAT+PTQ                  (000_baselines/qat_ptq)
+
+Donor selection: the donor with highest accuracy at λ=1 is selected;
+both the λ=1 and best-λ webs use that same donor.
 
 Output: PDF with LaTeX fonts (paper-ready).
 """
@@ -38,11 +47,6 @@ from src.vision.utils import sanitize_timm_model_name
 EVAL_ROOT_BASELINES = "evaluations/vision/ilharco_timm_supervised/000_baselines/vision"
 EVAL_ROOT_QV        = "evaluations/vision/ilharco_timm_supervised/001_qat_transfer/vision/qv_transfer"
 
-BEST_ALPHA_FILE = "best_alpha_qat_head_ptq.json"
-BEST_ALPHA_KEY  = "val_accuracy_qat_head_ptq"
-TEST_METRIC_KEY = "test_accuracy_qat_head_ptq"
-TEST_ACC_KEY    = "test_accuracy"
-
 DATASET_ORDER_SWAPS = [("DTD", "TinyImageNet"), ("RenderedSST2", "PCAM")]
 
 
@@ -56,15 +60,40 @@ def _swapped_dataset_order(datasets_dict):
     return ds
 
 
+METRIC_TAGS = {
+    "fp_head_ptq": {
+        "best_alpha_file": "best_alpha_fp_head_ptq.json",
+        "best_alpha_key":  "val_accuracy_fp_head_ptq",
+        "test_metric_key": "test_accuracy_fp_head_ptq",
+    },
+    "qat_head_ptq": {
+        "best_alpha_file": "best_alpha_qat_head_ptq.json",
+        "best_alpha_key":  "val_accuracy_qat_head_ptq",
+        "test_metric_key": "test_accuracy_qat_head_ptq",
+    },
+}
+TEST_ACC_KEY    = "test_accuracy"
+
+MODEL_DISPLAY_NAMES = {
+    "vit_base_patch16_224.orig_in21k": "ViT-B/16",
+    "vit_large_patch16_224.orig_in21k": "ViT-L/16",
+    "vit_huge_patch14_224.orig_in21k": "ViT-H/14",
+    "deit3_base_patch16_224.fb_in1k": "DeiT3-B/16",
+    "deit3_large_patch16_224.fb_in1k": "DeiT3-L/16",
+    "swin_base_patch4_window7_224.ms_in22k_ft_in1k": "Swin-B",
+    "swin_large_patch4_window7_224.ms_in22k_ft_in1k": "Swin-L",
+}
+
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-names",     required=True, nargs="+",
-                        help="Two or three timm model names")
-    parser.add_argument("--batch-sizes",     required=True, type=int, nargs="+",
-                        help="Batch sizes (one per model, parallel to --model-names)")
+                        help="Two or three timm model names (e.g. "
+                             "vit_base_patch16_224.orig_in21k "
+                             "vit_large_patch16_224.orig_in21k)")
     parser.add_argument("--seed",            required=True, type=int)
 
     parser.add_argument("--optim",           required=True, choices=["adamw", "sgd"])
@@ -73,6 +102,8 @@ def parse_args():
     parser.add_argument("--ls",              required=True, type=float)
     parser.add_argument("--wl",              required=True, type=int)
     parser.add_argument("--max-grad-norm",   required=True, type=float)
+    parser.add_argument("--batch-sizes",     required=True, type=int, nargs="+",
+                        help="Batch sizes (one per model, parallel to --model-names)")
 
     parser.add_argument("--qat-bits",        required=True, type=int)
     parser.add_argument("--ptq-bits",        required=True, type=int)
@@ -81,7 +112,8 @@ def parse_args():
                         help="One or more module names to skip during quantization "
                              "(no default: must be specified explicitly).")
 
-    parser.add_argument("--eval-split",      default="test", choices=["val", "test"])
+    parser.add_argument("--eval-split",      default="test", choices=["val", "test"],
+                        help="Which split the qv_transfer results were evaluated on.")
 
     args = parser.parse_args()
     if len(args.model_names) != len(args.batch_sizes):
@@ -159,9 +191,13 @@ def _load_value(path, key):
 # ---------------------------------------------------------------------------
 # Data loading — one model
 # ---------------------------------------------------------------------------
-def load_data(model_dir, args, optim_frag, qat_frag, ptq_frag):
-    """Return {dataset: {"fp_ptq": float, "qat_ptq": float, "qat_transfer_ptq": float}}."""
+def load_radar_data(model_dir, args, optim_frag, qat_frag, ptq_frag, tag_info):
+    """Return {dataset: {"fp_ptq", "qat_ptq", "qat_transfer_ptq_unit", "qat_transfer_ptq_best"}}."""
     datasets = _swapped_dataset_order(DATASET_NAME_TO_EPOCHS)
+
+    best_alpha_file = tag_info["best_alpha_file"]
+    best_alpha_key  = tag_info["best_alpha_key"]
+    test_metric_key = tag_info["test_metric_key"]
 
     data = {}
     for target_dataset in datasets:
@@ -175,7 +211,9 @@ def load_data(model_dir, args, optim_frag, qat_frag, ptq_frag):
             TEST_ACC_KEY,
         )
 
-        best_transfer_acc = None
+        # Step 1: find the best donor at λ=1
+        best_unit_acc = None
+        best_unit_donor = None
         for qv_dataset in datasets:
             if qv_dataset == target_dataset:
                 continue
@@ -184,81 +222,106 @@ def load_data(model_dir, args, optim_frag, qat_frag, ptq_frag):
                 model_dir, qv_dataset, target_dataset, args.seed,
                 optim_frag, qat_frag, ptq_frag,
             )
-            best_alpha_path = os.path.join(cell_prefix, BEST_ALPHA_FILE)
-            if not os.path.exists(best_alpha_path):
-                continue
-
-            with open(best_alpha_path) as f:
-                info = json.load(f).get(BEST_ALPHA_KEY)
-            if info is None:
-                continue
-
-            best_alpha_val = info["alpha"]
-            test_path = os.path.join(
-                cell_prefix, f"qv=alpha={best_alpha_val}",
+            unit_path = os.path.join(
+                cell_prefix, "qv=alpha=1.0",
                 "split=test", "eval_results.json",
             )
-            acc = _load_value(test_path, TEST_METRIC_KEY)
-            if acc is not None and (best_transfer_acc is None or acc > best_transfer_acc):
-                best_transfer_acc = acc
+            acc = _load_value(unit_path, test_metric_key)
+            if acc is not None and (best_unit_acc is None or acc > best_unit_acc):
+                best_unit_acc = acc
+                best_unit_donor = qv_dataset
+
+        # Step 2: get that donor's best-λ accuracy
+        best_transfer_acc = None
+        if best_unit_donor is not None:
+            cell_prefix = _qv_transfer_cell_prefix(
+                model_dir, best_unit_donor, target_dataset, args.seed,
+                optim_frag, qat_frag, ptq_frag,
+            )
+            best_alpha_path = os.path.join(cell_prefix, best_alpha_file)
+            if os.path.exists(best_alpha_path):
+                with open(best_alpha_path) as f:
+                    info = json.load(f).get(best_alpha_key)
+                if info is not None:
+                    best_alpha_val = info["alpha"]
+                    test_path = os.path.join(
+                        cell_prefix, f"qv=alpha={best_alpha_val}",
+                        "split=test", "eval_results.json",
+                    )
+                    best_transfer_acc = _load_value(test_path, test_metric_key)
 
         data[target_dataset] = {
             "fp_ptq": fp_ptq_acc,
             "qat_ptq": qat_ptq_acc,
-            "qat_transfer_ptq": best_transfer_acc,
+            "qat_transfer_ptq_unit": best_unit_acc,
+            "qat_transfer_ptq_best": best_transfer_acc,
         }
 
     return data
 
 
 # ---------------------------------------------------------------------------
-# Plot
+# Radar plot
 # ---------------------------------------------------------------------------
-def plot_scatterplot(all_data, model_labels, args, qat_frag):
+def plot_radar(all_data, model_labels, args, qat_frag, metric_tag):
     datasets = _swapped_dataset_order(DATASET_NAME_TO_EPOCHS)
-    n_ds = len(datasets)
-    x_pos = np.arange(n_ds)
+    n = len(datasets)
+    angles = np.linspace(0, 2 * np.pi, n, endpoint=False).tolist()
+    angles.append(angles[0])
 
-    model_colors = ["#1f77b4", "#2ca02c", "#d62728"]
-    model_markers = ["o", "s", "^"]
+    web_keys = ["fp_ptq", "qat_transfer_ptq_unit", "qat_transfer_ptq_best", "qat_ptq"]
+    web_labels = [
+        r"\textbf{FT$+$PTQ}",
+        r"\textbf{QV Patching$+$PTQ ($\lambda=1$)}",
+        r"\textbf{QV Patching$+$PTQ (best $\lambda$)}",
+        r"\textbf{QAT$+$PTQ}",
+    ]
+    web_colors = ["#e07a5f", "#f2cc8f", "#81b29a", "#3d405b"]
+    web_markers = ["o", "D", "s", "^"]
+    web_linestyles = ["-", "--", "-", "-"]
 
-    fig, ax = plt.subplots(figsize=(14, 5))
+    num_models = len(all_data)
+    fig_width = 9 * num_models
+    fig, axes = plt.subplots(1, num_models, figsize=(fig_width, 10),
+                             subplot_kw=dict(polar=True))
+    if num_models == 1:
+        axes = [axes]
 
-    for i, (data, label) in enumerate(zip(all_data, model_labels)):
-        y_values = []
-        x_valid = []
-        for j, ds in enumerate(datasets):
-            d = data[ds]
-            if d["fp_ptq"] is None or d["qat_ptq"] is None or d["qat_transfer_ptq"] is None:
-                continue
-            if d["qat_ptq"] == 0:
-                continue
-            ratio = (d["qat_transfer_ptq"] - d["fp_ptq"]) / d["qat_ptq"]
-            y_values.append(ratio)
-            x_valid.append(x_pos[j])
+    for ax, data, model_label in zip(axes, all_data, model_labels):
+        for key, label, color, marker, ls in zip(
+            web_keys, web_labels, web_colors, web_markers, web_linestyles,
+        ):
+            values = []
+            for ds in datasets:
+                v = data[ds].get(key)
+                values.append(v if v is not None else np.nan)
+            values.append(values[0])
+            ax.plot(angles, values, color=color, linewidth=1.5, marker=marker,
+                    markersize=4, label=label, linestyle=ls)
+            ax.fill(angles, values, color=color, alpha=0.08)
 
-        ax.scatter(x_valid, y_values, color=model_colors[i], marker=model_markers[i],
-                   s=50, zorder=3, label=label)
+        ax.set_xticks(angles[:-1])
+        ax.set_xticklabels(datasets, fontsize=16)
+        ax.tick_params(axis="x", pad=20)
+        ax.set_ylim(top=1.0)
+        display_title = MODEL_DISPLAY_NAMES.get(model_label, model_label)
+        ax.set_title(r"\textbf{" + display_title + "}", fontsize=24, pad=35)
+        ax.tick_params(axis="y", labelsize=14)
 
-    ax.axhline(y=0, color="gray", linewidth=0.8, linestyle="--", zorder=1)
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=4, fontsize=18,
+               frameon=False, bbox_to_anchor=(0.5, 0.02))
 
-    ax.set_xticks(x_pos)
-    ax.set_xticklabels(datasets, rotation=45, ha="right", fontsize=8)
-    ax.set_ylabel(r"$\frac{\mathrm{QAT\ Transfer{+}PTQ} - \mathrm{FT{+}PTQ}}{\mathrm{QAT{+}PTQ}}$",
-                  fontsize=11)
-    ax.legend(fontsize=9, frameon=False)
-    ax.grid(axis="y", alpha=0.3)
-
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0.02, 1, 1], w_pad=5)
 
     # -- export ---------------------------------------------------------------
     model_tag = "__".join(sanitize_timm_model_name(m) for m in args.model_names)
     out_dir = os.path.join(
         "plots", "vision", "ilharco_timm_supervised", "999_paper_stuff", "001_qat_transfer",
-        "scatterplot_multi", model_tag, f"seed={args.seed}", qat_frag,
+        "radar_plot_unit_sf_best_sf", model_tag, f"seed={args.seed}", qat_frag,
     )
     os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, "scatterplot_multi.pdf")
+    out_path = os.path.join(out_dir, f"radar_plot_unit_sf_best_sf_{metric_tag}.pdf")
 
     fig.savefig(out_path, format="pdf", bbox_inches="tight", dpi=300)
     plt.close(fig)
@@ -274,18 +337,19 @@ def main():
     qat_frag = _qat_frag(args)
     ptq_frag = _ptq_frag(args)
 
-    all_data = []
-    model_labels = []
-    for model_name, bs in zip(args.model_names, args.batch_sizes):
-        model_dir = sanitize_timm_model_name(model_name)
-        optim_frag = _optim_frag(args, bs)
-        print(f"Loading data for {model_name} ...")
+    for metric_tag, tag_info in METRIC_TAGS.items():
+        all_data = []
+        model_labels = []
+        for model_name, bs in zip(args.model_names, args.batch_sizes):
+            model_dir = sanitize_timm_model_name(model_name)
+            optim_frag = _optim_frag(args, bs)
+            print(f"Loading data ({metric_tag}) for {model_name} ...")
 
-        data = load_data(model_dir, args, optim_frag, qat_frag, ptq_frag)
-        all_data.append(data)
-        model_labels.append(model_name)
+            data = load_radar_data(model_dir, args, optim_frag, qat_frag, ptq_frag, tag_info)
+            all_data.append(data)
+            model_labels.append(model_name)
 
-    plot_scatterplot(all_data, model_labels, args, qat_frag)
+        plot_radar(all_data, model_labels, args, qat_frag, metric_tag)
 
 
 if __name__ == "__main__":

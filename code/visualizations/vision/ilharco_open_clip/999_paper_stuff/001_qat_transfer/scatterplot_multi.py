@@ -1,4 +1,4 @@
-"""Multi-model scatterplot: (QAT Transfer+PTQ - FP+PTQ) / QAT+PTQ per dataset.
+"""Multi-model scatterplot: (QAT Transfer+PTQ - FT+PTQ) / QAT+PTQ per dataset.
 
 All models overlaid on a single plot with different colors/markers.
 
@@ -42,6 +42,18 @@ BEST_ALPHA_FILE = "best_alpha.json"
 BEST_ALPHA_KEY  = "val_accuracy_patched_qat_ptq"
 TEST_METRIC_KEY = "test_accuracy_patched_qat_ptq"
 TEST_ACC_KEY    = "test_accuracy"
+
+DATASET_ORDER_SWAPS = [("DTD", "TinyImageNet"), ("RenderedSST2", "PCAM")]
+
+
+def _swapped_dataset_order(datasets_dict):
+    """Sorted dataset list with aesthetic swaps applied."""
+    ds = sorted(datasets_dict.keys())
+    for a, b in DATASET_ORDER_SWAPS:
+        if a in ds and b in ds:
+            ia, ib = ds.index(a), ds.index(b)
+            ds[ia], ds[ib] = ds[ib], ds[ia]
+    return ds
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +155,7 @@ def _load_value(path, key):
 # ---------------------------------------------------------------------------
 def load_data(model_dir, args, optim_frag, qat_frag, ptq_frag):
     """Return {dataset: {"fp_ptq": float, "qat_ptq": float, "qat_transfer_ptq": float}}."""
-    datasets = sorted(DATASET_NAME_TO_EPOCHS.keys())
+    datasets = _swapped_dataset_order(DATASET_NAME_TO_EPOCHS)
 
     data = {}
     for target_dataset in datasets:
@@ -197,7 +209,7 @@ def load_data(model_dir, args, optim_frag, qat_frag, ptq_frag):
 # Plot
 # ---------------------------------------------------------------------------
 def plot_scatterplot(all_data, model_labels, args, qat_frag):
-    datasets = sorted(DATASET_NAME_TO_EPOCHS.keys())
+    datasets = _swapped_dataset_order(DATASET_NAME_TO_EPOCHS)
     n_ds = len(datasets)
     x_pos = np.arange(n_ds)
 
@@ -226,7 +238,7 @@ def plot_scatterplot(all_data, model_labels, args, qat_frag):
 
     ax.set_xticks(x_pos)
     ax.set_xticklabels(datasets, rotation=45, ha="right", fontsize=8)
-    ax.set_ylabel(r"$\frac{\mathrm{QAT\ Transfer{+}PTQ} - \mathrm{FP{+}PTQ}}{\mathrm{QAT{+}PTQ}}$",
+    ax.set_ylabel(r"$\frac{\mathrm{QAT\ Transfer{+}PTQ} - \mathrm{FT{+}PTQ}}{\mathrm{QAT{+}PTQ}}$",
                   fontsize=11)
     ax.legend(fontsize=9, frameon=False)
     ax.grid(axis="y", alpha=0.3)

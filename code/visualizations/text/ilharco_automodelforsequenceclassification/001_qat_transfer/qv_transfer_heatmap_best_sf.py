@@ -96,6 +96,17 @@ TEST_ACC_KEY  = "test_accuracy"
 HEATMAP_COLORSCALE_SEQUENTIAL = "Viridis"
 HEATMAP_COLORSCALE_DIVERGING  = "RdYlGn"
 
+DATASET_LABEL_RENAMES = {
+    "AmazonCounterfactual": "Counterfactual",
+    "TweetSentimentExtraction": "Sentiment",
+    "AmazonReviewsClassification": "Reviews",
+    "ToxicConversations": "Toxic",
+    "MTOPDomain": "MTOP D",
+    "MTOPIntent": "MTOP I",
+    "MassiveIntent": "Intent",
+    "MassiveScenario": "Scenario",
+}
+
 # Allowed QV scaling factors for the restricted sweep. Any qv=alpha=* directory
 # on disk whose alpha is not in this set is silently ignored.
 ALLOWED_ALPHAS = (0.15, 0.30, 0.45, 0.60, 0.75, 0.90, 1.00, 1.05, 1.20, 1.35, 1.50)
@@ -376,7 +387,8 @@ def plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag,
     datasets = sorted(data.keys(), key=str.lower)
     head_label = QV_METRIC_LABELS[metric_tag]
 
-    qv_col_labels       = datasets
+    display_datasets    = [DATASET_LABEL_RENAMES.get(ds, ds) for ds in datasets]
+    qv_col_labels       = display_datasets
     baseline_col_labels = [BASELINE_METHOD_LABELS[m] for m in BASELINE_METHODS]
 
     qv_z, qv_text     = [], []
@@ -432,7 +444,7 @@ def plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag,
         go.Heatmap(
             z=qv_z,
             x=qv_col_labels,
-            y=datasets,
+            y=display_datasets,
             text=qv_text,
             texttemplate="%{text}",
             coloraxis="coloraxis",
@@ -446,7 +458,7 @@ def plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag,
         go.Heatmap(
             z=base_z,
             x=baseline_col_labels,
-            y=datasets,
+            y=display_datasets,
             text=base_text,
             texttemplate="%{text}",
             coloraxis="coloraxis2",

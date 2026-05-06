@@ -1,9 +1,13 @@
-"""999 — QV Transfer Side-by-Side Heatmaps: Fixed Alpha vs Best Alpha
+"""999 — QV Transfer Side-by-Side Heatmaps: Fixed Alpha vs Best Alpha — text
 
-Produces two difference heatmaps side-by-side:
+Produces two difference heatmaps side-by-side for each head variant
+(FT head / QAT head):
 
     Left  : cell = qv_transfer_ptq(fixed alpha) accuracy - FT+PTQ accuracy
     Right : cell = qv_transfer_ptq(best alpha) accuracy  - FT+PTQ accuracy
+
+Best alpha is read from pre-computed best_alpha_*.json files
+(produced by pick_best_alpha.py).
 
 Layout:
     Row 0 :  [Left heatmap]           [Right heatmap]
@@ -37,28 +41,57 @@ import matplotlib.colors as mcolors
 import matplotlib.gridspec as gridspec
 import numpy as np
 
-from src.vision.data.common import DATASET_NAME_TO_EPOCHS
-from src.vision.utils import sanitize_open_clip_model_name
+from src.text.data.common import DATASET_NAME_TO_EPOCHS
+from src.vision.utils import sanitize_hf_model_name
 
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-EVAL_ROOT_BASELINES = "evaluations/vision/ilharco_open_clip/000_baselines/vision"
-EVAL_ROOT_QV        = "evaluations/vision/ilharco_open_clip/001_qat_transfer/vision/qv_transfer"
+EVAL_ROOT_BASELINES = "evaluations/text/ilharco_automodelforsequenceclassification/000_baselines/text"
+EVAL_ROOT_QV        = "evaluations/text/ilharco_automodelforsequenceclassification/001_qat_transfer/text/qv_transfer"
 
-BEST_ALPHA_FILE = "best_alpha.json"
-BEST_ALPHA_KEY  = "val_accuracy_patched_qat_ptq"
-TEST_METRIC_KEY = "test_accuracy_patched_qat_ptq"
-TEST_ACC_KEY    = "test_accuracy"
-
-MODEL_DISPLAY_NAMES = {
-    "ViT-B-16": "ViT-B/16",
-    "ViT-L-14": "ViT-L/14",
-    "ViT-H-14": "ViT-H/14",
+TEST_METRIC_KEYS = {
+    "fp_head_ptq":  "test_accuracy_fp_head_ptq",
+    "qat_head_ptq": "test_accuracy_qat_head_ptq",
 }
 
-DATASET_ORDER_SWAPS = [("DTD", "TinyImageNet"), ("RenderedSST2", "PCAM")]
+QV_METRIC_LABELS = {
+    "fp_head_ptq":  "FT Head",
+    "qat_head_ptq": "QAT Head",
+}
+
+TEST_ACC_KEY = "test_accuracy"
+
+BEST_ALPHA_FILES = {
+    "fp_head_ptq":  "best_alpha_fp_head_ptq.json",
+    "qat_head_ptq": "best_alpha_qat_head_ptq.json",
+}
+
+BEST_ALPHA_KEYS = {
+    "fp_head_ptq":  "val_accuracy_fp_head_ptq",
+    "qat_head_ptq": "val_accuracy_qat_head_ptq",
+}
+
+DATASET_LABEL_RENAMES = {
+    "AmazonCounterfactual": "Counterfactual",
+    "TweetSentimentExtraction": "Sentiment",
+    "AmazonReviewsClassification": "Reviews",
+    "ToxicConversations": "Toxic",
+    "MTOPDomain": "MTOP D",
+    "MTOPIntent": "MTOP I",
+    "MassiveIntent": "Intent",
+    "MassiveScenario": "Scenario",
+}
+
+MODEL_DISPLAY_NAMES = {
+    "Qwen/Qwen3-Embedding-0.6B": "Qwen3-Embedding",
+    "google-bert/bert-base-uncased": "BERT-Base",
+    "google-bert/bert-large-uncased": "BERT-Large",
+    "google/embeddinggemma-300m": "EmbeddingGemma",
+}
+
+DATASET_ORDER_SWAPS = [("AmazonCounterfactual", "ToxicConversations")]
 
 
 def _swapped_dataset_order(datasets_dict):
@@ -77,18 +110,16 @@ def _swapped_dataset_order(datasets_dict):
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-name",     required=True,
-                        help="open_clip model name, e.g. ViT-B-16")
-    parser.add_argument("--pretrained",     required=True,
-                        help="open_clip pretrained tag, e.g. openai")
+                        help="HF model id, e.g. google-bert/bert-base-uncased")
     parser.add_argument("--seed",           required=True, type=int)
 
     parser.add_argument("--optim",          required=True, choices=["adamw", "sgd"])
     parser.add_argument("--lr",             required=True, type=float)
     parser.add_argument("--wd",             required=True, type=float)
     parser.add_argument("--ls",             required=True, type=float)
-    parser.add_argument("--wl",             required=True, type=int)
     parser.add_argument("--max-grad-norm",  required=True, type=float)
     parser.add_argument("--batch-size",     required=True, type=int)
+    parser.add_argument("--max-length",     required=True, type=int)
 
     parser.add_argument("--qat-bits",       required=True, type=int)
     parser.add_argument("--ptq-bits",       required=True, type=int)
@@ -113,9 +144,9 @@ def _skip_tag(skip_modules):
     return "-".join(sorted(skip_modules)) if len(skip_modules) > 0 else "none"
 
 
-def _optim_frag(optim, lr, wd, ls, wl, mgn, bs):
+def _optim_frag(optim, lr, wd, ls, mgn, bs, ml):
     del optim
-    return f"optim=adamw_lr={lr}_wd={wd}_ls={ls}_wl={wl}_mgn={mgn}_bs={bs}"
+    return f"optim=adamw_lr={lr}_wd={wd}_ls={ls}_mgn={mgn}_bs={bs}_ml={ml}"
 
 
 def _qat_frag(bits, gran, skip_modules):
@@ -187,9 +218,9 @@ def _load_value(path, key):
 # ---------------------------------------------------------------------------
 # Data loading — fixed alpha
 # ---------------------------------------------------------------------------
-def load_data_fixed_alpha(args, model_dir, optim_frag, qat_frag, ptq_frag):
+def load_data_fixed_alpha(args, model_dir, optim_frag, qat_frag, ptq_frag, metric_tag):
     qv_frag     = _qv_frag(args.qv_alpha)
-    metric_key  = f"{args.eval_split}_accuracy_patched_qat_ptq"
+    metric_key  = f"{args.eval_split}_accuracy_{metric_tag}"
     datasets    = sorted(DATASET_NAME_TO_EPOCHS.keys())
 
     data = {}
@@ -215,10 +246,14 @@ def load_data_fixed_alpha(args, model_dir, optim_frag, qat_frag, ptq_frag):
 
 
 # ---------------------------------------------------------------------------
-# Data loading — best alpha
+# Data loading — best alpha (from pre-computed best_alpha_*.json files)
 # ---------------------------------------------------------------------------
-def load_data_best_alpha(args, model_dir, optim_frag, qat_frag, ptq_frag):
+def load_data_best_alpha(args, model_dir, optim_frag, qat_frag, ptq_frag, metric_tag):
     datasets = _swapped_dataset_order(DATASET_NAME_TO_EPOCHS)
+
+    best_alpha_file = BEST_ALPHA_FILES[metric_tag]
+    best_alpha_key  = BEST_ALPHA_KEYS[metric_tag]
+    test_metric_key = TEST_METRIC_KEYS[metric_tag]
 
     data = {}
     for target_dataset in datasets:
@@ -234,10 +269,10 @@ def load_data_best_alpha(args, model_dir, optim_frag, qat_frag, ptq_frag):
             )
 
             best_alpha_val = None
-            best_alpha_path = os.path.join(cell_prefix, BEST_ALPHA_FILE)
+            best_alpha_path = os.path.join(cell_prefix, best_alpha_file)
             if os.path.exists(best_alpha_path):
                 with open(best_alpha_path) as f:
-                    info = json.load(f).get(BEST_ALPHA_KEY)
+                    info = json.load(f).get(best_alpha_key)
                     if info is not None:
                         best_alpha_val = info["alpha"]
 
@@ -247,7 +282,7 @@ def load_data_best_alpha(args, model_dir, optim_frag, qat_frag, ptq_frag):
                     cell_prefix, f"qv=alpha={best_alpha_val}",
                     "split=test", "eval_results.json",
                 )
-                best_alpha_acc = _load_value(test_path, TEST_METRIC_KEY)
+                best_alpha_acc = _load_value(test_path, test_metric_key)
             else:
                 print(f"  [NO BEST ALPHA] {best_alpha_path}", file=sys.stderr)
 
@@ -303,8 +338,9 @@ def _robust_symmetric_bounds(values, center, min_span=0.05, q_low=0.05, q_high=0
 # ---------------------------------------------------------------------------
 # Plot
 # ---------------------------------------------------------------------------
-def plot_sidebyside(data_fixed, data_best, args, model_dir, optim_frag, qat_frag):
+def plot_sidebyside(data_fixed, data_best, args, model_dir, optim_frag, qat_frag, metric_tag):
     datasets = _swapped_dataset_order(data_fixed)
+    display_datasets = [DATASET_LABEL_RENAMES.get(ds, ds) for ds in datasets]
     n = len(datasets)
 
     # -- build matrices -------------------------------------------------------
@@ -345,9 +381,9 @@ def plot_sidebyside(data_fixed, data_best, args, model_dir, optim_frag, qat_frag
     ax_left.imshow(masked_fixed, cmap=cmap_div, norm=norm_div, aspect="equal")
 
     ax_left.set_xticks(range(n))
-    ax_left.set_xticklabels(datasets, rotation=45, ha="right", fontsize=9)
+    ax_left.set_xticklabels(display_datasets, rotation=45, ha="right", fontsize=9)
     ax_left.set_yticks(range(n))
-    ax_left.set_yticklabels(datasets, fontsize=9)
+    ax_left.set_yticklabels(display_datasets, fontsize=9)
     ax_left.set_xlabel("Donor Dataset", fontsize=9, labelpad=4)
     ax_left.set_ylabel("Receiver Dataset", fontsize=9, labelpad=4)
     ax_left.tick_params(axis="both", length=2, pad=2)
@@ -358,7 +394,7 @@ def plot_sidebyside(data_fixed, data_best, args, model_dir, optim_frag, qat_frag
     im_right = ax_right.imshow(masked_best, cmap=cmap_div, norm=norm_div, aspect="equal")
 
     ax_right.set_xticks(range(n))
-    ax_right.set_xticklabels(datasets, rotation=45, ha="right", fontsize=9)
+    ax_right.set_xticklabels(display_datasets, rotation=45, ha="right", fontsize=9)
     ax_right.set_yticks(range(n))
     ax_right.set_yticklabels([], fontsize=9)
     ax_right.set_xlabel("Donor Dataset", fontsize=9, labelpad=4)
@@ -410,13 +446,14 @@ def plot_sidebyside(data_fixed, data_best, args, model_dir, optim_frag, qat_frag
 
     # -- export ---------------------------------------------------------------
     out_dir = os.path.join(
-        "plots", "vision", "ilharco_open_clip", "999_paper_stuff", "001_qat_transfer",
+        "plots", "text", "ilharco_automodelforsequenceclassification",
+        "999_paper_stuff", "001_qat_transfer",
         "qv_transfer_heatmap_alpha_fixed_vs_best",
         model_dir, f"seed={args.seed}", optim_frag, qat_frag,
         _qv_frag(args.qv_alpha), _split_frag(args.eval_split),
     )
     os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, "heatmap_alpha_fixed_vs_best.pdf")
+    out_path = os.path.join(out_dir, f"heatmap_alpha_fixed_vs_best_{metric_tag}.pdf")
 
     fig.savefig(out_path, format="pdf", bbox_inches="tight", dpi=300)
     plt.close(fig)
@@ -429,16 +466,17 @@ def plot_sidebyside(data_fixed, data_best, args, model_dir, optim_frag, qat_frag
 def main():
     args = parse_args()
 
-    model_dir  = sanitize_open_clip_model_name(args.model_name, args.pretrained)
-    optim_frag = _optim_frag(args.optim, args.lr, args.wd, args.ls, args.wl,
-                             args.max_grad_norm, args.batch_size)
+    model_dir  = sanitize_hf_model_name(args.model_name)
+    optim_frag = _optim_frag(args.optim, args.lr, args.wd, args.ls,
+                             args.max_grad_norm, args.batch_size, args.max_length)
     qat_frag   = _qat_frag(args.qat_bits, args.granularity, args.skip_modules)
     ptq_frag   = _ptq_frag(args.ptq_bits, args.granularity, args.skip_modules)
 
-    data_fixed = load_data_fixed_alpha(args, model_dir, optim_frag, qat_frag, ptq_frag)
-    data_best  = load_data_best_alpha(args, model_dir, optim_frag, qat_frag, ptq_frag)
+    for metric_tag in TEST_METRIC_KEYS:
+        data_fixed = load_data_fixed_alpha(args, model_dir, optim_frag, qat_frag, ptq_frag, metric_tag)
+        data_best  = load_data_best_alpha(args, model_dir, optim_frag, qat_frag, ptq_frag, metric_tag)
 
-    plot_sidebyside(data_fixed, data_best, args, model_dir, optim_frag, qat_frag)
+        plot_sidebyside(data_fixed, data_best, args, model_dir, optim_frag, qat_frag, metric_tag)
 
 
 if __name__ == "__main__":

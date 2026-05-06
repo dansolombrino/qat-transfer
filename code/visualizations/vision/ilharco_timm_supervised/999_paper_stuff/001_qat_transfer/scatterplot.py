@@ -1,7 +1,7 @@
-"""Scatterplot: (QAT Transfer+PTQ - FP+PTQ) / QAT+PTQ per dataset (timm supervised).
+"""Scatterplot: (QAT Transfer+PTQ - FT+PTQ) / QAT+PTQ per dataset (timm supervised).
 
 Dot plot with datasets on the x-axis and the normalised improvement of
-QAT transfer over the FP+PTQ baseline on the y-axis, using QAT+PTQ
+QAT transfer over the FT+PTQ baseline on the y-axis, using QAT+PTQ
 as the reference denominator.
 
 Output: PDF with LaTeX fonts (paper-ready).
@@ -44,6 +44,18 @@ BEST_ALPHA_FILE = "best_alpha_qat_head_ptq.json"
 BEST_ALPHA_KEY  = "val_accuracy_qat_head_ptq"
 TEST_METRIC_KEY = "test_accuracy_qat_head_ptq"
 TEST_ACC_KEY    = "test_accuracy"
+
+DATASET_ORDER_SWAPS = [("DTD", "TinyImageNet"), ("RenderedSST2", "PCAM")]
+
+
+def _swapped_dataset_order(datasets_dict):
+    """Sorted dataset list with aesthetic swaps applied."""
+    ds = sorted(datasets_dict.keys())
+    for a, b in DATASET_ORDER_SWAPS:
+        if a in ds and b in ds:
+            ia, ib = ds.index(a), ds.index(b)
+            ds[ia], ds[ib] = ds[ib], ds[ia]
+    return ds
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +156,7 @@ def _load_value(path, key):
 # ---------------------------------------------------------------------------
 def load_data(model_dir, args, optim_frag, qat_frag, ptq_frag):
     """Return {dataset: {"fp_ptq": float, "qat_ptq": float, "qat_transfer_ptq": float}}."""
-    datasets = sorted(DATASET_NAME_TO_EPOCHS.keys())
+    datasets = _swapped_dataset_order(DATASET_NAME_TO_EPOCHS)
 
     data = {}
     for target_dataset in datasets:
@@ -198,7 +210,7 @@ def load_data(model_dir, args, optim_frag, qat_frag, ptq_frag):
 # Plot
 # ---------------------------------------------------------------------------
 def plot_scatterplot(data, model_dir, args, qat_frag):
-    datasets = sorted(DATASET_NAME_TO_EPOCHS.keys())
+    datasets = _swapped_dataset_order(DATASET_NAME_TO_EPOCHS)
 
     x_labels = []
     y_values = []
@@ -221,7 +233,7 @@ def plot_scatterplot(data, model_dir, args, qat_frag):
 
     ax.set_xticks(x_pos)
     ax.set_xticklabels(x_labels, rotation=45, ha="right", fontsize=8)
-    ax.set_ylabel(r"$\frac{\mathrm{QAT\ Transfer{+}PTQ} - \mathrm{FP{+}PTQ}}{\mathrm{QAT{+}PTQ}}$",
+    ax.set_ylabel(r"$\frac{\mathrm{QAT\ Transfer{+}PTQ} - \mathrm{FT{+}PTQ}}{\mathrm{QAT{+}PTQ}}$",
                   fontsize=11)
     ax.set_title(args.model_name, fontsize=12)
     ax.grid(axis="y", alpha=0.3)

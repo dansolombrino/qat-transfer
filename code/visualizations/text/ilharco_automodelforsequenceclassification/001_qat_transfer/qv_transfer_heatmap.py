@@ -87,6 +87,17 @@ TEST_ACC_KEY  = "test_accuracy"
 HEATMAP_COLORSCALE_SEQUENTIAL = "Viridis"
 HEATMAP_COLORSCALE_DIVERGING  = "RdYlGn"
 
+DATASET_LABEL_RENAMES = {
+    "AmazonCounterfactual": "Counterfactual",
+    "TweetSentimentExtraction": "Sentiment",
+    "AmazonReviewsClassification": "Reviews",
+    "ToxicConversations": "Toxic",
+    "MTOPDomain": "MTOP D",
+    "MTOPIntent": "MTOP I",
+    "MassiveIntent": "Intent",
+    "MassiveScenario": "Scenario",
+}
+
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -323,7 +334,8 @@ def plot_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag, metric_ta
     datasets = sorted(data.keys(), key=str.lower)
     head_label = QV_METRIC_LABELS[metric_tag]
 
-    qv_col_labels       = datasets
+    display_datasets    = [DATASET_LABEL_RENAMES.get(ds, ds) for ds in datasets]
+    qv_col_labels       = display_datasets
     baseline_col_labels = [BASELINE_METHOD_LABELS[m] for m in BASELINE_METHODS]
 
     qv_z, qv_text     = [], []
@@ -367,7 +379,7 @@ def plot_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag, metric_ta
         go.Heatmap(
             z=qv_z,
             x=qv_col_labels,
-            y=datasets,
+            y=display_datasets,
             text=qv_text,
             texttemplate="%{text}",
             coloraxis="coloraxis",
@@ -381,7 +393,7 @@ def plot_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag, metric_ta
         go.Heatmap(
             z=base_z,
             x=baseline_col_labels,
-            y=datasets,
+            y=display_datasets,
             text=base_text,
             texttemplate="%{text}",
             coloraxis="coloraxis2",
@@ -446,7 +458,8 @@ def plot_difference_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag
     datasets = sorted(data.keys(), key=str.lower)
     head_label = QV_METRIC_LABELS[metric_tag]
 
-    qv_col_labels       = datasets
+    display_datasets    = [DATASET_LABEL_RENAMES.get(ds, ds) for ds in datasets]
+    qv_col_labels       = display_datasets
     baseline_col_labels = [BASELINE_METHOD_LABELS[m] for m in BASELINE_METHODS]
 
     qv_z, qv_text     = [], []
@@ -498,7 +511,7 @@ def plot_difference_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag
         go.Heatmap(
             z=qv_z,
             x=qv_col_labels,
-            y=datasets,
+            y=display_datasets,
             text=qv_text,
             texttemplate="%{text}",
             coloraxis="coloraxis",
@@ -512,7 +525,7 @@ def plot_difference_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag
         go.Heatmap(
             z=base_z,
             x=baseline_col_labels,
-            y=datasets,
+            y=display_datasets,
             text=base_text,
             texttemplate="%{text}",
             coloraxis="coloraxis2",

@@ -1,15 +1,12 @@
-"""999 — QV Transfer Side-by-Side Heatmaps: Fixed Alpha vs Best Alpha
+"""999 — QV Transfer Side-by-Side Heatmaps: Fixed Alpha vs Best Alpha — ALL open_clip models
 
-Produces two difference heatmaps side-by-side:
+Produces one giant PDF with all 3 open_clip models arranged in a 2-row × 2-column grid:
 
-    Left  : cell = qv_transfer_ptq(fixed alpha) accuracy - FT+PTQ accuracy
-    Right : cell = qv_transfer_ptq(best alpha) accuracy  - FT+PTQ accuracy
+    Row 0 :  [Model 1 pair]   [Model 2 pair]
+    Row 1 :        [Model 3 pair left-aligned]
 
-Layout:
-    Row 0 :  [Left heatmap]           [Right heatmap]
-    Row 1 :  [3 legend cells]         [Horizontal colorbar]
-
-Output: PDF, full-width, shared color scale, no cell annotations.
+Each model pair consists of two heatmaps (left=fixed alpha, right=best alpha)
+with a per-model colorbar underneath.
 """
 
 import argparse
@@ -47,6 +44,18 @@ from src.vision.utils import sanitize_open_clip_model_name
 EVAL_ROOT_BASELINES = "evaluations/vision/ilharco_open_clip/000_baselines/vision"
 EVAL_ROOT_QV        = "evaluations/vision/ilharco_open_clip/001_qat_transfer/vision/qv_transfer"
 
+MODELS = [
+    "ViT-B-16",
+    "ViT-L-14",
+    "ViT-H-14",
+]
+
+PRETRAINED_DEFAULTS = {
+    "ViT-B-16": "openai",
+    "ViT-L-14": "openai",
+    "ViT-H-14": "openai",
+}
+
 BEST_ALPHA_FILE = "best_alpha.json"
 BEST_ALPHA_KEY  = "val_accuracy_patched_qat_ptq"
 TEST_METRIC_KEY = "test_accuracy_patched_qat_ptq"
@@ -76,11 +85,11 @@ def _swapped_dataset_order(datasets_dict):
 # ---------------------------------------------------------------------------
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model-name",     required=True,
-                        help="open_clip model name, e.g. ViT-B-16")
-    parser.add_argument("--pretrained",     required=True,
-                        help="open_clip pretrained tag, e.g. openai")
     parser.add_argument("--seed",           required=True, type=int)
+
+    parser.add_argument("--pretrained-tags", required=True, nargs="+",
+                        help="One pretrained tag per model (3 values), positionally "
+                             "matched to the hardcoded MODELS list.")
 
     parser.add_argument("--optim",          required=True, choices=["adamw", "sgd"])
     parser.add_argument("--lr",             required=True, type=float)
@@ -88,7 +97,9 @@ def parse_args():
     parser.add_argument("--ls",             required=True, type=float)
     parser.add_argument("--wl",             required=True, type=int)
     parser.add_argument("--max-grad-norm",  required=True, type=float)
-    parser.add_argument("--batch-size",     required=True, type=int)
+    parser.add_argument("--batch-size",     required=True, nargs="+", type=int,
+                        help="One batch size per model (3 values), positionally "
+                             "matched to the hardcoded MODELS list.")
 
     parser.add_argument("--qat-bits",       required=True, type=int)
     parser.add_argument("--ptq-bits",       required=True, type=int)
@@ -103,7 +114,14 @@ def parse_args():
     parser.add_argument("--eval-split",     default="test", choices=["val", "test"],
                         help="Which split the qv_transfer results were evaluated on.")
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    assert len(args.batch_size) == len(MODELS), (
+        f"Expected {len(MODELS)} batch-size values (one per model), got {len(args.batch_size)}"
+    )
+    assert len(args.pretrained_tags) == len(MODELS), (
+        f"Expected {len(MODELS)} pretrained-tags values (one per model), got {len(args.pretrained_tags)}"
+    )
+    return args
 
 
 # ---------------------------------------------------------------------------
@@ -113,8 +131,7 @@ def _skip_tag(skip_modules):
     return "-".join(sorted(skip_modules)) if len(skip_modules) > 0 else "none"
 
 
-def _optim_frag(optim, lr, wd, ls, wl, mgn, bs):
-    del optim
+def _optim_frag(lr, wd, ls, wl, mgn, bs):
     return f"optim=adamw_lr={lr}_wd={wd}_ls={ls}_wl={wl}_mgn={mgn}_bs={bs}"
 
 
@@ -301,9 +318,9 @@ def _robust_symmetric_bounds(values, center, min_span=0.05, q_low=0.05, q_high=0
 
 
 # ---------------------------------------------------------------------------
-# Plot
+# Plot one model slot into a given SubplotSpec
 # ---------------------------------------------------------------------------
-def plot_sidebyside(data_fixed, data_best, args, model_dir, optim_frag, qat_frag):
+def _plot_model_slot(fig, slot_spec, data_fixed, data_best, model_name, show_ylabel, show_xlabel):
     datasets = _swapped_dataset_order(data_fixed)
     n = len(datasets)
 
@@ -311,7 +328,7 @@ def plot_sidebyside(data_fixed, data_best, args, model_dir, optim_frag, qat_frag
     z_fixed = _build_diff_matrix(data_fixed)
     z_best  = _build_diff_matrix(data_best)
 
-    # -- shared color bounds --------------------------------------------------
+    # -- per-model color bounds -----------------------------------------------
     finite_all = (
         z_fixed[np.isfinite(z_fixed)].tolist()
         + z_best[np.isfinite(z_best)].tolist()
@@ -323,100 +340,114 @@ def plot_sidebyside(data_fixed, data_best, args, model_dir, optim_frag, qat_frag
     cmap_div.set_bad(color="#d9d9d9")
     norm_div = mcolors.TwoSlopeNorm(vmin=cmin, vcenter=0.0, vmax=cmax)
 
-    # -- figure setup ---------------------------------------------------------
-    fig_width = 9.0
-    fig = plt.figure(figsize=(fig_width, 6.25))
-    display_name = MODEL_DISPLAY_NAMES.get(args.model_name, args.model_name)
-    fig.suptitle(r"\textbf{" + display_name + "}", fontsize=12, y=0.87)
-
-    gs = gridspec.GridSpec(
-        2, 2,
-        height_ratios=[1, 0.04],
-        width_ratios=[1, 1],
-        hspace=0.35,
+    # -- inner grid: 1 row × 3 cols (left heatmap, right heatmap, colorbar) --
+    inner_gs = gridspec.GridSpecFromSubplotSpec(
+        1, 3,
+        subplot_spec=slot_spec,
+        width_ratios=[1, 1, 0.04],
         wspace=0.08,
     )
 
-    ax_left  = fig.add_subplot(gs[0, 0])
-    ax_right = fig.add_subplot(gs[0, 1])
+    ax_left  = fig.add_subplot(inner_gs[0, 0])
+    ax_right = fig.add_subplot(inner_gs[0, 1])
+
+    display_name = MODEL_DISPLAY_NAMES.get(model_name, model_name)
 
     # -- left heatmap (fixed alpha) -------------------------------------------
     masked_fixed = np.ma.masked_invalid(z_fixed)
     ax_left.imshow(masked_fixed, cmap=cmap_div, norm=norm_div, aspect="equal")
 
     ax_left.set_xticks(range(n))
-    ax_left.set_xticklabels(datasets, rotation=45, ha="right", fontsize=9)
+    if show_xlabel:
+        ax_left.set_xticklabels(datasets, rotation=45, ha="right", fontsize=7)
+        ax_left.set_xlabel("Donor Dataset", fontsize=7, labelpad=4)
+    else:
+        ax_left.set_xticklabels([], fontsize=7)
     ax_left.set_yticks(range(n))
-    ax_left.set_yticklabels(datasets, fontsize=9)
-    ax_left.set_xlabel("Donor Dataset", fontsize=9, labelpad=4)
-    ax_left.set_ylabel("Receiver Dataset", fontsize=9, labelpad=4)
+    if show_ylabel:
+        ax_left.set_yticklabels(datasets, fontsize=7)
+        ax_left.set_ylabel("Receiver Dataset", fontsize=7, labelpad=4)
+    else:
+        ax_left.set_yticklabels([], fontsize=7)
     ax_left.tick_params(axis="both", length=2, pad=2)
-    ax_left.set_title(r"\textbf{constant scaling ($\lambda=1$)}", fontsize=9, pad=6)
+    ax_left.set_title(
+        r"\textbf{" + display_name + r"} — constant scaling ($\lambda=1$)",
+        fontsize=8, pad=6,
+    )
 
     # -- right heatmap (best alpha) -------------------------------------------
     masked_best = np.ma.masked_invalid(z_best)
     im_right = ax_right.imshow(masked_best, cmap=cmap_div, norm=norm_div, aspect="equal")
 
     ax_right.set_xticks(range(n))
-    ax_right.set_xticklabels(datasets, rotation=45, ha="right", fontsize=9)
+    if show_xlabel:
+        ax_right.set_xticklabels(datasets, rotation=45, ha="right", fontsize=7)
+        ax_right.set_xlabel("Donor Dataset", fontsize=7, labelpad=4)
+    else:
+        ax_right.set_xticklabels([], fontsize=7)
     ax_right.set_yticks(range(n))
-    ax_right.set_yticklabels([], fontsize=9)
-    ax_right.set_xlabel("Donor Dataset", fontsize=9, labelpad=4)
+    ax_right.set_yticklabels([], fontsize=7)
     ax_right.tick_params(axis="both", length=2, pad=2)
-    ax_right.set_title(r"\textbf{best $\lambda$ scaling}", fontsize=9, pad=6)
-
-    # -- legend cells (below left heatmap) ------------------------------------
-    ax_legend = fig.add_subplot(gs[1, 0])
-    ax_legend.set_axis_off()
-
-    legend_items = [
-        ("Harmful",     cmin),
-        ("Helpful",     cmax * 0.3),
-        ("Strong gain", cmax),
-    ]
-
-    cell_width  = 0.08
-    cell_height = 0.6
-    spacing     = 0.12
-    total_width = len(legend_items) * cell_width + (len(legend_items) - 1) * spacing
-    x_start     = 0.5 - total_width / 2.0
-
-    for idx, (label, value) in enumerate(legend_items):
-        x = x_start + idx * (cell_width + spacing)
-        color = cmap_div(norm_div(value))
-        rect = plt.Rectangle(
-            (x, 0.3), cell_width, cell_height,
-            facecolor=color, edgecolor="black", linewidth=0.5,
-            transform=ax_legend.transAxes, clip_on=False,
-        )
-        ax_legend.add_patch(rect)
-        ax_legend.text(
-            x + cell_width / 2.0, 0.1, label,
-            transform=ax_legend.transAxes, ha="center", va="top",
-            fontsize=9,
-        )
-
-    ax_legend.text(
-        0.5, -1.5, "Transfer outcome",
-        transform=ax_legend.transAxes, ha="center", va="top",
-        fontsize=9,
+    ax_right.set_title(
+        r"\textbf{" + display_name + r"} — best $\lambda$ scaling",
+        fontsize=8, pad=6,
     )
 
-    # -- horizontal colorbar (below right heatmap) ----------------------------
-    cbar_ax = fig.add_subplot(gs[1, 1])
-    cbar = fig.colorbar(im_right, cax=cbar_ax, orientation="horizontal")
-    cbar.set_label("Top-1 improvement of QV patching against naive PTQ", fontsize=9)
-    cbar.ax.tick_params(labelsize=6)
+    # -- vertical colorbar (right of heatmap pair) ----------------------------
+    cbar_ax = fig.add_subplot(inner_gs[0, 2])
+    cbar = fig.colorbar(im_right, cax=cbar_ax, orientation="vertical")
+    cbar.ax.tick_params(labelsize=5)
+
+
+# ---------------------------------------------------------------------------
+# Main figure assembly
+# ---------------------------------------------------------------------------
+def plot_all_models(all_data_fixed, all_data_best, args):
+    n_models = len(MODELS)
+    n_rows = (n_models + 1) // 2  # 2 rows for 3 models
+
+    fig_width = 18.0
+    row_height = 5.0
+    fig_height = n_rows * row_height
+    fig = plt.figure(figsize=(fig_width, fig_height))
+
+    outer_gs = gridspec.GridSpec(
+        n_rows, 2,
+        hspace=0.30,
+        wspace=0.15,
+        figure=fig,
+    )
+
+    for model_idx in range(n_models):
+        row = model_idx // 2
+        col = model_idx % 2
+
+        model_name = MODELS[model_idx]
+        _plot_model_slot(
+            fig, outer_gs[row, col],
+            all_data_fixed[model_name],
+            all_data_best[model_name],
+            model_name,
+            show_ylabel=(col == 0),
+            show_xlabel=(model_idx + 2 >= n_models),
+        )
 
     # -- export ---------------------------------------------------------------
+    qat_frag = _qat_frag(args.qat_bits, args.granularity, args.skip_modules)
+    bs_encoded = "-".join(str(b) for b in args.batch_size)
+    optim_path_frag = (
+        f"optim=adamw_lr={args.lr}_wd={args.wd}_ls={args.ls}"
+        f"_wl={args.wl}_mgn={args.max_grad_norm}_bs={bs_encoded}"
+    )
+
     out_dir = os.path.join(
         "plots", "vision", "ilharco_open_clip", "999_paper_stuff", "001_qat_transfer",
-        "qv_transfer_heatmap_alpha_fixed_vs_best",
-        model_dir, f"seed={args.seed}", optim_frag, qat_frag,
+        "qv_transfer_heatmap_alpha_fixed_vs_best_all_models",
+        f"seed={args.seed}", optim_path_frag, qat_frag,
         _qv_frag(args.qv_alpha), _split_frag(args.eval_split),
     )
     os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, "heatmap_alpha_fixed_vs_best.pdf")
+    out_path = os.path.join(out_dir, "heatmap_alpha_fixed_vs_best_all_models.pdf")
 
     fig.savefig(out_path, format="pdf", bbox_inches="tight", dpi=300)
     plt.close(fig)
@@ -429,16 +460,28 @@ def plot_sidebyside(data_fixed, data_best, args, model_dir, optim_frag, qat_frag
 def main():
     args = parse_args()
 
-    model_dir  = sanitize_open_clip_model_name(args.model_name, args.pretrained)
-    optim_frag = _optim_frag(args.optim, args.lr, args.wd, args.ls, args.wl,
-                             args.max_grad_norm, args.batch_size)
-    qat_frag   = _qat_frag(args.qat_bits, args.granularity, args.skip_modules)
-    ptq_frag   = _ptq_frag(args.ptq_bits, args.granularity, args.skip_modules)
+    qat_frag = _qat_frag(args.qat_bits, args.granularity, args.skip_modules)
+    ptq_frag = _ptq_frag(args.ptq_bits, args.granularity, args.skip_modules)
 
-    data_fixed = load_data_fixed_alpha(args, model_dir, optim_frag, qat_frag, ptq_frag)
-    data_best  = load_data_best_alpha(args, model_dir, optim_frag, qat_frag, ptq_frag)
+    all_data_fixed = {}
+    all_data_best  = {}
 
-    plot_sidebyside(data_fixed, data_best, args, model_dir, optim_frag, qat_frag)
+    for model_idx, model_name in enumerate(MODELS):
+        pretrained = args.pretrained_tags[model_idx]
+        model_dir  = sanitize_open_clip_model_name(model_name, pretrained)
+        optim_frag = _optim_frag(
+            args.lr, args.wd, args.ls, args.wl,
+            args.max_grad_norm, args.batch_size[model_idx],
+        )
+
+        all_data_fixed[model_name] = load_data_fixed_alpha(
+            args, model_dir, optim_frag, qat_frag, ptq_frag,
+        )
+        all_data_best[model_name] = load_data_best_alpha(
+            args, model_dir, optim_frag, qat_frag, ptq_frag,
+        )
+
+    plot_all_models(all_data_fixed, all_data_best, args)
 
 
 if __name__ == "__main__":
