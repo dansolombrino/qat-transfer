@@ -205,6 +205,7 @@ def plot_all(all_model_data, args):
     if n_models % n_cols != 0:
         axes[n_rows - 2][n_cols - 1].set_xticks(x_pos)
         axes[n_rows - 2][n_cols - 1].set_xticklabels(datasets, fontsize=10, rotation=45, ha="right")
+        axes[n_rows - 2][n_cols - 1].tick_params(labelbottom=True)
 
     axes_flat[0].legend(fontsize=12, frameon=False, loc="upper center",
                         bbox_to_anchor=(1.0, 1.35), ncol=3)
