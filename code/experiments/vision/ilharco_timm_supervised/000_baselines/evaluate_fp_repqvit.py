@@ -102,7 +102,7 @@ def main(cfg: DictConfig):
 
     set_seed(cfg.seed)
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = torch.device(f"cuda:{cfg.gpu}" if torch.cuda.is_available() else "cpu")
 
     epochs = (
         DATASET_NAME_TO_EPOCHS[cfg.dataset_name]
