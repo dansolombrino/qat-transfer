@@ -55,7 +55,15 @@ class QuantLinear(nn.Linear):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.use_input_quant:
-            x = self.input_quantizer(x)
+            if x.dim() == 4:
+                # Swin PatchMerging passes NHWC (B, H, W, C) — flatten spatial
+                # dims so the quantizer correctly uses last dim as channels.
+                B, H, W, C = x.shape
+                x = x.reshape(B, H * W, C)
+                x = self.input_quantizer(x)
+                x = x.reshape(B, H, W, C)
+            else:
+                x = self.input_quantizer(x)
         w = self.weight_quantizer(self.weight) if self.use_weight_quant else self.weight
         return F.linear(x, w, self.bias)
 
