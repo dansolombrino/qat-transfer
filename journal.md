@@ -148,7 +148,7 @@
 
 # PTQ4ViT Baseline
 
-**Status:** Implemented for vision models (ilharco_open_clip). Uses Hessian-guided PTQSL search for optimal quantization intervals with Split-of-Softmax (SoS) for attention score matrices and PostGeLU handling for MLP layers.
+**Status:** Implemented for vision models (ilharco_timm_supervised, ilharco_open_clip). Uses Hessian-guided PTQSL search for optimal quantization intervals with Split-of-Softmax (SoS) for attention score matrices and PostGeLU handling for MLP layers.
 
 ## Experiment progress
 
@@ -165,4 +165,39 @@
 - [ ] open_clip — ViT-H-14 / laion2b_s32b_b79k x 22 datasets (bit=3, hessian, seed=2038)
       ```
       uv run --active python code/experiments/vision/ilharco_open_clip/000_baselines/evaluate_ptq4vit.py -m model_name=ViT-H-14 pretrained=laion2b_s32b_b79k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=64 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0 ptq4vit.bit=3 ptq4vit.calibrator=hessian ptq4vit.calib_num_samples=32 ptq4vit.calib_batch_size=32 ptq4vit.hessian_batch_size=4 ptq4vit.metric=hessian ptq4vit.search_round=3 ptq4vit.eq_alpha=0.01 ptq4vit.eq_beta=1.2 ptq4vit.eq_n=100 ptq4vit.n_V=1 ptq4vit.n_H=1 ptq4vit.n_a=1 ptq4vit.n_G_A=1 ptq4vit.n_V_A=1 ptq4vit.n_H_A=1 ptq4vit.n_G_B=1 ptq4vit.n_V_B=1 ptq4vit.n_H_B=1 'ptq4vit.skip_modules=[classification_head]'
+      ```
+
+- [ ] timm — deit3_base_patch16_224.fb_in1k x 22 datasets (bit=3, hessian, seed=2038)
+      ```
+      uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_ptq4vit.py -m model_name=deit3_base_patch16_224.fb_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0 ptq4vit.bit=3 ptq4vit.calibrator=hessian ptq4vit.calib_num_samples=32 ptq4vit.calib_batch_size=32 ptq4vit.hessian_batch_size=4 ptq4vit.metric=hessian ptq4vit.search_round=3 ptq4vit.eq_alpha=0.01 ptq4vit.eq_beta=1.2 ptq4vit.eq_n=100 ptq4vit.n_V=1 ptq4vit.n_H=1 ptq4vit.n_a=1 ptq4vit.n_G_A=1 ptq4vit.n_V_A=1 ptq4vit.n_H_A=1 ptq4vit.n_G_B=1 ptq4vit.n_V_B=1 ptq4vit.n_H_B=1 'ptq4vit.skip_modules=[head]'
+      ```
+
+- [ ] timm — deit3_large_patch16_224.fb_in1k x 22 datasets (bit=3, hessian, seed=2038)
+      ```
+      uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_ptq4vit.py -m model_name=deit3_large_patch16_224.fb_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0 ptq4vit.bit=3 ptq4vit.calibrator=hessian ptq4vit.calib_num_samples=32 ptq4vit.calib_batch_size=32 ptq4vit.hessian_batch_size=4 ptq4vit.metric=hessian ptq4vit.search_round=3 ptq4vit.eq_alpha=0.01 ptq4vit.eq_beta=1.2 ptq4vit.eq_n=100 ptq4vit.n_V=1 ptq4vit.n_H=1 ptq4vit.n_a=1 ptq4vit.n_G_A=1 ptq4vit.n_V_A=1 ptq4vit.n_H_A=1 ptq4vit.n_G_B=1 ptq4vit.n_V_B=1 ptq4vit.n_H_B=1 'ptq4vit.skip_modules=[head]'
+      ```
+
+- [ ] timm — swin_base_patch4_window7_224.ms_in22k_ft_in1k x 22 datasets (bit=3, hessian, seed=2038)
+      ```
+      uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_ptq4vit.py -m model_name=swin_base_patch4_window7_224.ms_in22k_ft_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0 ptq4vit.bit=3 ptq4vit.calibrator=hessian ptq4vit.calib_num_samples=32 ptq4vit.calib_batch_size=32 ptq4vit.hessian_batch_size=4 ptq4vit.metric=hessian ptq4vit.search_round=3 ptq4vit.eq_alpha=0.01 ptq4vit.eq_beta=1.2 ptq4vit.eq_n=100 ptq4vit.n_V=1 ptq4vit.n_H=1 ptq4vit.n_a=1 ptq4vit.n_G_A=1 ptq4vit.n_V_A=1 ptq4vit.n_H_A=1 ptq4vit.n_G_B=1 ptq4vit.n_V_B=1 ptq4vit.n_H_B=1 'ptq4vit.skip_modules=[head]'
+      ```
+
+- [ ] timm — swin_large_patch4_window7_224.ms_in22k_ft_in1k x 22 datasets (bit=3, hessian, seed=2038)
+      ```
+      uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_ptq4vit.py -m model_name=swin_large_patch4_window7_224.ms_in22k_ft_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0 ptq4vit.bit=3 ptq4vit.calibrator=hessian ptq4vit.calib_num_samples=32 ptq4vit.calib_batch_size=32 ptq4vit.hessian_batch_size=4 ptq4vit.metric=hessian ptq4vit.search_round=3 ptq4vit.eq_alpha=0.01 ptq4vit.eq_beta=1.2 ptq4vit.eq_n=100 ptq4vit.n_V=1 ptq4vit.n_H=1 ptq4vit.n_a=1 ptq4vit.n_G_A=1 ptq4vit.n_V_A=1 ptq4vit.n_H_A=1 ptq4vit.n_G_B=1 ptq4vit.n_V_B=1 ptq4vit.n_H_B=1 'ptq4vit.skip_modules=[head]'
+      ```
+
+- [ ] timm — vit_base_patch16_224.orig_in21k x 22 datasets (bit=3, hessian, seed=2038)
+      ```
+      uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_ptq4vit.py -m model_name=vit_base_patch16_224.orig_in21k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0 ptq4vit.bit=3 ptq4vit.calibrator=hessian ptq4vit.calib_num_samples=32 ptq4vit.calib_batch_size=32 ptq4vit.hessian_batch_size=4 ptq4vit.metric=hessian ptq4vit.search_round=3 ptq4vit.eq_alpha=0.01 ptq4vit.eq_beta=1.2 ptq4vit.eq_n=100 ptq4vit.n_V=1 ptq4vit.n_H=1 ptq4vit.n_a=1 ptq4vit.n_G_A=1 ptq4vit.n_V_A=1 ptq4vit.n_H_A=1 ptq4vit.n_G_B=1 ptq4vit.n_V_B=1 ptq4vit.n_H_B=1 'ptq4vit.skip_modules=[head]'
+      ```
+
+- [ ] timm — vit_large_patch16_224.orig_in21k x 22 datasets (bit=3, hessian, seed=2038)
+      ```
+      uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_ptq4vit.py -m model_name=vit_large_patch16_224.orig_in21k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=64 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0 ptq4vit.bit=3 ptq4vit.calibrator=hessian ptq4vit.calib_num_samples=32 ptq4vit.calib_batch_size=32 ptq4vit.hessian_batch_size=4 ptq4vit.metric=hessian ptq4vit.search_round=3 ptq4vit.eq_alpha=0.01 ptq4vit.eq_beta=1.2 ptq4vit.eq_n=100 ptq4vit.n_V=1 ptq4vit.n_H=1 ptq4vit.n_a=1 ptq4vit.n_G_A=1 ptq4vit.n_V_A=1 ptq4vit.n_H_A=1 ptq4vit.n_G_B=1 ptq4vit.n_V_B=1 ptq4vit.n_H_B=1 'ptq4vit.skip_modules=[head]'
+      ```
+
+- [ ] timm — vit_huge_patch14_224.orig_in21k x 22 datasets (bit=3, hessian, seed=2038)
+      ```
+      uv run --active python code/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_ptq4vit.py -m model_name=vit_huge_patch14_224.orig_in21k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=64 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0 ptq4vit.bit=3 ptq4vit.calibrator=hessian ptq4vit.calib_num_samples=32 ptq4vit.calib_batch_size=32 ptq4vit.hessian_batch_size=4 ptq4vit.metric=hessian ptq4vit.search_round=3 ptq4vit.eq_alpha=0.01 ptq4vit.eq_beta=1.2 ptq4vit.eq_n=100 ptq4vit.n_V=1 ptq4vit.n_H=1 ptq4vit.n_a=1 ptq4vit.n_G_A=1 ptq4vit.n_V_A=1 ptq4vit.n_H_A=1 ptq4vit.n_G_B=1 ptq4vit.n_V_B=1 ptq4vit.n_H_B=1 'ptq4vit.skip_modules=[head]'
       ```
