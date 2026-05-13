@@ -1,0 +1,57 @@
+hydra:
+  searchpath:
+    - file://${oc.env:PWD}/config
+  sweep:
+    dir: logs/config/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_fp_aphq_vit
+    subdir: ${model_name}/${dataset_name}/optim=adamw_lr=${lr}_wd=${wd}_ls=${ls}_wl=${wl}_mgn=${max_grad_norm}_bs=${batch_size}/seed=${seed}
+
+model_name: ???
+dataset_name: ???
+batch_size: ???
+lr: ???
+wd: ???
+ls: ???
+wl: ???
+max_grad_norm: ???
+seed: ???
+gpu: ???
+limit_num_epochs: null
+limit_num_batches: null
+log_to_file: false
+
+aphq_vit:
+  # which fully-qualified module names (substring match) to leave unquantized
+  skip_modules: ???            # list[str] — e.g. [head]
+
+  # bit widths
+  w_bit: ???                   # int — weight bit-width
+  a_bit: ???                   # int — activation bit-width
+  qconv_a_bit: 8               # int — activation bits for conv (patch-embed); 8 in reference best.py
+  qhead_a_bit: ???             # int — activation bits for the classification head (varies per preset)
+
+  # Stage 2 -- MSE-guided calibration
+  calib_size: 128
+  calib_batch_size: 32
+  calib_metric: mse
+
+  # Stage 1 -- MLP reconstruction (GELU -> ReLU + Hessian-perturb fine-tune)
+  reconstruct_mlp: true        # bool — toggle Stage 1
+  recon_metric: hessian_perturb
+  pct: 0.98
+
+  # Stage 3 -- AdaRound block reconstruction
+  optimize: true               # bool — toggle Stage 3
+  optim_size: 1024
+  optim_batch_size: 32
+  optim_metric: hessian_perturb
+  optim_mode: qdrop            # str — "qinp" | "rinp" | "qdrop"
+  drop_prob: 0.5
+  use_mean_hessian: true
+  temp: 20
+  keep_gpu: true               # runtime-only flag; excluded from eval_dir path
+
+  # quant-layer search settings forwarded to wrap_modules_in_net
+  eq_n: 128
+  search_round: 3
+  matmul_head_channel_wise: true
+  token_channel_wise: false
