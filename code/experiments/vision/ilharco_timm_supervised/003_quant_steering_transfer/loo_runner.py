@@ -132,7 +132,9 @@ def _emit_commands(args, tasks: list[str], paths, background: bool):
         #   block_sweep: {args.block_sweep}
         #   alpha_grid : {args.alpha_grid}
         set -euo pipefail
-        cd "$(dirname "$(readlink -f "${{BASH_SOURCE[0]:-$0}}")")/{os.path.relpath('.', _PROJECT_ROOT)}" 2>/dev/null || cd "{_PROJECT_ROOT}"
+        # All commands below use repo-root-relative script paths, so cd there
+        # unconditionally regardless of where this .sh file was saved.
+        cd "{_PROJECT_ROOT}"
     """))
 
     for t in tasks:
