@@ -163,7 +163,7 @@ def _emit_commands(args, tasks: list[str], paths, background: bool):
                 'steering.methods={methods_str}' \\
                 steering.block_sweep={block_sweep} \\
                 'steering.alpha_grid={alpha_str}' \\
-                steering.vectors_path="{vec_path}"\
+                'steering.vectors_path="{vec_path}"'\
         """)
         if background:
             cmd = cmd + " &"
