@@ -179,6 +179,27 @@ def main(cfg: DictConfig):
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     ############################################################################
+    # BEGIN FP baseline (val + test, before PTQ)
+    ############################################################################
+
+    print("\nFP baseline (no quantization):")
+    fp_val_acc = _evaluate_loader(
+        image_classifier, dataset.val_loader, device,
+        limit_num_batches=cfg.limit_num_batches, desc="FP (val)",
+    )
+    fp_test_acc = _evaluate_loader(
+        image_classifier, dataset.test_loader, device,
+        limit_num_batches=cfg.limit_num_batches, desc="FP (test)",
+    )
+    print(f"  val={fp_val_acc * 100:.2f}%  test={fp_test_acc * 100:.2f}%")
+
+    ############################################################################
+    # END FP baseline
+    ############################################################################
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    ############################################################################
     # BEGIN PTQ (in-place fake-quantize)
     ############################################################################
 
@@ -324,12 +345,16 @@ def main(cfg: DictConfig):
 
     best = max(sweep_results, key=lambda r: r['val_acc'])
     test_gain = best['test_acc'] - plain_test_acc
+    ptq_drop_from_fp = fp_test_acc - plain_test_acc
 
     print()
-    print(f"  Plain PTQ      :  test={plain_test_acc * 100:.2f}%")
+    print(f"  FP             :  test={fp_test_acc * 100:.2f}%")
+    print(f"  Plain PTQ      :  test={plain_test_acc * 100:.2f}%  "
+          f"(Δ vs FP = {-ptq_drop_from_fp * 100:+.2f}pp)")
     print(f"  Best by val    :  method={best['method']}  block={best['block']}  "
           f"α={best['alpha']:+.3f}  val={best['val_acc'] * 100:.2f}%  "
-          f"test={best['test_acc'] * 100:.2f}%  (Δ={test_gain * 100:+.2f}pp)")
+          f"test={best['test_acc'] * 100:.2f}%  "
+          f"(Δ vs plain PTQ = {test_gain * 100:+.2f}pp)")
 
     ############################################################################
     # END best selection
@@ -386,8 +411,11 @@ def main(cfg: DictConfig):
         "steering_methods": methods,
         "steering_block_sweep": block_indices,
         "steering_alpha_grid": alpha_grid,
+        "fp_val_accuracy": fp_val_acc,
+        "fp_test_accuracy": fp_test_acc,
         "plain_ptq_val_accuracy": plain_val_acc,
         "plain_ptq_test_accuracy": plain_test_acc,
+        "ptq_drop_from_fp": ptq_drop_from_fp,
         "sweep_results": sweep_results,
         "best_by_val": best,
         "test_accuracy": best['test_acc'],
