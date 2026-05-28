@@ -577,6 +577,48 @@ uv run --active python code/experiments/vision/ilharco_timm_supervised/001_qat_t
 
 ---
 
+## 002_quant_steering — per-input quantization-steering vectors
+
+Studies *which* inputs lose accuracy after weight-only PTQ and fits a residual-stream steering vector (per ViT block) that flips quant-fragile inputs back toward the FP prediction at inference time. Two-script pipeline: `fit_steering_vector.py` records FP and Q predictions on the val split, splits inputs into `good = FP-correct & Q-correct` and `bad = FP-correct & Q-wrong`, then fits a mean-difference vector and a contrastive-SVD top-1 vector per block. `evaluate_steered_ptq.py` loads those vectors, sweeps `(method, block, alpha)`, and selects the best setting by val accuracy.
+
+### fit_steering_vector — [code/experiments/vision/ilharco_timm_supervised/002_quant_steering/fit_steering_vector.py](code/experiments/vision/ilharco_timm_supervised/002_quant_steering/fit_steering_vector.py)
+Config: [config/experiments/vision/ilharco_timm_supervised/002_quant_steering/fit_steering_vector.yaml](config/experiments/vision/ilharco_timm_supervised/002_quant_steering/fit_steering_vector.yaml). Requires `ptq.bits`, `ptq.granularity`, `ptq.skip_modules`.
+
+Single local run:
+```
+uv run --active python code/experiments/vision/ilharco_timm_supervised/002_quant_steering/fit_steering_vector.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0 ptq.bits=4 ptq.granularity=channel 'ptq.skip_modules=[head]'
+```
+
+Local sequential sweep (all datasets):
+```
+uv run --active python code/experiments/vision/ilharco_timm_supervised/002_quant_steering/fit_steering_vector.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 ptq.bits=4,8 ptq.granularity=channel 'ptq.skip_modules=[head]'
+```
+
+Submitit parallel sweep (all datasets):
+```
+uv run --active python code/experiments/vision/ilharco_timm_supervised/002_quant_steering/fit_steering_vector.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 ptq.bits=4,8 ptq.granularity=channel 'ptq.skip_modules=[head]'
+```
+
+### evaluate_steered_ptq — [code/experiments/vision/ilharco_timm_supervised/002_quant_steering/evaluate_steered_ptq.py](code/experiments/vision/ilharco_timm_supervised/002_quant_steering/evaluate_steered_ptq.py)
+Config: [config/experiments/vision/ilharco_timm_supervised/002_quant_steering/evaluate_steered_ptq.yaml](config/experiments/vision/ilharco_timm_supervised/002_quant_steering/evaluate_steered_ptq.yaml). Adds a `steering` group with `methods` (subset of `[mean_diff, contrastive_svd]`), `block_sweep` (`"all"` or list of block indices), `alpha_grid` (list of floats — include `0.0` to record the plain-PTQ baseline). Requires the corresponding `fit_steering_vector` run to have already saved its vectors at the matching path (or pass `steering.vectors_path=<absolute path>` to override).
+
+Single local run:
+```
+uv run --active python code/experiments/vision/ilharco_timm_supervised/002_quant_steering/evaluate_steered_ptq.py model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=CIFAR10 batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=2038 gpu=0 ptq.bits=4 ptq.granularity=channel 'ptq.skip_modules=[head]' 'steering.methods=[mean_diff,contrastive_svd]' steering.block_sweep=all 'steering.alpha_grid=[-2.0,-1.0,-0.5,0.0,0.5,1.0,2.0]'
+```
+
+Local sequential sweep (all datasets):
+```
+uv run --active python code/experiments/vision/ilharco_timm_supervised/002_quant_steering/evaluate_steered_ptq.py -m model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 ptq.bits=4,8 ptq.granularity=channel 'ptq.skip_modules=[head]' 'steering.methods=[mean_diff,contrastive_svd]' steering.block_sweep=all 'steering.alpha_grid=[-2.0,-1.0,-0.5,0.0,0.5,1.0,2.0]'
+```
+
+Submitit parallel sweep (all datasets):
+```
+uv run --active python code/experiments/vision/ilharco_timm_supervised/002_quant_steering/evaluate_steered_ptq.py -m hydra/launcher=submitit_slurm model_name=vit_base_patch16_clip_224.openai_ft_in12k_in1k dataset_name=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet batch_size=128 lr=1e-5 wd=0.1 ls=0.0 wl=500 max_grad_norm=1.0 seed=1,2,3 gpu=0 ptq.bits=4,8 ptq.granularity=channel 'ptq.skip_modules=[head]' 'steering.methods=[mean_diff,contrastive_svd]' steering.block_sweep=all 'steering.alpha_grid=[-2.0,-1.0,-0.5,0.0,0.5,1.0,2.0]'
+```
+
+---
+
 ## Visualizations (argparse, no Hydra, no Slurm)
 
 ### qv_transfer_heatmap — [code/visualizations/vision/ilharco_timm_supervised/001_qat_transfer/qv_transfer_heatmap.py](code/visualizations/vision/ilharco_timm_supervised/001_qat_transfer/qv_transfer_heatmap.py)
