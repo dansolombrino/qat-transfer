@@ -106,6 +106,63 @@ and its top eigenvector is noisy. Pooling activations across tasks (Approach C
 in the plan) might rescue cSVD, but mean-diff is the more reliable per-task
 estimator at these sample sizes.
 
+### F5 [2026-05-28] — W4-tensor is catastrophic; the "universal direction" is a failure-mode signature, not a fixable-fragility signature
+
+Ran the 003 LOO transfer experiment at W4-tensor, `sign_align_average`
+combiner, `mean_diff` method, blocks 5–9, α grid ±{0.5, 1, 2}. Plain-PTQ
+accuracy is at chance for every completed target:
+
+| Target | FP test | Plain PTQ | Random chance |
+|---|---|---|---|
+| CIFAR10 | 97.84% | 9.97% | 10.00% (1/10) |
+| Flowers102 | 96.86% | 0.44% | 0.98% (1/102) |
+| Cars | 38.35% | 0.51% | 0.51% (1/196) |
+| GTSRB | 94.71% | 5.65% | 2.33% (1/43) |
+| EMNIST | 81.15% | 4.05% | 2.13% (1/47) |
+| EuroSAT | 98.26% | 12.56% | 10.00% (1/10) |
+
+(11/21 complete; the pattern is identical for all done.)
+
+Best steering gives Δ ∈ [−0.06pp, +0.19pp] vs plain PTQ — i.e. nothing.
+
+**Reinterpretation of F2/F3.** The strong cross-task signal at W4-tensor
+block 6 (|cos| ≈ 0.83) was real, but it was capturing the activation
+signature of *catastrophic failure*, not the signature of *fixable
+fragility*. When PTQ destroys the model, the `good = FP-correct ∩ Q-correct`
+group is "got lucky" rather than "was robust." The shared direction we found
+is what activations look like when collapsed, not what we can steer to fix.
+
+W4-tensor on ViT attention/MLP linears with `skip=[head]` is a known
+catastrophic regime in the literature — without rotation or smoothing tricks
+(SmoothQuant, QuaRot, Hadamard transforms) it destroys accuracy. `apply_ptq_`
+uses neither.
+
+### F6 [2026-05-28] — W4-channel is the right operating regime, but its cross-task signal is weak (the squeeze)
+
+From `fit_metadata.json`, per-task FP→PTQ val-drop at W4-channel:
+
+| Drop range | Tasks |
+|---|---|
+| 0–1pp | CIFAR10, EuroSAT, MNIST, OxfordIIITPet, RenderedSST2, STL10, Flowers102 |
+| 1–2pp | CIFAR100, DTD, FER2013, FashionMNIST, GTSRB, PCAM, SVHN |
+| 2–6pp | Cars (5.4), EMNIST (4.3), KMNIST (3.0), SUN397 (2.8), TinyImageNet (2.5), Food101 (2.1), RESISC45 (2.3) |
+
+This is the regime where the steering hypothesis is testable: drops are
+meaningful but recoverable, `num_bad` ranges 4–331. **But** F1 already
+established the cross-task signal here is weak (|cos|=0.25 max). Combined
+with F5, this is a real squeeze:
+
+- Operating point with strong **cross-task** signal (W4-tensor) → unrecoverable.
+- Operating point with **recoverable** degradation (W4-channel) → weak cross-task signal.
+
+**Next experiment**: verify whether **per-task** steering at W4-channel
+recovers any accuracy at all, on the high-drop tasks (Cars, EMNIST, KMNIST,
+SUN397, TinyImageNet, Food101). 002 has fits but never ran its own eval at
+W4-channel. If per-task steering itself doesn't help here, the rank-1
+CLS-derived broadcast-to-all-tokens approach is fundamentally insufficient
+regardless of source pool, and we need to rethink — per-input alpha,
+non-rank-1 fix, or different intervention site.
+
 ---
 
 ## Actions taken (chronological)
