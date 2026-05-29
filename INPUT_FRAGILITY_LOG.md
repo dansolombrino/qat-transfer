@@ -232,6 +232,59 @@ This is the paper-headline number, combined with the F3 mechanism story
 (FP/Q margin + cross-model disagreement features) and the deployment
 recipe (route top X% by predicted P(bad)).
 
+### F5 [2026-05-28] — predictor generalises to W3-channel (bit-width robustness, with a regime caveat)
+
+Re-ran the full pipeline at W3-channel: 21 task dumps + Script D LOO.
+
+**Aggregate X@90% across 21 held-out tasks at W3-channel:**
+
+| Method | X@90% | LOO − oracle |
+|---|---|---|
+| oracle | 53.8% ± 16.7 | — |
+| **LOO** | **62.8% ± 16.6** | **+9.0 pp** |
+| same_task | 65.5% ± 16.9 | +11.7 pp |
+| margin_only | 89.8% | +36.0 pp |
+| random | 90.3% | +36.5 pp |
+
+The absolute X@90% looks scary (54% for oracle vs W4's 1.9%) — but **it's
+the regime, not the predictor**. At W3-channel with vanilla `apply_ptq_`,
+mean PTQ test accuracy ≈ 25% (catastrophic; see F5/F6 in
+QUANT_STEERING_LOG). Mean FP→PTQ gap ≈ 60pp. Most inputs are now `bad`,
+so oracle has to route ~60% of inputs to FP to recover 90% of the gap.
+No shortcut exists.
+
+**LOO − oracle gap is only 9pp at W3** (vs 4.7pp at W4). Proportionally
+LOO/oracle = **1.17×** at W3 vs 3.5× at W4 — i.e. the predictor is
+**relatively closer to oracle at the harsher regime**. And LOO still
+beats same-task on the mean. Same direction as F4.
+
+Small-val pooling rescue still applies:
+
+| Task | n_val | Same-task X@90% | LOO X@90% |
+|---|---|---|---|
+| Cars | 814 | 88.9% | **33.3%** |
+| SUN397 | 1985 | 81.2% | **42.8%** |
+| TinyImageNet | 5000 | 70.0% | **54.3%** |
+
+**Honest caveat for the paper:** at catastrophic regimes (W3-channel,
+W4-tensor), no input-aware routing can save much compute — the gap is
+too wide and the `bad` population is too prevalent. Practical deployment
+of "PTQ + routing" works at moderate-PTQ regimes (W4-channel) where the
+gap is small and the bad population is a minority. At harsher regimes,
+the bottleneck is the PTQ method itself (vanilla `apply_ptq_`), not the
+predictor.
+
+**Two-axis paper claim** now supported by data:
+
+1. **Predictor generalises across tasks (F4) AND across bit-widths
+   (F5).** The mechanism (FP/Q confidence + cross-model disagreement) is
+   bit-width-robust.
+2. **The practical compute-saving benefit depends on the PTQ regime
+   being recoverable** — i.e. on the FP→PTQ gap being a minority of
+   inputs. Stronger PTQ methods (SmoothQuant, AWQ, QuaRot) that produce
+   gentler W3/W2 degradation would extend the routing-recovers-compute
+   regime to harsher bit-widths. Future work.
+
 ---
 
 ## Actions taken
