@@ -285,6 +285,64 @@ predictor.
    gentler W3/W2 degradation would extend the routing-recovers-compute
    regime to harsher bit-widths. Future work.
 
+### F6 [2026-05-28] — feature ablation: the 6.6% number is a DIAGNOSTIC ceiling; the deployable headline is Q-only X@90% ≈ 24%
+
+Ran Script E feature-subset ablation under the LOO setup at W4-channel.
+
+The 15-feature predictor's 6.6% X@90% uses features that require BOTH
+forward passes (FP and Q). Not a deployment recipe — if you've paid for
+both forward passes there's no compute saving to claim. The deployable
+recipe is **PTQ-first**: run PTQ on every input, use its own confidence
+signals to decide whether to also run FP.
+
+**Aggregate X@90% LOO across 18 tasks per subset:**
+
+| Subset | Deployment scenario | X@90% |
+|---|---|---|
+| `image_only` | No model — image stats | 79.2% (near random) |
+| **`q_only`** | **PTQ-first deployable** | **24.4% ± 20.8** |
+| `q_plus_image` | PTQ-first + image stats | 24.5% (image adds nothing) |
+| `fp_only` | FP-side only | 36.0% |
+| `fp_plus_image` | FP-side + image | 36.2% |
+| `fp_plus_q_no_cross` | Both models, no cross | 29.1% |
+| **`all_features`** | **Diagnostic ceiling (both models + cross)** | **6.6% ± 8.6** |
+
+**Key takeaways:**
+
+1. **Deployable headline shifts: X@90% ≈ 24%, not 6.6%.** Under realistic
+   PTQ-first deployment, a Q-side multivariate LogReg routes ~24% of
+   unseen target-task inputs to FP and recovers 90% of the FP→PTQ gap.
+   Still beats random (83.8%) by 3.4×, no per-task training needed.
+
+2. **The 18pp gap (24.4% → 6.6%) is the cost of the lucky-Q
+   ambiguity.** Q-side features alone cannot tell bad inputs from
+   lucky-Q inputs without comparing to FP's view — but running FP
+   defeats the saving. So 24% is the true ceiling for single-pass
+   routing; 6.6% is what's achievable only as a diagnostic.
+
+3. **Image pixel statistics carry zero signal even after ablation.**
+   image_only ≈ random; q_plus_image = q_only; fp_plus_image = fp_only.
+   PTQ-fragility is purely a model phenomenon — never a pixel-level one.
+
+4. **Q-side alone beats FP-side alone** (24% vs 36%). When you have one
+   model's signals, Q's own uncertainty predicts "PTQ is wrong here"
+   better than FP's uncertainty does. Q knows its own decision boundaries.
+
+5. **Running both models without cross-features barely beats Q-only**
+   (29.1% vs 24.4%). The cross-product features carry almost all of the
+   "both models" value. Without them, paying for two forward passes
+   is essentially wasted.
+
+**Revised deployment claim** (this is the paper's actual headline):
+
+> At W4-channel PTQ, running the quantized model first and using only
+> its own confidence signals (`q_margin`, `q_softmax_top1`, `q_entropy`),
+> a logistic regression fit on a pool of source tasks routes ~24% of
+> unseen target-task inputs to a full-precision fallback and recovers
+> 90% of the FP→PTQ accuracy gap. The classifier requires no
+> per-target-task training. The 6.6% "both-models" ceiling diagnoses the
+> bad-vs-lucky-Q ambiguity that single-pass routing cannot resolve.
+
 ---
 
 ## Actions taken
