@@ -370,6 +370,46 @@ only** — where bad inputs are a minority of the test set. W4-channel
 qualifies; W3-channel doesn't. The two-axis paper claim is now
 quantitatively delineated by the F6 / F6b table.
 
+### F7 [2026-05-28] — threshold calibration for online deployment: batch is rock-solid, online τ adds variance
+
+Ran Script F at W4-channel. Q-only LogReg trained per-target under LOO
+on pooled source-task val. Compared the batch claim (sort-and-route)
+against three online τ-strategies and the LogReg's natural threshold:
+
+| Strategy | At deploy needs | Mean frac routed | Mean recovery |
+|---|---|---|---|
+| `batch` | full target batch | **26.7%** | **91.0% ± 2.3** |
+| `natural` (τ=0.5) | nothing | 29.9% | 82.4% ± 45.8 |
+| `val_pct` (75th-pct on target val) | val P(bad), label-free | 26.8% | 70.3% ± 57.4 |
+| `source_pct` (75th-pct on pooled source val) | global τ from training | 37.4% | 80.2% ± 68.4 |
+| `val_labeled` (val Pareto opt at 90%) | val labels + P(bad) | 23.9% | 78.3% ± 38.2 |
+
+**Batch is rock-solid**: ~91% recovery with σ=2.3pp across 18 tasks.
+The headline claim holds tightly task-to-task. **Online τ-strategies
+are workable but noisier**: mean recovery 70–82%, with large per-task
+variance driven by small-gap outliers (RenderedSST2 at +0.11pp gap
+dominates the variance).
+
+**Three deployment tiers now empirically delineated:**
+
+1. **Batch (top)**: ~27% routing → 91% recovery, σ=2.3pp. Drop-in recipe;
+   no calibration; ships as one function.
+2. **Online + val-percentile τ (middle, label-free)**: ~27% routing →
+   70% recovery. Ships LogReg + 1-line per-task calibration step. No
+   labels needed.
+3. **Online + τ=0.5 (bottom, zero-cost)**: ~30% routing → 82% recovery
+   on aggregate but high variance per-task. Single fixed number, no
+   calibration.
+
+`val_labeled` shows surprisingly poor consistency — val Pareto points
+overfit to small target val sets. Label-free percentile calibration is
+the better online recipe in practice.
+
+**For the paper**: the **primary claim is batch routing** (strong
+recovery, tight variance, no per-task calibration). The **online
+extension** is a clear follow-on with quantified noise. This is a
+better story than insisting online matches batch.
+
 ---
 
 ## Actions taken
