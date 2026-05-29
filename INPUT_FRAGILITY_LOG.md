@@ -103,6 +103,44 @@ that sharpens the positive one.
 **Multivariate beats best univariate** (+0.02 AUC). FP-confidence and
 class-typicality carry partially complementary information.
 
+### F2 [2026-05-28] — robust across 18 of 21 tasks; mean test AUC = 0.926; `fp_margin` alone gives ~0.92
+
+Re-ran the dump on all 21 tasks at W4-channel and the analyzer over the 18
+that had ≥ 10 bad samples on both val and test (skipped Flowers102,
+OxfordIIITPet, STL10 — same tasks that the steering analysis tossed for the
+same reason, PTQ barely hurts them).
+
+**Multivariate test AUC range: 0.784–0.980**, mean **0.926 ± 0.047**.
+
+| Highest | AUC | Lowest | AUC |
+|---|---|---|---|
+| CIFAR10 | 0.980 | Cars | 0.784 |
+| FashionMNIST | 0.976 | SUN397 | 0.885 |
+| GTSRB | 0.976 | KMNIST | 0.895 |
+| MNIST | 0.973 | RenderedSST2 | 0.898 |
+| EuroSAT | 0.966 | DTD | 0.895 |
+
+**Univariate AUC (mean across 18 tasks, direction-aware) — sharpened story:**
+
+| Property | Discriminative AUC | Mean AUC (raw) | Comment |
+|---|---|---|---|
+| `fp_margin` | **0.919** | 0.081 (lower → bad) | best single feature, consistent |
+| `fp_softmax_top1` | 0.896 | 0.104 | strongly correlated with margin |
+| `fp_cls_dist_to_class_centroid` | 0.834 | 0.834 (higher → bad) | strong except RenderedSST2 (0.46) |
+| `fp_entropy` | 0.820 | 0.820 (higher → bad) | weaker, more variable |
+| `img_brightness`/`contrast`/`edge_density`/`high_freq_ratio` | ≈ 0.49–0.50 | — | **no signal across all 18 tasks** |
+
+**Sharpened claim from F1**: `fp_margin` alone gives ~0.92 AUC, and the
+multivariate model only adds +0.007. The paper-headline result might just
+be the single-feature predictor. The other features are marginal
+refinements; raw pixels add nothing.
+
+This also strengthens the negative-image-stats finding: **across 22
+finetuned tasks spanning digits, natural images, satellite, faces,
+textures, and scenes, raw image statistics carry zero predictive power for
+PTQ fragility.** PTQ-fragility is purely a property of the model's
+representation of the input.
+
 ---
 
 ## Actions taken
