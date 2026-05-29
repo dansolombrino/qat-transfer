@@ -348,25 +348,26 @@ def fig_regime_comparison():
 # Figure 4: per-task LOO vs same-task scatter
 # ============================================================================
 def fig_loo_vs_same_task():
-    print("Generating Figure 4 (LOO vs same-task X@90%) ...")
+    """Q-only deployable: LOO vs same-task per task. Matches paper Table:loo."""
+    print("Generating Figure 4 (LOO vs same-task X@90%, Q-only deployable) ...")
     task_data = _load_all(4, "channel")
     eligible = list(task_data.keys())
 
-    loo_curves = _loo_curves(task_data, ALL_FEATS, eligible)
+    loo_curves = _loo_curves(task_data, Q_FEATS, eligible)
 
-    # Same-task: fit LogReg on target's own val
+    # Same-task: fit LogReg on target's own val (Q-only features).
     same_curves = {}
     for target in eligible:
         df_val_tgt, df_test_tgt = task_data[target]
         vf = df_val_tgt[df_val_tgt["fp_correct"]].reset_index(drop=True)
-        Xv = np.array(vf[ALL_FEATS].to_numpy(dtype=np.float64), copy=True)
+        Xv = np.array(vf[Q_FEATS].to_numpy(dtype=np.float64), copy=True)
         Xv_norm, mu, sigma = _per_task_z(Xv)
         yv = vf["bad"].astype(int).to_numpy()
         if yv.sum() < 5 or (len(yv) - yv.sum()) < 5:
             continue
         clf = LogisticRegression(max_iter=500, class_weight="balanced")
         clf.fit(Xv_norm, yv)
-        X_test = np.array(df_test_tgt[ALL_FEATS].to_numpy(dtype=np.float64), copy=True)
+        X_test = np.array(df_test_tgt[Q_FEATS].to_numpy(dtype=np.float64), copy=True)
         X_test_norm = _apply_z(X_test, mu, sigma)
         scores = clf.predict_proba(X_test_norm)[:, 1]
         fp_c = df_test_tgt["fp_correct"].to_numpy(dtype=bool)
@@ -403,7 +404,7 @@ def fig_loo_vs_same_task():
     ax.set_ylim(0, lim)
     ax.set_xlabel("Same-task X@90\\% (\\%)")
     ax.set_ylabel("LOO cross-task X@90\\% (\\%)")
-    ax.set_title("LOO matches/beats same-task across 18 tasks (W4-channel)")
+    ax.set_title("Q-only deployable: LOO vs same-task X@90\\% (W4-channel, 18 tasks)")
     ax.grid(True, linestyle=":", linewidth=0.4, alpha=0.7)
     ax.legend(loc="upper left", framealpha=0.95)
 
