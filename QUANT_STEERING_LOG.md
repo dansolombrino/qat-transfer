@@ -6,6 +6,10 @@ what's been done and what the current state of the hypothesis is.
 
 **Branch:** `quant-steering` (off `master`)
 **Last updated:** 2026-05-28
+**Status: ABANDONED** — hypothesis tested, ceiling found (~26% gap recovery
+on the best task, ~12% mean), no principled follow-up that would lift it
+further. See "Verdict on the steering hypothesis" below. Do not reopen this
+line without a genuinely new mechanism reason to expect a different result.
 
 ---
 
