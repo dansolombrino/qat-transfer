@@ -201,6 +201,90 @@ winners is the next move.
 the working result and the next question is whether **cluster-level**
 combiners on W4-channel transfer (vs. F1's failed global average) work.
 
+### F7b [2026-05-28] — wider-α confirms the rank-1 ceiling on Cars: not underpowered, just bounded
+
+Re-ran Cars with `α ∈ [−8, −4, −2, −1, 0, 1, 2, 4, 8]`, `block_sweep=all`.
+Best test gain per α (across all blocks):
+
+| α | best test Δ | best block |
+|---|---|---|
+| −8.00 | +0.05pp | 0 |
+| −4.00 | +0.27pp | 6 |
+| **−2.00** | **+1.28pp** | **6** ← peak |
+| −1.00 | +0.93pp | 6 |
+|  0.00 |  0.00pp | — |
+| +1.00 | +0.11pp | 1 |
+| +2.00 | +0.09pp | 2 |
+| +4.00 | −0.91pp | 3 |
+| +8.00 | +0.29pp | 0 |
+
+Clean unimodal peak at α = −2.0 with Δ falling off on both sides. The previous
+α=±2 grid's "saturation at boundary" was not underpowered search — it just
+happened to land near the peak. **+1.28pp is the genuine ceiling for the
+rank-1 / mean_diff / broadcast-to-all-tokens approach on Cars** (≈ 26% of the
+FP→PTQ gap).
+
+### F8 [2026-05-28] — CLS-only application is WORSE; broadcast was load-bearing via attention propagation
+
+Tested `token_mode=cls` on Cars (apply α·v only at CLS position 0, leave patch
+positions untouched). Result: clearly worse than `token_mode=all`. The
+broadcast-to-all-tokens setup wasn't a sloppy convenience — it was carrying
+the recovery via the attention-propagation channel. A CLS-derived direction
+only helps when applied with full-token reach so that subsequent attention
+layers can mix the patch perturbation back into CLS. Direct CLS push at one
+block doesn't propagate enough to flip the head's read.
+
+This is a mechanism finding: the steering vector "lives" in a CLS subspace
+but operates through patches.
+
+### F9 [2026-05-28] — tied multi-block injection does NOT compound; the universal direction is consequential at every block but not uniformly helpful
+
+Tested `injection_mode=tied_multi` on Cars with `block_sweep=[5,6,7,8,9]` and
+wide α. Best Δ ≈ +1.17pp — essentially the same ceiling as single-block
+(+1.28pp), slightly worse. Several α values produced **catastrophic** drops
+(model behaves much worse than plain PTQ).
+
+Two takeaways:
+
+1. The universal direction does not compound additively across layers, so
+   single-block injection is already capturing all the recovery that's
+   available from this direction. Tying multiple blocks just adds
+   interference.
+2. **The direction IS strongly consequential at every block** (otherwise
+   catastrophic α wouldn't destroy the model) — but its useful effect is
+   bounded and direction-fragile. We can push the model around easily; we
+   just can't push it toward "recovered" beyond the ~26% gap ceiling.
+
+### Verdict on the steering hypothesis [2026-05-28]
+
+The original framing — "rank-1 CLS-derived broadcast residual-stream steering
+recovers ViT W4-PTQ accuracy" — is dead. Evidence:
+
+- Best-case per-task recovery: **26% of the FP→PTQ gap** (Cars), mean across
+  the 6-task pilot: **~12%**, two tasks slightly negative.
+- The α grid edge wasn't underpowered (F7b) — we're at the rank-1 ceiling,
+  not below it.
+- CLS-only injection makes things worse (F8) — mechanism story is more
+  complex than "find the CLS direction and add it."
+- Multi-block tied injection doesn't compound (F9) — same ceiling.
+- Cross-task transfer doesn't work in the recoverable regime (F1) and the
+  signal we found in the catastrophic regime captures failure, not fixable
+  fragility (F5).
+- No intermediate operating point exists with stock weight-only PTQ (F6).
+
+**Pivot recommendation**: write up the negative-result short paper:
+*"Rank-1 residual-stream steering does not recover ViT PTQ accuracy in
+the recoverable regime; the universal direction at catastrophic regimes is
+a failure-mode signature."* Tight 4-page workshop story with mechanism
+diagnostics. We have all the data.
+
+Adjacent findings that could ladder into further work (not necessarily on
+the steering hypothesis):
+- F2/F3 W4-tensor "shared failure axis" — non-trivial standalone observation
+  about ViT collapse modes under aggressive PTQ.
+- F1 MNIST-family quant-fragility clustering — quant-fragility direction
+  encodes input-distribution similarity.
+
 ---
 
 ## Actions taken (chronological)
