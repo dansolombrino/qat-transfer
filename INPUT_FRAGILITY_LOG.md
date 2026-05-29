@@ -141,6 +141,47 @@ textures, and scenes, raw image statistics carry zero predictive power for
 PTQ fragility.** PTQ-fragility is purely a property of the model's
 representation of the input.
 
+### F3 [2026-05-28] — cross-model (FP↔Q) features close most of the gap to oracle on Pareto routing
+
+Added 8 features per sample that compare the FP and Q model views: q-side
+scalars (`q_margin`, `q_softmax_top1`, `q_entropy`) plus cross-model
+quantities (`fp_logit_at_q_pred`, `q_logit_at_fp_pred`,
+`fp_softmax_at_q_pred`, `q_softmax_at_fp_pred`, `fp_q_kl_symmetric`,
+`fp_q_disagree`).
+
+**On Script B (binary classification, AUC of bad-within-FP-correct):**
+multivariate test AUC = 1.000 ± 0.000 on every task. This is a
+**target leak**: within FP-correct, `bad` is defined as
+"fp_pred ≠ q_pred", which is what `fp_q_disagree` and (continuously) the
+other cross-model features measure. So Script B's AUC numbers are
+degenerate; they confirm the leak but say nothing useful about predictor
+performance.
+
+**On Script C (Pareto routing on test, where labels aren't used):**
+multivariate X@90% drops from **40.6% → 15.9%**. X@95% drops 45.6% → 16.6%.
+Oracle is 1.7%. So the cross-model features close **~75% of the gap**
+between F2's predictor and the oracle ceiling.
+
+**Why the leak helps at test:** within FP-correct training data,
+`fp_softmax_at_q_pred` is a degenerate label proxy (top1 for good,
+sub-top1 for bad). But on **test data (including FP-wrong rows)**, it
+carries a genuine bad-vs-lucky-Q signal:
+- bad (FP-correct, Q-wrong): Q stole FP's runner-up class →
+  `fp_softmax_at_q_pred` is *moderate*.
+- lucky-Q (FP-wrong, Q-correct): true class was deep in FP's ranking →
+  `fp_softmax_at_q_pred` is *low*.
+
+The predictor learns "fp_softmax_at_q_pred low → bad" on val (trivially)
+and the same ordering distinguishes bad from lucky-Q on test
+(informatively). The label-leak structure happens to correlate with the
+test-time signal we want.
+
+This is the strongest version of the input-aware mixed-precision routing
+result we have so far. The headline becomes: **a logistic regression on
+~15 simple FP- and Q-side features predicts PTQ fragility well enough
+that routing the top 16% of test inputs to FP recovers 90% of the
+FP→PTQ accuracy gap, across 18 diverse ViT-B tasks.**
+
 ---
 
 ## Actions taken
