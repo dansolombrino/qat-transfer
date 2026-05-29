@@ -163,6 +163,44 @@ CLS-derived broadcast-to-all-tokens approach is fundamentally insufficient
 regardless of source pool, and we need to rethink — per-input alpha,
 non-rank-1 fix, or different intervention site.
 
+### F7 [2026-05-28] — per-task steering at W4-channel: real but small signal; α-search was underpowered
+
+Ran 002's `evaluate_steered_ptq.py` per-task at W4-channel on the six
+high-drop tasks with `block_sweep=all`, `methods=[mean_diff]`, α-grid
+±{0.5, 1, 2}.
+
+Result: 3 of 6 tasks recover meaningfully (Cars +1.28pp, Food101 +0.70pp,
+EMNIST +0.66pp); 3 are noise (KMNIST/SUN397 slightly negative, TinyImageNet
++0.15pp). Mean Δ = +0.43pp on a mean drop of 3.84pp → **~12% of the FP→PTQ
+gap recovered on average**. Cars alone recovered **26% of its gap** —
+genuine evidence the mechanism can work.
+
+**Two important caveats** that change how we should read this:
+
+1. **All six "best α" values are at the grid boundary (±2.0)**. This is the
+   textbook signature of an underpowered search — the true optimum is almost
+   certainly outside the searched range. Widening to ±4 / ±8 may shift the
+   verdict noticeably, especially for Cars/Food101/EMNIST.
+
+2. **Best block is all over the map** (0, 3, 4, 5, 6, 11). No "consistent
+   right block" emerged — each task picked whatever happened to look slightly
+   better on its val. That's consistent with both "weak signal so block-pick
+   is noise" and "different tasks legitimately have different optimal blocks."
+   The α-widening should partially disambiguate.
+
+Interpretation so far: rank-1 / CLS-derived / broadcast-to-all-tokens
+steering does produce measurable per-task recovery on some tasks (~25–30%
+of the gap on the best one). It is not catastrophic on any task. It is not
+yet a method headline either. The α saturation strongly suggests we are
+leaving real recovery on the table — re-running with wider α on the three
+winners is the next move.
+
+**Next experiment**: re-eval Cars / Food101 / EMNIST at α ∈
+[−8, −4, −2, −1, 0, 1, 2, 4, 8] with `block_sweep=all`. If gains grow,
+"per-task rank-1 steering recovers a fraction of W4-channel PTQ loss" is
+the working result and the next question is whether **cluster-level**
+combiners on W4-channel transfer (vs. F1's failed global average) work.
+
 ---
 
 ## Actions taken (chronological)
