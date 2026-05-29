@@ -55,6 +55,17 @@ PROPERTY_COLUMNS = [
     "fp_softmax_top1",
     "fp_entropy",
     "fp_cls_dist_to_class_centroid",
+    # Q-pass difficulty proxies (introduced after F2)
+    "q_margin",
+    "q_softmax_top1",
+    "q_entropy",
+    # Cross-model (FP <-> Q) features — designed to distinguish bad from lucky-Q
+    "fp_logit_at_q_pred",
+    "q_logit_at_fp_pred",
+    "fp_softmax_at_q_pred",
+    "q_softmax_at_fp_pred",
+    "fp_q_kl_symmetric",
+    "fp_q_disagree",
     # Raw image statistics
     "img_brightness",
     "img_contrast",
@@ -65,6 +76,10 @@ PROPERTY_COLUMNS = [
 # Pretty groupings for the report
 PROPERTY_GROUPS = {
     "FP-difficulty": ["fp_margin", "fp_softmax_top1", "fp_entropy", "fp_cls_dist_to_class_centroid"],
+    "Q-difficulty":  ["q_margin", "q_softmax_top1", "q_entropy"],
+    "Cross-model":   ["fp_logit_at_q_pred", "q_logit_at_fp_pred",
+                      "fp_softmax_at_q_pred", "q_softmax_at_fp_pred",
+                      "fp_q_kl_symmetric", "fp_q_disagree"],
     "Image-stats":   ["img_brightness", "img_contrast", "img_edge_density", "img_high_freq_ratio"],
 }
 

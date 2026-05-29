@@ -51,10 +51,23 @@ from src.vision.utils import sanitize_timm_model_name
 
 
 PROPERTY_COLUMNS = [
+    # FP-pass difficulty proxies
     "fp_margin",
     "fp_softmax_top1",
     "fp_entropy",
     "fp_cls_dist_to_class_centroid",
+    # Q-pass difficulty proxies
+    "q_margin",
+    "q_softmax_top1",
+    "q_entropy",
+    # Cross-model (FP <-> Q) features
+    "fp_logit_at_q_pred",
+    "q_logit_at_fp_pred",
+    "fp_softmax_at_q_pred",
+    "q_softmax_at_fp_pred",
+    "fp_q_kl_symmetric",
+    "fp_q_disagree",
+    # Raw image statistics
     "img_brightness",
     "img_contrast",
     "img_edge_density",

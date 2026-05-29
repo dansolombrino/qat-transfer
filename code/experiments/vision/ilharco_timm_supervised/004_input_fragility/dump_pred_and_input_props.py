@@ -130,7 +130,10 @@ def _forward_fp(model, loader, device, sobel_x, sobel_y, limit_num_batches=None,
         "fp_margin": [], "fp_softmax_top1": [], "fp_entropy": [],
         "img_brightness": [], "img_contrast": [],
         "img_edge_density": [], "img_high_freq_ratio": [],
-        "_cls_embedding": [],  # underscore = drop before save
+        # underscore = held only in memory for cross-model derived features;
+        # dropped before parquet save (see main()).
+        "_cls_embedding": [],
+        "_fp_logits": [],
     }
 
     with torch.no_grad():
@@ -178,6 +181,7 @@ def _forward_fp(model, loader, device, sobel_x, sobel_y, limit_num_batches=None,
             chunks["fp_softmax_top1"].append(sm_top1.cpu())
             chunks["fp_entropy"].append(entropy.cpu())
             chunks["_cls_embedding"].append(pooled.cpu())
+            chunks["_fp_logits"].append(logits.cpu())
 
     out = {k: torch.cat(v, dim=0).numpy() for k, v in chunks.items()}
     return out
@@ -193,6 +197,8 @@ def _forward_q(model, loader, device, limit_num_batches=None, desc="Q"):
 
     chunks: dict[str, list[torch.Tensor]] = {
         "q_pred": [], "q_logit_top1": [], "q_logit_top2": [], "q_margin": [],
+        "q_softmax_top1": [], "q_entropy": [],
+        "_q_logits": [],  # held in memory for cross-model features; dropped before save
     }
 
     with torch.no_grad():
@@ -209,12 +215,70 @@ def _forward_q(model, loader, device, limit_num_batches=None, desc="Q"):
             q_top1 = top2_vals[:, 0]
             q_top2 = top2_vals[:, 1]
 
+            logp = F.log_softmax(logits, dim=1)
+            p = logp.exp()
+            q_entropy = -(p * logp).sum(dim=1)
+            q_sm_top1 = p.gather(1, preds.unsqueeze(1)).squeeze(1)
+
             chunks["q_pred"].append(preds.cpu())
             chunks["q_logit_top1"].append(q_top1.cpu())
             chunks["q_logit_top2"].append(q_top2.cpu())
             chunks["q_margin"].append((q_top1 - q_top2).cpu())
+            chunks["q_softmax_top1"].append(q_sm_top1.cpu())
+            chunks["q_entropy"].append(q_entropy.cpu())
+            chunks["_q_logits"].append(logits.cpu())
 
     return {k: torch.cat(v, dim=0).numpy() for k, v in chunks.items()}
+
+
+def _cross_model_features(fp_logits: np.ndarray, q_logits: np.ndarray,
+                          fp_pred: np.ndarray, q_pred: np.ndarray) -> dict:
+    """Per-sample cross-FP/Q features that distinguish 'bad' from 'lucky-Q'.
+
+    For a 'bad' input (FP-correct, Q-wrong), Q typically picks FP's runner-up
+    class — so fp_logit_at_q_pred is close to fp_logit_top2 (i.e. FP gives Q's
+    answer high credence). For a 'lucky-Q' input (FP-wrong, Q-correct), the
+    true class can be deep in FP's ranking — fp_logit_at_q_pred is small and
+    fp_softmax_at_q_pred near zero. These features therefore predict the
+    cross-model agreement pattern that distinguishes the two cases.
+    """
+    fp_logits = fp_logits.astype(np.float64)
+    q_logits = q_logits.astype(np.float64)
+    n = fp_logits.shape[0]
+
+    # Direct gather of logits at the OTHER model's predicted class
+    idx = np.arange(n)
+    fp_logit_at_q_pred = fp_logits[idx, q_pred]
+    q_logit_at_fp_pred = q_logits[idx, fp_pred]
+
+    # Softmax-normalised versions (probability the OTHER model's answer was
+    # under THIS model's distribution).
+    fp_logits_shifted = fp_logits - fp_logits.max(axis=1, keepdims=True)
+    fp_exp = np.exp(fp_logits_shifted)
+    fp_softmax = fp_exp / fp_exp.sum(axis=1, keepdims=True)
+    fp_softmax_at_q_pred = fp_softmax[idx, q_pred]
+
+    q_logits_shifted = q_logits - q_logits.max(axis=1, keepdims=True)
+    q_exp = np.exp(q_logits_shifted)
+    q_softmax = q_exp / q_exp.sum(axis=1, keepdims=True)
+    q_softmax_at_fp_pred = q_softmax[idx, fp_pred]
+
+    # KL(fp || q) on softmax (symmetrised average of the two directions).
+    eps = 1e-12
+    kl_fp_q = (fp_softmax * (np.log(fp_softmax + eps) - np.log(q_softmax + eps))).sum(axis=1)
+    kl_q_fp = (q_softmax * (np.log(q_softmax + eps) - np.log(fp_softmax + eps))).sum(axis=1)
+    fp_q_kl_symmetric = 0.5 * (kl_fp_q + kl_q_fp)
+
+    fp_q_disagree = (fp_pred != q_pred).astype(np.float32)
+
+    return {
+        "fp_logit_at_q_pred":   fp_logit_at_q_pred.astype(np.float32),
+        "q_logit_at_fp_pred":   q_logit_at_fp_pred.astype(np.float32),
+        "fp_softmax_at_q_pred": fp_softmax_at_q_pred.astype(np.float32),
+        "q_softmax_at_fp_pred": q_softmax_at_fp_pred.astype(np.float32),
+        "fp_q_kl_symmetric":    fp_q_kl_symmetric.astype(np.float32),
+        "fp_q_disagree":        fp_q_disagree,
+    }
 
 
 def _compute_centroid_distances(cls_embeddings: np.ndarray, labels: np.ndarray, num_classes: int):
@@ -238,11 +302,12 @@ def _compute_centroid_distances(cls_embeddings: np.ndarray, labels: np.ndarray, 
     return distances.astype(np.float32), centroids.astype(np.float32), counts
 
 
-def _to_dataframe(fp: dict, q: dict, dist_to_centroid: np.ndarray) -> pd.DataFrame:
+def _to_dataframe(fp: dict, q: dict, cross: dict, dist_to_centroid: np.ndarray) -> pd.DataFrame:
     n = len(fp["label"])
     df = pd.DataFrame({
         "sample_idx": np.arange(n, dtype=np.int64),
         "label": fp["label"].astype(np.int32),
+        # FP-side scalars
         "fp_pred": fp["fp_pred"].astype(np.int32),
         "fp_logit_label": fp["fp_logit_label"].astype(np.float32),
         "fp_logit_top1": fp["fp_logit_top1"].astype(np.float32),
@@ -251,10 +316,21 @@ def _to_dataframe(fp: dict, q: dict, dist_to_centroid: np.ndarray) -> pd.DataFra
         "fp_softmax_top1": fp["fp_softmax_top1"].astype(np.float32),
         "fp_entropy": fp["fp_entropy"].astype(np.float32),
         "fp_cls_dist_to_class_centroid": dist_to_centroid.astype(np.float32),
+        # Q-side scalars
         "q_pred": q["q_pred"].astype(np.int32),
         "q_logit_top1": q["q_logit_top1"].astype(np.float32),
         "q_logit_top2": q["q_logit_top2"].astype(np.float32),
         "q_margin": q["q_margin"].astype(np.float32),
+        "q_softmax_top1": q["q_softmax_top1"].astype(np.float32),
+        "q_entropy": q["q_entropy"].astype(np.float32),
+        # Cross-model (FP↔Q) features
+        "fp_logit_at_q_pred": cross["fp_logit_at_q_pred"],
+        "q_logit_at_fp_pred": cross["q_logit_at_fp_pred"],
+        "fp_softmax_at_q_pred": cross["fp_softmax_at_q_pred"],
+        "q_softmax_at_fp_pred": cross["q_softmax_at_fp_pred"],
+        "fp_q_kl_symmetric": cross["fp_q_kl_symmetric"],
+        "fp_q_disagree": cross["fp_q_disagree"],
+        # Image-pixel statistics
         "img_brightness": fp["img_brightness"].astype(np.float32),
         "img_contrast": fp["img_contrast"].astype(np.float32),
         "img_edge_density": fp["img_edge_density"].astype(np.float32),
@@ -457,8 +533,23 @@ def main(cfg: DictConfig):
     # BEGIN assemble + save
     ############################################################################
 
-    df_val = _to_dataframe(fp_val, q_val, val_dist)
-    df_test = _to_dataframe(fp_test, q_test, test_dist)
+    # Compute cross-model (FP <-> Q) scalar features from the full logits
+    # we held in memory, then drop the heavy arrays.
+    val_fp_logits = fp_val.pop("_fp_logits")
+    test_fp_logits = fp_test.pop("_fp_logits")
+    val_q_logits = q_val.pop("_q_logits")
+    test_q_logits = q_test.pop("_q_logits")
+
+    val_cross = _cross_model_features(
+        val_fp_logits, val_q_logits, fp_val["fp_pred"], q_val["q_pred"],
+    )
+    test_cross = _cross_model_features(
+        test_fp_logits, test_q_logits, fp_test["fp_pred"], q_test["q_pred"],
+    )
+    del val_fp_logits, test_fp_logits, val_q_logits, test_q_logits
+
+    df_val = _to_dataframe(fp_val, q_val, val_cross, val_dist)
+    df_test = _to_dataframe(fp_test, q_test, test_cross, test_dist)
 
     n_val = len(df_val)
     n_test = len(df_test)
