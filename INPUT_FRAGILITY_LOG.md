@@ -343,6 +343,33 @@ signals to decide whether to also run FP.
 > per-target-task training. The 6.6% "both-models" ceiling diagnoses the
 > bad-vs-lucky-Q ambiguity that single-pass routing cannot resolve.
 
+### F6b [2026-05-28] — W3-channel feature ablation: deployable Q-only collapses; the recoverable-regime caveat is sharp
+
+Ran Script E at W3-channel for direct comparison with F6.
+
+| Subset | Deployment | W4 X@90% | W3 X@90% |
+|---|---|---|---|
+| `image_only` | no model | 79.2% | 86.4% |
+| **`q_only`** | **PTQ-first deployable** | **24.4%** | **81.2%** |
+| `q_plus_image` | PTQ-first + image | 24.5% | 81.3% |
+| `fp_only` | FP-side only | 36.0% | 87.1% |
+| `fp_plus_image` | FP-side + image | 36.2% | 86.4% |
+| `fp_plus_q_no_cross` | both models, no cross | 29.1% | 81.4% |
+| **`all_features`** | diagnostic ceiling | **6.6%** | **62.8%** |
+| oracle | upper bound | 1.9% | 53.8% |
+
+**Sharp transition between regimes.** At W3-channel even the
+all-features diagnostic ceiling needs ~63% routing to recover 90% of
+the gap. Q-only is barely better than random (81% vs 90%). Reason: at
+W3 the bad-input population is the **majority** (~70% of FP-correct
+inputs), so oracle itself is already in "route most things" territory
+(54%). No predictor can substantially outperform oracle.
+
+The deployable-routing recipe works **at recoverable PTQ regimes
+only** — where bad inputs are a minority of the test set. W4-channel
+qualifies; W3-channel doesn't. The two-axis paper claim is now
+quantitatively delineated by the F6 / F6b table.
+
 ---
 
 ## Actions taken
