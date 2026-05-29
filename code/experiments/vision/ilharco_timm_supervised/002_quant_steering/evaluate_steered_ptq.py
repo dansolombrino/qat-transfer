@@ -80,13 +80,35 @@ def _evaluate_loader(
     return correct / total if total > 0 else float('nan')
 
 
-def _attach_steering_hook(block_module, vector: torch.Tensor, alpha: float):
-    """Register a forward hook that adds alpha * vector to the block's output,
-    broadcast across batch and token positions. Returns the handle."""
-    v_bcast = vector.view(1, 1, -1)
+def _attach_steering_hook(
+    block_module,
+    vector: torch.Tensor,
+    alpha: float,
+    token_mode: str = "all",
+):
+    """Register a forward hook that adds alpha * vector to the block's output.
 
-    def _hook(_mod, _inp, out):
-        return out + alpha * v_bcast
+    token_mode:
+      - "all": broadcast over every token position (CLS + patches). Original behavior.
+      - "cls": add only at token position 0 (CLS), leave patch positions untouched.
+              Matches the fit subspace exactly (we fit on CLS only).
+    """
+    if token_mode == "all":
+        v_bcast = vector.view(1, 1, -1)
+
+        def _hook(_mod, _inp, out):
+            return out + alpha * v_bcast
+
+    elif token_mode == "cls":
+        v_flat = vector  # (D,)
+
+        def _hook(_mod, _inp, out):
+            out = out.clone()
+            out[:, 0, :] = out[:, 0, :] + alpha * v_flat
+            return out
+
+    else:
+        raise ValueError(f"Unknown token_mode {token_mode!r}; expected 'all' or 'cls'")
 
     return block_module.register_forward_hook(_hook)
 
@@ -284,8 +306,24 @@ def main(cfg: DictConfig):
         block_indices = [int(b) for b in cfg.steering.block_sweep]
     alpha_grid = [float(a) for a in cfg.steering.alpha_grid]
 
-    print(f"\nSweep size: methods={len(methods)} × blocks={len(block_indices)} "
-          f"× alphas={len(alpha_grid)} = {len(methods) * len(block_indices) * len(alpha_grid)}")
+    token_mode = str(cfg.steering.get("token_mode", "all"))
+    injection_mode = str(cfg.steering.get("injection_mode", "single"))
+    if token_mode not in ("all", "cls"):
+        raise ValueError(f"cfg.steering.token_mode must be 'all' or 'cls'; got {token_mode!r}")
+    if injection_mode not in ("single", "tied_multi"):
+        raise ValueError(
+            f"cfg.steering.injection_mode must be 'single' or 'tied_multi'; got {injection_mode!r}"
+        )
+
+    if injection_mode == "single":
+        n_configs = len(methods) * len(block_indices) * len(alpha_grid)
+        print(f"\nSweep [single, token={token_mode}]: methods={len(methods)} × "
+              f"blocks={len(block_indices)} × alphas={len(alpha_grid)} = {n_configs}")
+    else:
+        n_configs = len(methods) * len(alpha_grid)
+        print(f"\nSweep [tied_multi, token={token_mode}]: methods={len(methods)} × "
+              f"alphas={len(alpha_grid)} = {n_configs}  "
+              f"(each config injects at all blocks in block_sweep={block_indices})")
 
     # Plain-PTQ baseline (alpha=0) is identical across (method, block); compute once.
     print("\nPlain PTQ baseline (alpha=0):")
@@ -301,36 +339,72 @@ def main(cfg: DictConfig):
 
     sweep_results = []
 
-    for method in methods:
-        v_per_block = vectors_by_method[method]
-        for bi in block_indices:
-            v = v_per_block[bi]
+    if injection_mode == "single":
+        for method in methods:
+            v_per_block = vectors_by_method[method]
+            for bi in block_indices:
+                v = v_per_block[bi]
+                for alpha in alpha_grid:
+                    if alpha == 0.0:
+                        val_acc, test_acc = plain_val_acc, plain_test_acc
+                    else:
+                        handle = _attach_steering_hook(blocks[bi], v, alpha, token_mode)
+                        try:
+                            val_acc = _evaluate_loader(
+                                image_classifier, dataset.val_loader, device,
+                                limit_num_batches=cfg.limit_num_batches,
+                                desc=f"{method}/b={bi}/a={alpha:+.2f} (val)",
+                            )
+                            test_acc = _evaluate_loader(
+                                image_classifier, dataset.test_loader, device,
+                                limit_num_batches=cfg.limit_num_batches,
+                                desc=f"{method}/b={bi}/a={alpha:+.2f} (test)",
+                            )
+                        finally:
+                            handle.remove()
+                    sweep_results.append({
+                        'method': method,
+                        'block': bi,
+                        'alpha': alpha,
+                        'val_acc': val_acc,
+                        'test_acc': test_acc,
+                    })
+                    print(f"  [{method}] block={bi:>2}  α={alpha:+.3f}  "
+                          f"val={val_acc * 100:.2f}%  test={test_acc * 100:.2f}%")
+    else:  # tied_multi: one shared α applied at every block in block_indices simultaneously
+        for method in methods:
+            v_per_block = vectors_by_method[method]
             for alpha in alpha_grid:
                 if alpha == 0.0:
                     val_acc, test_acc = plain_val_acc, plain_test_acc
                 else:
-                    handle = _attach_steering_hook(blocks[bi], v, alpha)
+                    handles = []
                     try:
+                        for bi in block_indices:
+                            handles.append(
+                                _attach_steering_hook(blocks[bi], v_per_block[bi], alpha, token_mode)
+                            )
                         val_acc = _evaluate_loader(
                             image_classifier, dataset.val_loader, device,
                             limit_num_batches=cfg.limit_num_batches,
-                            desc=f"{method}/b={bi}/a={alpha:+.2f} (val)",
+                            desc=f"{method}/tied/a={alpha:+.2f} (val)",
                         )
                         test_acc = _evaluate_loader(
                             image_classifier, dataset.test_loader, device,
                             limit_num_batches=cfg.limit_num_batches,
-                            desc=f"{method}/b={bi}/a={alpha:+.2f} (test)",
+                            desc=f"{method}/tied/a={alpha:+.2f} (test)",
                         )
                     finally:
-                        handle.remove()
+                        for h in handles:
+                            h.remove()
                 sweep_results.append({
                     'method': method,
-                    'block': bi,
+                    'block': list(block_indices),  # explicit set, not a single index
                     'alpha': alpha,
                     'val_acc': val_acc,
                     'test_acc': test_acc,
                 })
-                print(f"  [{method}] block={bi:>2}  α={alpha:+.3f}  "
+                print(f"  [{method}] tied @ blocks={block_indices}  α={alpha:+.3f}  "
                       f"val={val_acc * 100:.2f}%  test={test_acc * 100:.2f}%")
 
     ############################################################################
@@ -368,7 +442,15 @@ def main(cfg: DictConfig):
 
     evaluation_base_path = os.environ['EVALUATION_BASE_PATH']
 
-    eval_dir = os.path.join(
+    # Only namespace the dir when modes deviate from the original defaults, so
+    # existing eval_results.json files at the un-tagged path keep working.
+    extra_steering_tag_parts = []
+    if token_mode != "all":
+        extra_steering_tag_parts.append(f"tok={token_mode}")
+    if injection_mode != "single":
+        extra_steering_tag_parts.append(f"inj={injection_mode}")
+
+    eval_dir_parts = [
         evaluation_base_path,
         "vision",
         "ilharco_timm_supervised",
@@ -379,8 +461,11 @@ def main(cfg: DictConfig):
         cfg.dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
         f"ptq=bits={cfg.ptq.bits}_gran={cfg.ptq.granularity}_skip={skip_modules_tag}",
-        f"seed={cfg.seed}",
-    )
+    ]
+    if extra_steering_tag_parts:
+        eval_dir_parts.append("steering=" + "_".join(extra_steering_tag_parts))
+    eval_dir_parts.append(f"seed={cfg.seed}")
+    eval_dir = os.path.join(*eval_dir_parts)
 
     num_classes = len(dataset.class_names)
     random_chance = 1.0 / num_classes
@@ -411,6 +496,8 @@ def main(cfg: DictConfig):
         "steering_methods": methods,
         "steering_block_sweep": block_indices,
         "steering_alpha_grid": alpha_grid,
+        "steering_token_mode": token_mode,
+        "steering_injection_mode": injection_mode,
         "fp_val_accuracy": fp_val_acc,
         "fp_test_accuracy": fp_test_acc,
         "plain_ptq_val_accuracy": plain_val_acc,

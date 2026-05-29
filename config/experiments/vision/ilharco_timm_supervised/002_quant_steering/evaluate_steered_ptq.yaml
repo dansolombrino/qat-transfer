@@ -25,7 +25,11 @@ ptq:
   granularity: ???   # "tensor" or "channel"
 
 steering:
-  methods: ???       # list, subset of [mean_diff, contrastive_svd]
-  block_sweep: ???   # "all" or list[int]
-  alpha_grid: ???    # list[float]; include 0.0 to record the plain-PTQ baseline
-  vectors_path: null # absolute path; if null, derived from the cfg above
+  methods: ???        # list, subset of [mean_diff, contrastive_svd]
+  block_sweep: ???    # "all" or list[int]. In single mode: each is a candidate to test.
+                      # In tied_multi mode: THE set of blocks to inject at simultaneously.
+  alpha_grid: ???     # list[float]; include 0.0 to record the plain-PTQ baseline
+  vectors_path: null  # absolute path; if null, derived from the cfg above
+  token_mode: all     # "all" (broadcast α·v to every token) or "cls" (only at position 0)
+  injection_mode: single  # "single" (sweep over block_sweep, one block at a time) or
+                          # "tied_multi" (one shared α at every block in block_sweep)
