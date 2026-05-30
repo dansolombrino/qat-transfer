@@ -1,18 +1,24 @@
 """Generate publication-quality figures for the paper from the existing dumps.
 
-Outputs to paper/figs/:
-  fig_headline_pareto_w4.pdf    — Aggregate Pareto: Q-only LOO vs all_features
-                                  vs margin_only vs random, plus oracle line.
-  fig_feature_ablation_w4.pdf    — Pareto curves per feature subset.
-  fig_regime_comparison.pdf      — W4 vs W3 aggregate curves side by side.
-  fig_loo_vs_same_task.pdf       — Per-task scatter of LOO vs same-task X@90%.
+Outputs to paper/figs/, one set per (model, PTQ-config) combination:
+  fig_headline_pareto_{sanitized}_bits{bits}_{granularity}.pdf
+  fig_feature_ablation_{sanitized}_bits{bits}_{granularity}.pdf
+  fig_regime_comparison_{sanitized}_W{p}vsW{s}_{granularity}.pdf
+  fig_loo_vs_same_task_{sanitized}_bits{bits}_{granularity}.pdf
 
-Matplotlib (vector PDF), no GPU, ~5 s.
+Argparse: --model-name, --batch-size, --primary-bits, --secondary-bits,
+--granularity, plus the standard finetuning hyperparameters used in the
+checkpoint path. Defaults reproduce the ViT-B paper baseline.
+
+Matplotlib (vector PDF), no GPU, ~5 s end-to-end.
 """
 
+import argparse
 import os
+import re
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[5]
 _CODE_DIR = _PROJECT_ROOT / "code"
@@ -33,7 +39,7 @@ from sklearn.linear_model import LogisticRegression
 from src.vision.utils import sanitize_timm_model_name
 
 
-# Set publication-quality defaults.
+# Publication-quality matplotlib defaults.
 plt.rcParams.update({
     "font.family": "serif",
     "font.size": 10,
@@ -49,11 +55,8 @@ plt.rcParams.update({
     "pdf.fonttype": 42,
 })
 
-MODEL_NAME = "vit_base_patch16_224.orig_in21k"
-SANITIZED = sanitize_timm_model_name(MODEL_NAME)
-LR, WD, LS, WL, MGN, BS, SEED = "1e-05", "0.1", "0.0", "500", "1.0", "128", "2038"
-SKIP_TAG = "head"
 FIG_DIR = _PROJECT_ROOT / "paper" / "figs"
+
 
 # Feature sets — must match Script E.
 IMAGE_FEATS = ["img_brightness", "img_contrast", "img_edge_density", "img_high_freq_ratio"]
@@ -70,7 +73,6 @@ SUBSETS = {
     "fp_plus_q_no_cross": FP_FEATS + Q_FEATS + IMAGE_FEATS,
     "all_features": ALL_FEATS,
 }
-
 SUBSET_COLORS = {
     "image_only": "#7f7f7f",
     "q_only": "#1f77b4",
@@ -87,23 +89,86 @@ SUBSET_LABELS = {
 }
 
 
-def _dump_dir(dataset: str, bits: int, granularity: str) -> Path:
-    base = Path(os.environ["CHECKPOINT_BASE_PATH"]) / "vision" / "ilharco_timm_supervised" / "input_fragility_dumps" / SANITIZED
-    return (
-        base / dataset
-        / f"optim=adamw_lr={LR}_wd={WD}_ls={LS}_wl={WL}_mgn={MGN}_bs={BS}"
-        / f"ptq=bits={bits}_gran={granularity}_skip={SKIP_TAG}"
-        / f"seed={SEED}"
+# ============================================================================
+# argparse + cfg helpers
+# ============================================================================
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p.add_argument("--model-name", default="vit_base_patch16_224.orig_in21k")
+    p.add_argument("--batch-size", default="128")
+    p.add_argument("--lr", default="1e-05")
+    p.add_argument("--wd", default="0.1")
+    p.add_argument("--ls", default="0.0")
+    p.add_argument("--wl", default="500")
+    p.add_argument("--max-grad-norm", default="1.0")
+    p.add_argument("--seed", default="2038")
+    p.add_argument("--skip-modules", nargs="+", default=["head"])
+    p.add_argument("--primary-bits", type=int, default=4,
+                   help="The headline PTQ bit-width (e.g. 4).")
+    p.add_argument("--secondary-bits", type=int, default=3,
+                   help="The stress-test PTQ bit-width used in the regime-comparison panel.")
+    p.add_argument("--granularity", default="channel",
+                   help="PTQ granularity (channel|tensor); shared between primary and secondary.")
+    return p.parse_args()
+
+
+def _build_cfg(args: argparse.Namespace) -> SimpleNamespace:
+    skip_tag = "-".join(sorted(args.skip_modules)) if args.skip_modules else "none"
+    return SimpleNamespace(
+        model_name=args.model_name,
+        sanitized=sanitize_timm_model_name(args.model_name),
+        lr=args.lr, wd=args.wd, ls=args.ls, wl=args.wl,
+        mgn=args.max_grad_norm, bs=args.batch_size, seed=args.seed,
+        skip_tag=skip_tag,
+        granularity=args.granularity,
     )
 
 
-def _load_all(bits: int, granularity: str):
-    base = Path(os.environ["CHECKPOINT_BASE_PATH"]) / "vision" / "ilharco_timm_supervised" / "input_fragility_dumps" / SANITIZED
+def _short_model(model_name: str) -> str:
+    """ViT-{S,B,L}/{patch} short tag for figure titles."""
+    n = model_name.lower()
+    if "base" in n:
+        size = "ViT-B"
+    elif "large" in n:
+        size = "ViT-L"
+    elif "small" in n:
+        size = "ViT-S"
+    else:
+        size = "ViT"
+    m = re.search(r"patch(\d+)", model_name)
+    return f"{size}/{m.group(1)}" if m else size
+
+
+# ============================================================================
+# parquet loading + curve helpers (cfg-parameterised)
+# ============================================================================
+
+def _dump_dir(cfg: SimpleNamespace, dataset: str, bits: int, granularity: str) -> Path:
+    base = (
+        Path(os.environ["CHECKPOINT_BASE_PATH"]) / "vision"
+        / "ilharco_timm_supervised" / "input_fragility_dumps" / cfg.sanitized
+    )
+    return (
+        base / dataset
+        / f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.mgn}_bs={cfg.bs}"
+        / f"ptq=bits={bits}_gran={granularity}_skip={cfg.skip_tag}"
+        / f"seed={cfg.seed}"
+    )
+
+
+def _load_all(cfg: SimpleNamespace, bits: int, granularity: str) -> dict:
+    base = (
+        Path(os.environ["CHECKPOINT_BASE_PATH"]) / "vision"
+        / "ilharco_timm_supervised" / "input_fragility_dumps" / cfg.sanitized
+    )
+    if not base.exists():
+        return {}
     out = {}
     for ds_dir in sorted(base.iterdir()):
         if not ds_dir.is_dir():
             continue
-        d = _dump_dir(ds_dir.name, bits, granularity)
+        d = _dump_dir(cfg, ds_dir.name, bits, granularity)
         if not (d / "predictions_test.parquet").exists():
             continue
         df_val = pd.read_parquet(d / "predictions_val.parquet")
@@ -142,8 +207,6 @@ def _routed_curve(scores, fp_correct, q_correct):
 
 
 def _loo_curves(task_data, cols, eligible):
-    """For each target task, fit LogReg on pooled OTHER-tasks val FP-correct rows
-    (per-task z-scored), score target's test, return curve dict per task."""
     per_task_train = {}
     for ds in eligible:
         df_val, _ = task_data[ds]
@@ -177,7 +240,6 @@ def _loo_curves(task_data, cols, eligible):
 
 
 def _baseline_curves(task_data, eligible):
-    """Oracle, margin_only, random — one curve per task."""
     oracle = {}
     margin = {}
     rand = {}
@@ -188,11 +250,9 @@ def _baseline_curves(task_data, eligible):
         gap = float(fp_c.mean()) - float(q_c.mean())
         if gap <= 1e-9:
             continue
-
         s_or = fp_c.astype(int) - q_c.astype(int)
         s_m = -df_test_tgt["fp_margin"].to_numpy(dtype=np.float64)
         s_r = np.random.default_rng(0).random(len(df_test_tgt))
-
         for name, s, store in [("oracle", s_or, oracle), ("margin", s_m, margin), ("random", s_r, rand)]:
             frac, acc = _routed_curve(s, fp_c, q_c)
             rec = (acc - float(q_c.mean())) / gap
@@ -208,13 +268,16 @@ def _aggregate_to_grid(curves, grid):
 
 
 # ============================================================================
-# Figure 1: headline Pareto at W4-channel — Q-only deployable vs all_features ceiling
+# Figure 1: headline Pareto
 # ============================================================================
-def fig_headline_pareto_w4():
-    print("Generating Figure 1 (headline Pareto, W4-channel) ...")
-    task_data = _load_all(4, "channel")
+def fig_headline_pareto(cfg, bits, granularity, model_short, out_path):
+    print(f"Generating Figure 1 (headline Pareto, W{bits}-{granularity}, {cfg.sanitized}) ...")
+    task_data = _load_all(cfg, bits, granularity)
     eligible = list(task_data.keys())
     print(f"  {len(eligible)} eligible tasks")
+    if not eligible:
+        print("  no eligible tasks; skipping.")
+        return
     grid = np.linspace(0, 1, 201)
 
     oracle, margin, rand = _baseline_curves(task_data, eligible)
@@ -240,29 +303,31 @@ def fig_headline_pareto_w4():
         ax.plot(grid * 100, mean * 100, color=color, linestyle=ls, label=label)
 
     ax.axhline(90, color="green", linestyle=":", linewidth=0.8, alpha=0.7)
-    ax.text(98, 91.5, "90% gap recovered", ha="right", va="bottom",
+    ax.text(98, 91.5, "90\\% gap recovered", ha="right", va="bottom",
             fontsize=8, color="green")
     ax.set_xlim(0, 100)
     ax.set_ylim(-5, 105)
     ax.set_xlabel("FP-compute fraction (\\%)")
     ax.set_ylabel("Mean FP$\\to$PTQ gap recovery (\\%)")
-    ax.set_title("LOO cross-task routing at W4-channel (18 ViT-B tasks)")
+    ax.set_title(f"LOO cross-task routing at W{bits}-{granularity} ({len(eligible)} {model_short} tasks)")
     ax.legend(loc="lower right", framealpha=0.95)
     ax.grid(True, linestyle=":", linewidth=0.4, alpha=0.7)
 
-    out = FIG_DIR / "fig_headline_pareto_w4.pdf"
-    fig.savefig(out)
+    fig.savefig(out_path)
     plt.close(fig)
-    print(f"  saved {out}")
+    print(f"  saved {out_path}")
 
 
 # ============================================================================
-# Figure 2: feature ablation at W4-channel
+# Figure 2: feature ablation
 # ============================================================================
-def fig_feature_ablation_w4():
-    print("Generating Figure 2 (feature ablation, W4-channel) ...")
-    task_data = _load_all(4, "channel")
+def fig_feature_ablation(cfg, bits, granularity, model_short, out_path):
+    print(f"Generating Figure 2 (feature ablation, W{bits}-{granularity}, {cfg.sanitized}) ...")
+    task_data = _load_all(cfg, bits, granularity)
     eligible = list(task_data.keys())
+    if not eligible:
+        print("  no eligible tasks; skipping.")
+        return
     grid = np.linspace(0, 1, 201)
 
     fig, ax = plt.subplots(figsize=(5.2, 3.6))
@@ -279,6 +344,8 @@ def fig_feature_ablation_w4():
     for name, curves, color, ls in [("oracle", oracle, "#000000", "-"),
                                      ("random", rand, "#bbbbbb", ":")]:
         arr = _aggregate_to_grid(curves, grid)
+        if arr is None:
+            continue
         ax.plot(grid * 100, arr.mean(axis=0) * 100,
                 color=color, linestyle=ls, linewidth=1.2,
                 label="oracle" if name == "oracle" else "random")
@@ -288,30 +355,34 @@ def fig_feature_ablation_w4():
     ax.set_ylim(-5, 105)
     ax.set_xlabel("FP-compute fraction (\\%)")
     ax.set_ylabel("Mean gap recovery (\\%)")
-    ax.set_title("Feature-subset ablation, W4-channel LOO (18 tasks)")
+    ax.set_title(f"Feature-subset ablation, W{bits}-{granularity} LOO ({len(eligible)} {model_short} tasks)")
     ax.legend(loc="lower right", framealpha=0.95, fontsize=8)
     ax.grid(True, linestyle=":", linewidth=0.4, alpha=0.7)
 
-    out = FIG_DIR / "fig_feature_ablation_w4.pdf"
-    fig.savefig(out)
+    fig.savefig(out_path)
     plt.close(fig)
-    print(f"  saved {out}")
+    print(f"  saved {out_path}")
 
 
 # ============================================================================
-# Figure 3: regime comparison W4 vs W3
+# Figure 3: regime comparison (primary vs secondary bits)
 # ============================================================================
-def fig_regime_comparison():
-    print("Generating Figure 3 (regime comparison W4 vs W3) ...")
+def fig_regime_comparison(cfg, primary_bits, secondary_bits, granularity, model_short, out_path):
+    print(f"Generating Figure 3 (regime comparison W{primary_bits} vs W{secondary_bits}, {cfg.sanitized}) ...")
     grid = np.linspace(0, 1, 201)
     fig, axes = plt.subplots(1, 2, figsize=(9.5, 3.6), sharey=True)
 
-    for ax, bits, granularity, title in [
-        (axes[0], 4, "channel", "W4-channel (recoverable regime)"),
-        (axes[1], 3, "channel", "W3-channel (catastrophic regime)"),
+    for ax, bits, label_suffix in [
+        (axes[0], primary_bits, "(recoverable regime)" if primary_bits >= 4 else ""),
+        (axes[1], secondary_bits, "(catastrophic regime)" if secondary_bits <= 3 else ""),
     ]:
-        task_data = _load_all(bits, granularity)
+        task_data = _load_all(cfg, bits, granularity)
         eligible = list(task_data.keys())
+        if not eligible:
+            ax.text(0.5, 0.5, f"no dumps at W{bits}-{granularity}",
+                    transform=ax.transAxes, ha="center", va="center")
+            ax.set_title(f"W{bits}-{granularity}")
+            continue
         oracle, _, rand = _baseline_curves(task_data, eligible)
         curves_q = _loo_curves(task_data, Q_FEATS, eligible)
         curves_all = _loo_curves(task_data, ALL_FEATS, eligible)
@@ -332,30 +403,32 @@ def fig_regime_comparison():
         ax.set_xlim(0, 100)
         ax.set_ylim(-5, 105)
         ax.set_xlabel("FP-compute fraction (\\%)")
-        ax.set_title(title + f" ({len(eligible)} tasks)")
+        title = f"W{bits}-{granularity} {label_suffix}".strip()
+        ax.set_title(f"{title} ({len(eligible)} tasks)")
         ax.grid(True, linestyle=":", linewidth=0.4, alpha=0.7)
 
     axes[0].set_ylabel("Mean gap recovery (\\%)")
     axes[0].legend(loc="lower right", framealpha=0.95, fontsize=8)
 
-    out = FIG_DIR / "fig_regime_comparison.pdf"
-    fig.savefig(out)
+    fig.suptitle(f"Regime comparison — {model_short}", fontsize=11, y=1.02)
+    fig.savefig(out_path)
     plt.close(fig)
-    print(f"  saved {out}")
+    print(f"  saved {out_path}")
 
 
 # ============================================================================
-# Figure 4: per-task LOO vs same-task scatter
+# Figure 4: per-task LOO vs same-task scatter (Q-only deployable)
 # ============================================================================
-def fig_loo_vs_same_task():
-    """Q-only deployable: LOO vs same-task per task. Matches paper Table:loo."""
-    print("Generating Figure 4 (LOO vs same-task X@90%, Q-only deployable) ...")
-    task_data = _load_all(4, "channel")
+def fig_loo_vs_same_task(cfg, bits, granularity, model_short, out_path):
+    print(f"Generating Figure 4 (LOO vs same-task X@90\\%, Q-only, W{bits}-{granularity}, {cfg.sanitized}) ...")
+    task_data = _load_all(cfg, bits, granularity)
     eligible = list(task_data.keys())
+    if not eligible:
+        print("  no eligible tasks; skipping.")
+        return
 
     loo_curves = _loo_curves(task_data, Q_FEATS, eligible)
 
-    # Same-task: fit LogReg on target's own val (Q-only features).
     same_curves = {}
     for target in eligible:
         df_val_tgt, df_test_tgt = task_data[target]
@@ -404,22 +477,49 @@ def fig_loo_vs_same_task():
     ax.set_ylim(0, lim)
     ax.set_xlabel("Same-task X@90\\% (\\%)")
     ax.set_ylabel("LOO cross-task X@90\\% (\\%)")
-    ax.set_title("Q-only deployable: LOO vs same-task X@90\\% (W4-channel, 18 tasks)")
+    ax.set_title(f"Q-only deployable LOO vs same-task X@90\\%\n"
+                 f"(W{bits}-{granularity}, {len(common)} {model_short} tasks)")
     ax.grid(True, linestyle=":", linewidth=0.4, alpha=0.7)
     ax.legend(loc="upper left", framealpha=0.95)
 
-    out = FIG_DIR / "fig_loo_vs_same_task.pdf"
-    fig.savefig(out)
+    fig.savefig(out_path)
     plt.close(fig)
-    print(f"  saved {out}")
+    print(f"  saved {out_path}")
 
 
 # ============================================================================
+# Entry point
+# ============================================================================
+def main():
+    args = parse_args()
+    cfg = _build_cfg(args)
+    model_short = _short_model(args.model_name)
+
+    primary_tag = f"{cfg.sanitized}_bits{args.primary_bits}_{args.granularity}"
+    regime_tag = (
+        f"{cfg.sanitized}_W{args.primary_bits}vsW{args.secondary_bits}_{args.granularity}"
+    )
+
+    FIG_DIR.mkdir(parents=True, exist_ok=True)
+
+    fig_headline_pareto(
+        cfg, args.primary_bits, args.granularity, model_short,
+        FIG_DIR / f"fig_headline_pareto_{primary_tag}.pdf",
+    )
+    fig_feature_ablation(
+        cfg, args.primary_bits, args.granularity, model_short,
+        FIG_DIR / f"fig_feature_ablation_{primary_tag}.pdf",
+    )
+    fig_regime_comparison(
+        cfg, args.primary_bits, args.secondary_bits, args.granularity, model_short,
+        FIG_DIR / f"fig_regime_comparison_{regime_tag}.pdf",
+    )
+    fig_loo_vs_same_task(
+        cfg, args.primary_bits, args.granularity, model_short,
+        FIG_DIR / f"fig_loo_vs_same_task_{primary_tag}.pdf",
+    )
+    print("\nAll figures generated.")
+
 
 if __name__ == "__main__":
-    FIG_DIR.mkdir(parents=True, exist_ok=True)
-    fig_headline_pareto_w4()
-    fig_feature_ablation_w4()
-    fig_regime_comparison()
-    fig_loo_vs_same_task()
-    print("\nAll figures generated.")
+    main()

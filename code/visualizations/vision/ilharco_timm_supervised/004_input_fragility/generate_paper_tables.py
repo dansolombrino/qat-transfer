@@ -38,13 +38,11 @@ import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
 
+from types import SimpleNamespace
+
 from src.vision.utils import sanitize_timm_model_name
 
 
-MODEL_NAME = "vit_base_patch16_224.orig_in21k"
-SANITIZED = sanitize_timm_model_name(MODEL_NAME)
-LR, WD, LS, WL, MGN, BS, SEED = "1e-05", "0.1", "0.0", "500", "1.0", "128", "2038"
-SKIP_TAG = "head"
 OUT_DIR = _PROJECT_ROOT / "paper" / "tables"
 
 
@@ -74,6 +72,15 @@ SUBSET_HEADERS = {
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p.add_argument("--model-name", default="vit_base_patch16_224.orig_in21k")
+    p.add_argument("--batch-size", default="128")
+    p.add_argument("--lr", default="1e-05")
+    p.add_argument("--wd", default="0.1")
+    p.add_argument("--ls", default="0.0")
+    p.add_argument("--wl", default="500")
+    p.add_argument("--max-grad-norm", default="1.0")
+    p.add_argument("--seed", default="2038")
+    p.add_argument("--skip-modules", nargs="+", default=["head"])
     p.add_argument("--bits-primary", type=int, default=4)
     p.add_argument("--bits-secondary", type=int, default=3)
     p.add_argument("--granularity", default="channel")
@@ -82,23 +89,42 @@ def parse_args():
     return p.parse_args()
 
 
-def _dump_dir(dataset: str, bits: int, granularity: str) -> Path:
-    base = Path(os.environ["CHECKPOINT_BASE_PATH"]) / "vision" / "ilharco_timm_supervised" / "input_fragility_dumps" / SANITIZED
-    return (
-        base / dataset
-        / f"optim=adamw_lr={LR}_wd={WD}_ls={LS}_wl={WL}_mgn={MGN}_bs={BS}"
-        / f"ptq=bits={bits}_gran={granularity}_skip={SKIP_TAG}"
-        / f"seed={SEED}"
+def _build_cfg(args):
+    skip_tag = "-".join(sorted(args.skip_modules)) if args.skip_modules else "none"
+    return SimpleNamespace(
+        model_name=args.model_name,
+        sanitized=sanitize_timm_model_name(args.model_name),
+        lr=args.lr, wd=args.wd, ls=args.ls, wl=args.wl,
+        mgn=args.max_grad_norm, bs=args.batch_size, seed=args.seed,
+        skip_tag=skip_tag,
     )
 
 
-def _load_all(bits: int, granularity: str):
-    base = Path(os.environ["CHECKPOINT_BASE_PATH"]) / "vision" / "ilharco_timm_supervised" / "input_fragility_dumps" / SANITIZED
+def _dump_dir(cfg, dataset: str, bits: int, granularity: str) -> Path:
+    base = (
+        Path(os.environ["CHECKPOINT_BASE_PATH"]) / "vision"
+        / "ilharco_timm_supervised" / "input_fragility_dumps" / cfg.sanitized
+    )
+    return (
+        base / dataset
+        / f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.mgn}_bs={cfg.bs}"
+        / f"ptq=bits={bits}_gran={granularity}_skip={cfg.skip_tag}"
+        / f"seed={cfg.seed}"
+    )
+
+
+def _load_all(cfg, bits: int, granularity: str):
+    base = (
+        Path(os.environ["CHECKPOINT_BASE_PATH"]) / "vision"
+        / "ilharco_timm_supervised" / "input_fragility_dumps" / cfg.sanitized
+    )
+    if not base.exists():
+        return {}
     out = {}
     for ds_dir in sorted(base.iterdir()):
         if not ds_dir.is_dir():
             continue
-        d = _dump_dir(ds_dir.name, bits, granularity)
+        d = _dump_dir(cfg, ds_dir.name, bits, granularity)
         if not (d / "predictions_test.parquet").exists():
             continue
         df_val = pd.read_parquet(d / "predictions_val.parquet")
@@ -218,10 +244,10 @@ def _fmt_count(x):
 # ============================================================================
 # Table A1: per-task statistics
 # ============================================================================
-def emit_task_stats_table(args):
+def emit_task_stats_table(cfg, args):
     print("Building per-task statistics table ...")
-    primary = _load_all(args.bits_primary, args.granularity)
-    secondary = _load_all(args.bits_secondary, args.granularity)
+    primary = _load_all(cfg, args.bits_primary, args.granularity)
+    secondary = _load_all(cfg, args.bits_secondary, args.granularity)
     all_tasks = sorted(set(primary.keys()) | set(secondary.keys()))
 
     rows = []
@@ -297,7 +323,7 @@ def emit_task_stats_table(args):
     lines.append("\\end{tabular}")
     lines.append("\\end{table}")
 
-    out_path = OUT_DIR / "appendix_task_stats.tex"
+    out_path = OUT_DIR / f"appendix_task_stats_{cfg.sanitized}.tex"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text("\n".join(lines) + "\n")
     print(f"  saved {out_path}")
@@ -306,9 +332,9 @@ def emit_task_stats_table(args):
 # ============================================================================
 # Table A2: per-task X@90 across feature subsets
 # ============================================================================
-def emit_pareto_ablation_table(args):
+def emit_pareto_ablation_table(cfg, args):
     print("Building per-task LOO X@90 ablation table ...")
-    task_data = _load_all(args.bits_primary, args.granularity)
+    task_data = _load_all(cfg, args.bits_primary, args.granularity)
 
     eligible = []
     for ds, (dv, dt, _) in task_data.items():
@@ -378,16 +404,18 @@ def emit_pareto_ablation_table(args):
     lines.append("\\end{tabular}")
     lines.append("\\end{table}")
 
-    out_path = OUT_DIR / "appendix_pareto_ablation.tex"
+    tag = f"{cfg.sanitized}_bits{args.bits_primary}_{args.granularity}"
+    out_path = OUT_DIR / f"appendix_pareto_ablation_{tag}.tex"
     out_path.write_text("\n".join(lines) + "\n")
     print(f"  saved {out_path}")
 
 
 def main():
     args = parse_args()
+    cfg = _build_cfg(args)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    emit_task_stats_table(args)
-    emit_pareto_ablation_table(args)
+    emit_task_stats_table(cfg, args)
+    emit_pareto_ablation_table(cfg, args)
     print("\nDone.")
 
 
