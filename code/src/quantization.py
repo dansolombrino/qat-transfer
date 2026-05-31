@@ -50,11 +50,87 @@ def _quantize_channelwise(
     return int_w, scale
 
 
+def _parse_group_size(granularity: str) -> int:
+    """Parse a 'group_<N>' granularity string into its integer group size.
+
+    Raises ValueError if the suffix is missing or not a positive integer."""
+    if not granularity.startswith("group_"):
+        raise ValueError(
+            f"_parse_group_size called with non-group granularity {granularity!r}"
+        )
+    suffix = granularity[len("group_"):]
+    if not suffix.isdigit() or int(suffix) <= 0:
+        raise ValueError(
+            f"Invalid group granularity {granularity!r}; expected 'group_<positive int>'"
+        )
+    return int(suffix)
+
+
+def _is_valid_granularity(granularity: str) -> bool:
+    """True if `granularity` is one of: 'tensor', 'channel', or 'group_<positive int>'."""
+    if granularity in ("tensor", "channel"):
+        return True
+    if granularity.startswith("group_"):
+        suffix = granularity[len("group_"):]
+        return suffix.isdigit() and int(suffix) > 0
+    return False
+
+
+def _quantize_groupwise(
+    weight: torch.Tensor, bits: int, group_size: int
+) -> Tuple[torch.Tensor, torch.Tensor]:
+
+    """
+    Symmetric per-group quantization along the input (last) dimension.
+    Weight has shape [out_features, in_features]; the in_features axis is split
+    into in_features // group_size contiguous groups, and each group gets its
+    own scale. Returns (int_tensor, scales) where scales has shape
+    [out_features, num_groups]. `group_size` must divide `in_features`.
+
+    Strictly finer than channelwise (which is the special case group_size = in_features).
+    Standard recipe used by GPTQ / AWQ to reduce dynamic-range-induced rounding error
+    at low bit-widths.
+    """
+
+    out_features, in_features = weight.shape
+    if in_features % group_size != 0:
+        raise ValueError(
+            f"group_size={group_size} must divide in_features={in_features} "
+            f"(layer with shape {tuple(weight.shape)}). Pick a group_size that "
+            f"divides every linear's in_features in the model "
+            f"(e.g. 64 or 128 for standard transformer hidden sizes)."
+        )
+    num_groups = in_features // group_size
+
+    qmin = -(2 ** (bits - 1))
+    qmax = 2 ** (bits - 1) - 1
+
+    # [O, G, group_size]
+    w_grouped = weight.view(out_features, num_groups, group_size)
+    abs_max = w_grouped.abs().amax(dim=2, keepdim=True).clamp(min=1e-8)  # [O, G, 1]
+    scale_grouped = abs_max / qmax                                        # [O, G, 1]
+
+    int_w_grouped = (w_grouped / scale_grouped).round().clamp(qmin, qmax).to(torch.int8)
+    int_w = int_w_grouped.view(out_features, in_features)
+    scale = scale_grouped.squeeze(-1)                                     # [O, G]
+
+    return int_w, scale
+
+
 def quantize_tensor(
     weight: torch.Tensor, bits: int, granularity: str
 ) -> Tuple[torch.Tensor, torch.Tensor]:
 
-    """Dispatch to the appropriate quantization function based on granularity."""
+    """Dispatch to the appropriate quantization function based on granularity.
+
+    Accepted granularities:
+      - "tensor"        : one scalar scale for the whole weight
+      - "channel"       : one scale per output row (out_features scales)
+      - "group_<N>"     : one scale per contiguous chunk of N input features
+                          (N must divide in_features for every quantized layer).
+                          Strictly finer than "channel"; recommended for low
+                          bit-widths (W3 and below).
+    """
 
     if granularity == "tensor":
         return _quantize_tensorwise(weight, bits)
@@ -62,14 +138,43 @@ def quantize_tensor(
     elif granularity == "channel":
         return _quantize_channelwise(weight, bits)
 
+    elif granularity.startswith("group_"):
+        return _quantize_groupwise(weight, bits, _parse_group_size(granularity))
+
     else:
         raise ValueError(
-            f"granularity expected to be 'tensor' or 'channel', got '{granularity}'"
+            f"granularity expected to be 'tensor', 'channel', or 'group_<int>', "
+            f"got '{granularity}'"
         )
 
 
 def dequantize_tensor(int_w: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
-    """Dequantize an integer weight tensor back to float using the stored scale."""
+    """Dequantize an integer weight tensor back to float using the stored scale.
+
+    Handles all three granularity shapes:
+      - tensor-wise : scale is a 0-d or 1-element tensor (broadcast trivially)
+      - channel-wise: scale has shape [out_features, 1]   (broadcast trivially)
+      - group-wise  : scale has shape [out_features, G] with G > 1; each group's
+                      scale is repeated `group_size = in_features // G` times
+                      along the input axis before the multiply.
+    """
+
+    if scale.ndim == 2 and scale.shape[1] > 1:
+        out_features, num_groups = scale.shape
+        in_features = int_w.shape[1]
+        if in_features % num_groups != 0:
+            raise ValueError(
+                f"dequantize_tensor: scale shape {tuple(scale.shape)} not "
+                f"compatible with int_w shape {tuple(int_w.shape)} "
+                f"(num_groups={num_groups} must divide in_features={in_features})."
+            )
+        group_size = in_features // num_groups
+        expanded = (
+            scale.unsqueeze(-1)
+            .expand(out_features, num_groups, group_size)
+            .reshape(out_features, in_features)
+        )
+        return int_w.float() * expanded
 
     return int_w.float() * scale
 
@@ -110,9 +215,10 @@ class QATLinear(nn.Module):
         self.bits = bits
         self.granularity = granularity
 
-        if self.granularity not in ("tensor", "channel"):
+        if not _is_valid_granularity(self.granularity):
             raise ValueError(
-                f"granularity expected to be 'tensor' or 'channel', got '{self.granularity}'"
+                f"granularity expected to be 'tensor', 'channel', or 'group_<int>', "
+                f"got '{self.granularity}'"
             )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -156,9 +262,10 @@ class QATMultiheadAttention(nn.Module):
         self.bits = bits
         self.granularity = granularity
 
-        if self.granularity not in ("tensor", "channel"):
+        if not _is_valid_granularity(self.granularity):
             raise ValueError(
-                f"granularity expected to be 'tensor' or 'channel', got '{self.granularity}'"
+                f"granularity expected to be 'tensor', 'channel', or 'group_<int>', "
+                f"got '{self.granularity}'"
             )
 
         if not self.mha._qkv_same_embed_dim:

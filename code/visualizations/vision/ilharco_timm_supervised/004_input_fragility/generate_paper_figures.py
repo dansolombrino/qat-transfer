@@ -498,6 +498,24 @@ def fig_loo_vs_same_task(cfg, bits, granularity, model_short, out_path):
 # Dual-backbone variants: two backbones side-by-side in one figure.
 # ============================================================================
 
+def _annotate_x_at_90(ax, grid, mean, color, y_offset_pp):
+    """Mark the X@90 point on a Pareto curve: scatter dot at (X@90, 90) plus
+    a small text label showing the X@90 value. Stagger labels with y_offset_pp
+    so multiple curves don't overlap labels at the 90% line."""
+    above = np.where(mean >= 0.9)[0]
+    if len(above) == 0:
+        return
+    x90 = float(grid[above[0]]) * 100
+    ax.scatter([x90], [90], s=22, color=color, zorder=5, edgecolor="white", linewidth=0.6)
+    ax.annotate(
+        f"{x90:.1f}\\%",
+        xy=(x90, 90),
+        xytext=(x90 + 2.0, 90 + y_offset_pp),
+        fontsize=7, color=color, ha="left", va="center",
+        annotation_clip=True,
+    )
+
+
 def _plot_headline_on_ax(ax, cfg, bits, granularity, model_short, show_legend):
     """Render the headline Pareto into a pre-existing axis. Returns n_tasks."""
     task_data = _load_all(cfg, bits, granularity)
@@ -518,6 +536,13 @@ def _plot_headline_on_ax(ax, cfg, bits, granularity, model_short, show_legend):
         ("FP margin only", margin, "#ff7f0e", "--"),
         ("Random", rand, "#7f7f7f", ":"),
     ]
+    # Vertical stagger so X@90 labels don't collide.
+    annotate_offsets = {
+        "Oracle": -6.0,
+        "All features (ceiling)": -3.0,
+        "Q only (deployable)": +3.0,
+        "FP margin only": +6.0,
+    }
     for label, curves, color, ls in series:
         arr = _aggregate_to_grid(curves, grid)
         if arr is None:
@@ -527,6 +552,8 @@ def _plot_headline_on_ax(ax, cfg, bits, granularity, model_short, show_legend):
         hi = np.percentile(arr, 75, axis=0)
         ax.fill_between(grid * 100, lo * 100, hi * 100, color=color, alpha=0.10, linewidth=0)
         ax.plot(grid * 100, mean * 100, color=color, linestyle=ls, label=label)
+        if label in annotate_offsets:
+            _annotate_x_at_90(ax, grid, mean, color, annotate_offsets[label])
     ax.axhline(90, color="green", linestyle=":", linewidth=0.8, alpha=0.7)
     ax.set_xlim(0, 100)
     ax.set_ylim(-5, 105)
@@ -547,22 +574,31 @@ def _plot_feature_ablation_on_ax(ax, cfg, bits, granularity, model_short, show_l
         ax.set_title(f"{model_short} --- W{bits}-{granularity}")
         return 0
     grid = np.linspace(0, 1, 201)
+    # Annotate only the three subsets the paper actually highlights: q_only,
+    # all_features, and oracle. Others would crowd the figure.
+    annotate_offsets = {"q_only": +3.0, "all_features": -3.0}
     for name, cols in SUBSETS.items():
         curves = _loo_curves(task_data, cols, eligible)
         arr = _aggregate_to_grid(curves, grid)
         if arr is None:
             continue
-        ax.plot(grid * 100, arr.mean(axis=0) * 100,
+        mean = arr.mean(axis=0)
+        ax.plot(grid * 100, mean * 100,
                 color=SUBSET_COLORS[name], label=SUBSET_LABELS[name])
+        if name in annotate_offsets:
+            _annotate_x_at_90(ax, grid, mean, SUBSET_COLORS[name], annotate_offsets[name])
     oracle, _, rand = _baseline_curves(task_data, eligible)
     for name, curves, color, ls in [("oracle", oracle, "#000000", "-"),
                                      ("random", rand, "#bbbbbb", ":")]:
         arr = _aggregate_to_grid(curves, grid)
         if arr is None:
             continue
-        ax.plot(grid * 100, arr.mean(axis=0) * 100,
+        mean = arr.mean(axis=0)
+        ax.plot(grid * 100, mean * 100,
                 color=color, linestyle=ls, linewidth=1.2,
                 label="oracle" if name == "oracle" else "random")
+        if name == "oracle":
+            _annotate_x_at_90(ax, grid, mean, color, -6.0)
     ax.axhline(90, color="green", linestyle=":", linewidth=0.8, alpha=0.7)
     ax.set_xlim(0, 100)
     ax.set_ylim(-5, 105)
