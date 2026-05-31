@@ -297,6 +297,29 @@ def _fmt_count(x):
     return f"{int(x):,}"
 
 
+def _tex_safe_join(lines):
+    """Join `lines` for `.tex` output, escaping raw `group_<N>` granularity
+    references to `group\\_<N>` so LaTeX renders the underscore as text rather
+    than as math-mode subscript. We deliberately do not touch:
+      - lines that begin with `%` (LaTeX comments),
+      - lines that contain `\\label{...}`, `\\input{...}`, `\\ref{...}`,
+        `\\cite{...}` or `\\bibliography{...}` --- those use raw `_` as part
+        of identifier keys and would break under naive escaping.
+    The pattern matches only `group_<digit>`, so it cannot collide with
+    identifier-style underscores like `vit_base_patch16_224_orig_in21k`.
+    """
+    import re
+    safe_pattern = re.compile(r'(?<!\\)group_(\d)')
+    skip_pattern = re.compile(r'\\(label|input|ref|cite|bibliography)\{')
+    out = []
+    for line in lines:
+        if line.lstrip().startswith("%") or skip_pattern.search(line):
+            out.append(line)
+        else:
+            out.append(safe_pattern.sub(r'group\\_\1', line))
+    return "\n".join(out) + "\n"
+
+
 # ============================================================================
 # Table A1: per-task statistics
 # ============================================================================
@@ -384,7 +407,7 @@ def emit_task_stats_table(cfg, args):
 
     out_path = OUT_DIR / f"appendix_task_stats_{cfg.sanitized}.tex"
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text("\n".join(lines) + "\n")
+    out_path.write_text(_tex_safe_join(lines))
     print(f"  saved {out_path}")
 
 
@@ -468,7 +491,7 @@ def emit_pareto_ablation_table(cfg, args):
 
     tag = f"{cfg.sanitized}_bits{args.bits_primary}_{args.granularity}"
     out_path = OUT_DIR / f"appendix_pareto_ablation_{tag}.tex"
-    out_path.write_text("\n".join(lines) + "\n")
+    out_path.write_text(_tex_safe_join(lines))
     print(f"  saved {out_path}")
 
 
@@ -592,7 +615,7 @@ def emit_dual_ablation_table(cfg_a, cfg_b, args, short_a, short_b):
         f"_W{args.bits_primary}vsW{args.bits_secondary}_{args.granularity}"
     )
     out_path = OUT_DIR / f"ablation_dual_{tag}.tex"
-    out_path.write_text("\n".join(lines) + "\n")
+    out_path.write_text(_tex_safe_join(lines))
     print(f"  saved {out_path}")
 
 
@@ -737,7 +760,7 @@ def emit_dual_auroc_table(cfg_a, cfg_b, args, short_a, short_b):
 
     tag = f"{cfg_a.sanitized}_vs_{cfg_b.sanitized}_bits{args.bits_primary}_{args.granularity}"
     out_path = OUT_DIR / f"auroc_dual_{tag}.tex"
-    out_path.write_text("\n".join(lines) + "\n")
+    out_path.write_text(_tex_safe_join(lines))
     print(f"  saved {out_path}")
 
 
@@ -960,7 +983,7 @@ def emit_dual_threshold_table(cfg_a, cfg_b, args, short_a, short_b,
 
     tag = f"{cfg_a.sanitized}_vs_{cfg_b.sanitized}_bits{args.bits_primary}_{args.granularity}"
     out_path = OUT_DIR / f"threshold_dual_{tag}.tex"
-    out_path.write_text("\n".join(lines) + "\n")
+    out_path.write_text(_tex_safe_join(lines))
     print(f"  saved {out_path}")
 
 
