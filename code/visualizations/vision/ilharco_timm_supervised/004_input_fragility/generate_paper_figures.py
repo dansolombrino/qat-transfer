@@ -14,6 +14,7 @@ Matplotlib (vector PDF), no GPU, ~5 s end-to-end.
 """
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -60,6 +61,7 @@ FIG_DIR = _PROJECT_ROOT / "paper" / "figs"
 
 # Feature sets — must match Script E.
 IMAGE_FEATS = ["img_brightness", "img_contrast", "img_edge_density", "img_high_freq_ratio"]
+TEXT_FEATS  = ["txt_n_tokens", "txt_n_unique_tokens", "txt_type_token_ratio", "txt_punct_ratio"]
 Q_FEATS = ["q_margin", "q_softmax_top1", "q_entropy"]
 FP_FEATS = ["fp_margin", "fp_softmax_top1", "fp_entropy", "fp_cls_dist_to_class_centroid"]
 CROSS_FEATS = ["fp_logit_at_q_pred", "q_logit_at_fp_pred", "fp_softmax_at_q_pred",
@@ -74,19 +76,42 @@ SUBSETS = {
     "all_features": ALL_FEATS,
 }
 SUBSET_COLORS = {
-    "image_only": "#7f7f7f",
+    "image_only": "#9467bd",  # input-domain only — distinct from Random's gray
     "q_only": "#1f77b4",
     "fp_only": "#ff7f0e",
     "fp_plus_q_no_cross": "#2ca02c",
     "all_features": "#d62728",
 }
 SUBSET_LABELS = {
-    "image_only": "image only",
+    "image_only": "input-domain only",
     "q_only": "Q only (deployable)",
     "fp_only": "FP only",
     "fp_plus_q_no_cross": "FP+Q, no cross",
     "all_features": "all features (ceiling)",
 }
+
+
+def _input_feats_for(task_data) -> list:
+    """Return the input-domain feature list (image-pixel for ViT, tokenizer-text for Qwen3)
+    by inspecting the columns of the first task's val dataframe."""
+    sample_df = next(iter(task_data.values()))[0]
+    if "img_brightness" in sample_df.columns:
+        return IMAGE_FEATS
+    if "txt_n_tokens" in sample_df.columns:
+        return TEXT_FEATS
+    return []  # neither family present
+
+
+def _subsets_for(task_data) -> dict:
+    """Modality-aware SUBSETS: substitutes IMAGE_FEATS with TEXT_FEATS on Qwen3 dumps."""
+    inp = _input_feats_for(task_data)
+    return {
+        "image_only": inp,
+        "q_only": Q_FEATS,
+        "fp_only": FP_FEATS,
+        "fp_plus_q_no_cross": FP_FEATS + Q_FEATS + inp,
+        "all_features": FP_FEATS + Q_FEATS + CROSS_FEATS + inp,
+    }
 
 
 # ============================================================================
@@ -117,6 +142,12 @@ def parse_args() -> argparse.Namespace:
                         "--also-model-name vit_large_patch16_224.orig_in21k.")
     p.add_argument("--also-batch-size", default=None,
                    help="--batch-size for the second backbone (defaults to --batch-size).")
+    # Optional Qwen3 NLP backbone for tri-panel headline / ablation figures.
+    p.add_argument("--qwen3-model-name", default="Qwen/Qwen3-Embedding-0.6B",
+                   help="HF model id for the NLP backbone (text/.../input_fragility_dumps/).")
+    p.add_argument("--qwen3-batch-size", default="32")
+    p.add_argument("--qwen3-max-length", default="128")
+    p.add_argument("--qwen3-skip-modules", nargs="+", default=["score"])
     return p.parse_args()
 
 
@@ -150,6 +181,44 @@ def _short_model(model_name: str) -> str:
 # ============================================================================
 # parquet loading + curve helpers (cfg-parameterised)
 # ============================================================================
+
+def _load_all_qwen3(args, bits: int) -> dict:
+    """Loader for Qwen3 NLP dumps. Returns the same (df_val, df_test, meta) tuple
+    schema as `_load_all` so the rest of the pipeline does not care about modality.
+    Returns {} if the Qwen3 sweep dump base directory does not exist.
+    """
+    try:
+        from src.text.utils import sanitize_hf_model_name
+    except Exception:
+        # Fallback: lightweight inline sanitizer matching the HF convention.
+        def sanitize_hf_model_name(name: str) -> str:
+            return name.replace("/", "_").replace("-", "_")
+    sanitized = sanitize_hf_model_name(args.qwen3_model_name)
+    skip_tag = "-".join(sorted(args.qwen3_skip_modules)) if args.qwen3_skip_modules else "none"
+    base = (
+        Path(os.environ["CHECKPOINT_BASE_PATH"]) / "text"
+        / "ilharco_automodelforsequenceclassification" / "input_fragility_dumps" / sanitized
+    )
+    if not base.exists():
+        return {}
+    out = {}
+    for ds_dir in sorted(base.iterdir()):
+        if not ds_dir.is_dir():
+            continue
+        d = (
+            ds_dir
+            / f"optim=adamw_lr={args.lr}_wd={args.wd}_ls={args.ls}_mgn={args.max_grad_norm}_bs={args.qwen3_batch_size}_ml={args.qwen3_max_length}"
+            / f"ptq=bits={bits}_gran={args.granularity}_skip={skip_tag}"
+            / f"seed={args.seed}"
+        )
+        if not (d / "predictions_test.parquet").exists():
+            continue
+        df_val = pd.read_parquet(d / "predictions_val.parquet")
+        df_test = pd.read_parquet(d / "predictions_test.parquet")
+        if int(df_val["bad"].sum()) >= 10 and int(df_test["bad"].sum()) >= 10:
+            out[ds_dir.name] = (df_val, df_test)
+    return out
+
 
 def _dump_dir(cfg: SimpleNamespace, dataset: str, bits: int, granularity: str) -> Path:
     base = (
@@ -288,17 +357,21 @@ def fig_headline_pareto(cfg, bits, granularity, model_short, out_path):
     grid = np.linspace(0, 1, 201)
 
     oracle, margin, rand = _baseline_curves(task_data, eligible)
-    curves_q = _loo_curves(task_data, Q_FEATS, eligible)
-    curves_all = _loo_curves(task_data, ALL_FEATS, eligible)
+    curves_q = _loo_curves(task_data, ["q_margin"], eligible)
+    subsets = _subsets_for(task_data)
+    curves_all = _loo_curves(task_data, subsets["all_features"], eligible)
+    curves_input = _loo_curves(task_data, subsets["image_only"], eligible) if subsets["image_only"] else None
 
     fig, ax = plt.subplots(figsize=(5.2, 3.6))
     series = [
         ("Oracle (upper bound)", oracle, "#000000", "-"),
         ("All features (ceiling, both models)", curves_all, "#d62728", "-"),
-        ("Q only (PTQ-first deployable)", curves_q, "#1f77b4", "-"),
+        ("q_margin (deployable)", curves_q, "#1f77b4", "-"),
         ("FP margin only", margin, "#ff7f0e", "--"),
-        ("Random", rand, "#7f7f7f", ":"),
     ]
+    if curves_input is not None:
+        series.append(("Input-domain only", curves_input, SUBSET_COLORS["image_only"], "--"))
+    series.append(("Random", rand, "#7f7f7f", ":"))
     for label, curves, color, ls in series:
         arr = _aggregate_to_grid(curves, grid)
         if arr is None:
@@ -310,12 +383,12 @@ def fig_headline_pareto(cfg, bits, granularity, model_short, out_path):
         ax.plot(grid * 100, mean * 100, color=color, linestyle=ls, label=label)
 
     ax.axhline(90, color="green", linestyle=":", linewidth=0.8, alpha=0.7)
-    ax.text(98, 91.5, "90\\% gap recovered", ha="right", va="bottom",
+    ax.text(98, 91.5, "90% gap recovered", ha="right", va="bottom",
             fontsize=8, color="green")
     ax.set_xlim(0, 100)
     ax.set_ylim(-5, 105)
-    ax.set_xlabel("FP-compute fraction (\\%)")
-    ax.set_ylabel("Mean FP$\\to$PTQ gap recovery (\\%)")
+    ax.set_xlabel("FP-compute fraction (%)")
+    ax.set_ylabel("Mean FP$\\to$PTQ gap recovery (%)")
     ax.set_title(f"LOO cross-task routing at W{bits}-{granularity} ({len(eligible)} {model_short} tasks)")
     ax.legend(loc="lower right", framealpha=0.95)
     ax.grid(True, linestyle=":", linewidth=0.4, alpha=0.7)
@@ -338,7 +411,9 @@ def fig_feature_ablation(cfg, bits, granularity, model_short, out_path):
     grid = np.linspace(0, 1, 201)
 
     fig, ax = plt.subplots(figsize=(5.2, 3.6))
-    for name, cols in SUBSETS.items():
+    for name, cols in _subsets_for(task_data).items():
+        if not cols:
+            continue
         curves = _loo_curves(task_data, cols, eligible)
         arr = _aggregate_to_grid(curves, grid)
         if arr is None:
@@ -360,8 +435,8 @@ def fig_feature_ablation(cfg, bits, granularity, model_short, out_path):
     ax.axhline(90, color="green", linestyle=":", linewidth=0.8, alpha=0.7)
     ax.set_xlim(0, 100)
     ax.set_ylim(-5, 105)
-    ax.set_xlabel("FP-compute fraction (\\%)")
-    ax.set_ylabel("Mean gap recovery (\\%)")
+    ax.set_xlabel("FP-compute fraction (%)")
+    ax.set_ylabel("Mean gap recovery (%)")
     ax.set_title(f"Feature-subset ablation, W{bits}-{granularity} LOO ({len(eligible)} {model_short} tasks)")
     ax.legend(loc="lower right", framealpha=0.95, fontsize=8)
     ax.grid(True, linestyle=":", linewidth=0.4, alpha=0.7)
@@ -391,13 +466,13 @@ def fig_regime_comparison(cfg, primary_bits, secondary_bits, granularity, model_
             ax.set_title(f"W{bits}-{granularity}")
             continue
         oracle, _, rand = _baseline_curves(task_data, eligible)
-        curves_q = _loo_curves(task_data, Q_FEATS, eligible)
+        curves_q = _loo_curves(task_data, ["q_margin"], eligible)
         curves_all = _loo_curves(task_data, ALL_FEATS, eligible)
 
         for label, curves, color, ls in [
             ("Oracle", oracle, "#000000", "-"),
             ("All features (ceiling)", curves_all, "#d62728", "-"),
-            ("Q only (deployable)", curves_q, "#1f77b4", "-"),
+            ("q_margin (deployable)", curves_q, "#1f77b4", "-"),
             ("Random", rand, "#7f7f7f", ":"),
         ]:
             arr = _aggregate_to_grid(curves, grid)
@@ -409,12 +484,12 @@ def fig_regime_comparison(cfg, primary_bits, secondary_bits, granularity, model_
         ax.axhline(90, color="green", linestyle=":", linewidth=0.8, alpha=0.7)
         ax.set_xlim(0, 100)
         ax.set_ylim(-5, 105)
-        ax.set_xlabel("FP-compute fraction (\\%)")
+        ax.set_xlabel("FP-compute fraction (%)")
         title = f"W{bits}-{granularity} {label_suffix}".strip()
         ax.set_title(f"{title} ({len(eligible)} tasks)")
         ax.grid(True, linestyle=":", linewidth=0.4, alpha=0.7)
 
-    axes[0].set_ylabel("Mean gap recovery (\\%)")
+    axes[0].set_ylabel("Mean gap recovery (%)")
     axes[0].legend(loc="lower right", framealpha=0.95, fontsize=8)
 
     fig.suptitle(f"Regime comparison — {model_short}", fontsize=11, y=1.02)
@@ -427,7 +502,7 @@ def fig_regime_comparison(cfg, primary_bits, secondary_bits, granularity, model_
 # Figure 4: per-task LOO vs same-task scatter (Q-only deployable)
 # ============================================================================
 def fig_loo_vs_same_task(cfg, bits, granularity, model_short, out_path):
-    print(f"Generating Figure 4 (LOO vs same-task X@90\\%, Q-only, W{bits}-{granularity}, {cfg.sanitized}) ...")
+    print(f"Generating Figure 4 (LOO vs same-task X@90%, Q-only, W{bits}-{granularity}, {cfg.sanitized}) ...")
     task_data = _load_all(cfg, bits, granularity)
     eligible = list(task_data.keys())
     if not eligible:
@@ -482,9 +557,9 @@ def fig_loo_vs_same_task(cfg, bits, granularity, model_short, out_path):
             label="y = x")
     ax.set_xlim(0, lim)
     ax.set_ylim(0, lim)
-    ax.set_xlabel("Same-task X@90\\% (\\%)")
-    ax.set_ylabel("LOO cross-task X@90\\% (\\%)")
-    ax.set_title(f"Q-only deployable LOO vs same-task X@90\\%\n"
+    ax.set_xlabel("Same-task X@90% (%)")
+    ax.set_ylabel("LOO cross-task X@90% (%)")
+    ax.set_title(f"Q-only deployable LOO vs same-task X@90%\n"
                  f"(W{bits}-{granularity}, {len(common)} {model_short} tasks)")
     ax.grid(True, linestyle=":", linewidth=0.4, alpha=0.7)
     ax.legend(loc="upper left", framealpha=0.95)
@@ -508,7 +583,7 @@ def _annotate_x_at_90(ax, grid, mean, color, y_offset_pp):
     x90 = float(grid[above[0]]) * 100
     ax.scatter([x90], [90], s=22, color=color, zorder=5, edgecolor="white", linewidth=0.6)
     ax.annotate(
-        f"{x90:.1f}\\%",
+        f"{x90:.1f}%",
         xy=(x90, 90),
         xytext=(x90 + 2.0, 90 + y_offset_pp),
         fontsize=7, color=color, ha="left", va="center",
@@ -516,9 +591,9 @@ def _annotate_x_at_90(ax, grid, mean, color, y_offset_pp):
     )
 
 
-def _plot_headline_on_ax(ax, cfg, bits, granularity, model_short, show_legend):
-    """Render the headline Pareto into a pre-existing axis. Returns n_tasks."""
-    task_data = _load_all(cfg, bits, granularity)
+def _plot_headline_on_ax(ax, task_data, bits, granularity, model_short, show_legend):
+    """Render the headline Pareto into a pre-existing axis. Returns n_tasks.
+    `task_data` is a pre-loaded dict from _load_all or _load_all_qwen3."""
     eligible = list(task_data.keys())
     if not eligible:
         ax.text(0.5, 0.5, f"no dumps at W{bits}-{granularity}",
@@ -527,20 +602,24 @@ def _plot_headline_on_ax(ax, cfg, bits, granularity, model_short, show_legend):
         return 0
     grid = np.linspace(0, 1, 201)
     oracle, margin, rand = _baseline_curves(task_data, eligible)
-    curves_q = _loo_curves(task_data, Q_FEATS, eligible)
-    curves_all = _loo_curves(task_data, ALL_FEATS, eligible)
+    curves_q = _loo_curves(task_data, ["q_margin"], eligible)
+    subsets = _subsets_for(task_data)
+    curves_all = _loo_curves(task_data, subsets["all_features"], eligible)
+    curves_input = _loo_curves(task_data, subsets["image_only"], eligible) if subsets["image_only"] else None
     series = [
         ("Oracle", oracle, "#000000", "-"),
         ("All features (ceiling)", curves_all, "#d62728", "-"),
-        ("Q only (deployable)", curves_q, "#1f77b4", "-"),
+        ("q_margin (deployable)", curves_q, "#1f77b4", "-"),
         ("FP margin only", margin, "#ff7f0e", "--"),
-        ("Random", rand, "#7f7f7f", ":"),
     ]
+    if curves_input is not None:
+        series.append(("Input-domain only", curves_input, SUBSET_COLORS["image_only"], "--"))
+    series.append(("Random", rand, "#7f7f7f", ":"))
     # Vertical stagger so X@90 labels don't collide.
     annotate_offsets = {
         "Oracle": -6.0,
         "All features (ceiling)": -3.0,
-        "Q only (deployable)": +3.0,
+        "q_margin (deployable)": +3.0,
         "FP margin only": +6.0,
     }
     for label, curves, color, ls in series:
@@ -557,7 +636,7 @@ def _plot_headline_on_ax(ax, cfg, bits, granularity, model_short, show_legend):
     ax.axhline(90, color="green", linestyle=":", linewidth=0.8, alpha=0.7)
     ax.set_xlim(0, 100)
     ax.set_ylim(-5, 105)
-    ax.set_xlabel("FP-compute fraction (\\%)")
+    ax.set_xlabel("FP-compute fraction (%)")
     ax.set_title(f"{model_short} --- W{bits}-{granularity} ({len(eligible)} tasks)")
     ax.grid(True, linestyle=":", linewidth=0.4, alpha=0.7)
     if show_legend:
@@ -565,8 +644,9 @@ def _plot_headline_on_ax(ax, cfg, bits, granularity, model_short, show_legend):
     return len(eligible)
 
 
-def _plot_feature_ablation_on_ax(ax, cfg, bits, granularity, model_short, show_legend):
-    task_data = _load_all(cfg, bits, granularity)
+def _plot_feature_ablation_on_ax(ax, task_data, bits, granularity, model_short, show_legend):
+    """`task_data` is pre-loaded; use _subsets_for to pick the modality-appropriate
+    input-domain feature list."""
     eligible = list(task_data.keys())
     if not eligible:
         ax.text(0.5, 0.5, f"no dumps at W{bits}-{granularity}",
@@ -577,7 +657,10 @@ def _plot_feature_ablation_on_ax(ax, cfg, bits, granularity, model_short, show_l
     # Annotate only the three subsets the paper actually highlights: q_only,
     # all_features, and oracle. Others would crowd the figure.
     annotate_offsets = {"q_only": +3.0, "all_features": -3.0}
-    for name, cols in SUBSETS.items():
+    subsets = _subsets_for(task_data)
+    for name, cols in subsets.items():
+        if not cols:  # skip image_only on backbones that have no input-domain features
+            continue
         curves = _loo_curves(task_data, cols, eligible)
         arr = _aggregate_to_grid(curves, grid)
         if arr is None:
@@ -602,7 +685,7 @@ def _plot_feature_ablation_on_ax(ax, cfg, bits, granularity, model_short, show_l
     ax.axhline(90, color="green", linestyle=":", linewidth=0.8, alpha=0.7)
     ax.set_xlim(0, 100)
     ax.set_ylim(-5, 105)
-    ax.set_xlabel("FP-compute fraction (\\%)")
+    ax.set_xlabel("FP-compute fraction (%)")
     ax.set_title(f"{model_short} --- W{bits}-{granularity} ({len(eligible)} tasks)")
     ax.grid(True, linestyle=":", linewidth=0.4, alpha=0.7)
     if show_legend:
@@ -610,25 +693,42 @@ def _plot_feature_ablation_on_ax(ax, cfg, bits, granularity, model_short, show_l
     return len(eligible)
 
 
-def fig_headline_pareto_dual(cfg_a, cfg_b, bits, granularity, short_a, short_b, out_path):
-    print(f"Generating dual headline Pareto: {cfg_a.sanitized} vs {cfg_b.sanitized}, "
-          f"W{bits}-{granularity} ...")
-    fig, axes = plt.subplots(1, 2, figsize=(10.4, 3.8), sharey=True)
-    _plot_headline_on_ax(axes[0], cfg_a, bits, granularity, short_a, show_legend=False)
-    _plot_headline_on_ax(axes[1], cfg_b, bits, granularity, short_b, show_legend=True)
-    axes[0].set_ylabel("Mean FP$\\to$PTQ gap recovery (\\%)")
+def fig_headline_pareto_dual(cfg_a, cfg_b, bits, granularity, short_a, short_b, out_path,
+                             qwen3_data=None, qwen3_short=None):
+    """Side-by-side headline Pareto. If `qwen3_data` is provided, emits a 3-panel
+    figure (two ViTs + Qwen3); otherwise 2-panel."""
+    n_panels = 3 if qwen3_data else 2
+    width = 5.2 * n_panels
+    print(f"Generating {n_panels}-panel headline Pareto: {cfg_a.sanitized} vs {cfg_b.sanitized}"
+          f"{' vs Qwen3' if qwen3_data else ''}, W{bits}-{granularity} ...")
+    fig, axes = plt.subplots(1, n_panels, figsize=(width, 3.8), sharey=True)
+    td_a = _load_all(cfg_a, bits, granularity)
+    td_b = _load_all(cfg_b, bits, granularity)
+    _plot_headline_on_ax(axes[0], td_a, bits, granularity, short_a, show_legend=False)
+    _plot_headline_on_ax(axes[1], td_b, bits, granularity, short_b, show_legend=(n_panels == 2))
+    if qwen3_data:
+        _plot_headline_on_ax(axes[2], qwen3_data, bits, granularity, qwen3_short, show_legend=True)
+    axes[0].set_ylabel("Mean FP$\\to$PTQ gap recovery (%)")
     fig.savefig(out_path)
     plt.close(fig)
     print(f"  saved {out_path}")
 
 
-def fig_feature_ablation_dual(cfg_a, cfg_b, bits, granularity, short_a, short_b, out_path):
-    print(f"Generating dual feature ablation: {cfg_a.sanitized} vs {cfg_b.sanitized}, "
-          f"W{bits}-{granularity} ...")
-    fig, axes = plt.subplots(1, 2, figsize=(10.4, 3.8), sharey=True)
-    _plot_feature_ablation_on_ax(axes[0], cfg_a, bits, granularity, short_a, show_legend=False)
-    _plot_feature_ablation_on_ax(axes[1], cfg_b, bits, granularity, short_b, show_legend=True)
-    axes[0].set_ylabel("Mean gap recovery (\\%)")
+def fig_feature_ablation_dual(cfg_a, cfg_b, bits, granularity, short_a, short_b, out_path,
+                              qwen3_data=None, qwen3_short=None):
+    """Side-by-side feature ablation. If `qwen3_data` is provided, emits a 3-panel figure."""
+    n_panels = 3 if qwen3_data else 2
+    width = 5.2 * n_panels
+    print(f"Generating {n_panels}-panel feature ablation: {cfg_a.sanitized} vs {cfg_b.sanitized}"
+          f"{' vs Qwen3' if qwen3_data else ''}, W{bits}-{granularity} ...")
+    fig, axes = plt.subplots(1, n_panels, figsize=(width, 3.8), sharey=True)
+    td_a = _load_all(cfg_a, bits, granularity)
+    td_b = _load_all(cfg_b, bits, granularity)
+    _plot_feature_ablation_on_ax(axes[0], td_a, bits, granularity, short_a, show_legend=False)
+    _plot_feature_ablation_on_ax(axes[1], td_b, bits, granularity, short_b, show_legend=(n_panels == 2))
+    if qwen3_data:
+        _plot_feature_ablation_on_ax(axes[2], qwen3_data, bits, granularity, qwen3_short, show_legend=True)
+    axes[0].set_ylabel("Mean gap recovery (%)")
     fig.savefig(out_path)
     plt.close(fig)
     print(f"  saved {out_path}")
@@ -656,12 +756,12 @@ def fig_regime_comparison_dual(cfg_a, cfg_b, primary_bits, secondary_bits, granu
                 ax.set_title(f"{short} --- W{bits}-{granularity}")
                 continue
             oracle, _, rand = _baseline_curves(task_data, eligible)
-            curves_q = _loo_curves(task_data, Q_FEATS, eligible)
+            curves_q = _loo_curves(task_data, ["q_margin"], eligible)
             curves_all = _loo_curves(task_data, ALL_FEATS, eligible)
             for label, curves, color, ls in [
                 ("Oracle", oracle, "#000000", "-"),
                 ("All features (ceiling)", curves_all, "#d62728", "-"),
-                ("Q only (deployable)", curves_q, "#1f77b4", "-"),
+                ("q_margin (deployable)", curves_q, "#1f77b4", "-"),
                 ("Random", rand, "#7f7f7f", ":"),
             ]:
                 arr = _aggregate_to_grid(curves, grid)
@@ -675,9 +775,9 @@ def fig_regime_comparison_dual(cfg_a, cfg_b, primary_bits, secondary_bits, granu
             ax.set_title(f"{short} --- W{bits}-{granularity} {suffix} ({len(eligible)} tasks)".strip())
             ax.grid(True, linestyle=":", linewidth=0.4, alpha=0.7)
             if r == 1:
-                ax.set_xlabel("FP-compute fraction (\\%)")
+                ax.set_xlabel("FP-compute fraction (%)")
             if c == 0:
-                ax.set_ylabel("Mean gap recovery (\\%)")
+                ax.set_ylabel("Mean gap recovery (%)")
     axes[0, 1].legend(loc="lower right", framealpha=0.95, fontsize=8)
     fig.tight_layout()
     fig.savefig(out_path)
@@ -737,7 +837,7 @@ def _scatter_loo_vs_same_on_ax(ax, cfg, bits, granularity, model_short):
     ax.plot([0, lim], [0, lim], color="grey", linestyle="--", linewidth=0.8)
     ax.set_xlim(0, lim)
     ax.set_ylim(0, lim)
-    ax.set_xlabel("Same-task X@90\\% (\\%)")
+    ax.set_xlabel("Same-task X@90% (%)")
     ax.set_title(f"{model_short} --- W{bits}-{granularity} ({len(common)} tasks)")
     ax.grid(True, linestyle=":", linewidth=0.4, alpha=0.7)
 
@@ -747,7 +847,7 @@ def fig_loo_vs_same_task_dual(cfg_a, cfg_b, bits, granularity, short_a, short_b,
     fig, axes = plt.subplots(1, 2, figsize=(10.0, 4.5))
     _scatter_loo_vs_same_on_ax(axes[0], cfg_a, bits, granularity, short_a)
     _scatter_loo_vs_same_on_ax(axes[1], cfg_b, bits, granularity, short_b)
-    axes[0].set_ylabel("LOO cross-task X@90\\% (\\%)")
+    axes[0].set_ylabel("LOO cross-task X@90% (%)")
     fig.savefig(out_path)
     plt.close(fig)
     print(f"  saved {out_path}")
@@ -801,13 +901,20 @@ def main():
             f"{cfg_a.sanitized}_vs_{cfg_b.sanitized}"
             f"_W{args.primary_bits}vsW{args.secondary_bits}_{args.granularity}"
         )
+        # Optionally load Qwen3 dumps for tri-panel headline / ablation figures.
+        qwen3_data = _load_all_qwen3(args, args.primary_bits)
+        qwen3_short = "Qwen3-Emb-0.6B" if qwen3_data else None
+        if qwen3_data:
+            print(f"  including Qwen3 panel ({len(qwen3_data)} tasks loaded)")
         fig_headline_pareto_dual(
             cfg_a, cfg_b, args.primary_bits, args.granularity, short_a, short_b,
             FIG_DIR / f"fig_headline_pareto_dual_{pair_tag}.pdf",
+            qwen3_data=qwen3_data, qwen3_short=qwen3_short,
         )
         fig_feature_ablation_dual(
             cfg_a, cfg_b, args.primary_bits, args.granularity, short_a, short_b,
             FIG_DIR / f"fig_feature_ablation_dual_{pair_tag}.pdf",
+            qwen3_data=qwen3_data, qwen3_short=qwen3_short,
         )
         fig_regime_comparison_dual(
             cfg_a, cfg_b, args.primary_bits, args.secondary_bits, args.granularity,

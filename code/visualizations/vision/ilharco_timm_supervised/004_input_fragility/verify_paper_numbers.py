@@ -75,9 +75,14 @@ CROSS_FEATS = ["fp_logit_at_q_pred", "q_logit_at_fp_pred", "fp_softmax_at_q_pred
 ALL_FEATS = FP_FEATS + Q_FEATS + CROSS_FEATS + IMAGE_FEATS
 SUBSETS = {
     "image_only": IMAGE_FEATS,
-    # MSP baseline (Hendrycks & Gimpel 2017 / Geifman & El-Yaniv 2017):
-    # single-feature reference using the quantized model's top-1 softmax.
-    "msp_only": ["q_softmax_top1"],
+    # Univariate Q-side ablations (one feature each).
+    "msp_only":         ["q_softmax_top1"],
+    "q_margin_only":    ["q_margin"],
+    "q_entropy_only":   ["q_entropy"],
+    # Pairwise Q-side ablations (drop one of the three features).
+    "q_margin_msp":     ["q_margin", "q_softmax_top1"],
+    "q_margin_entropy": ["q_margin", "q_entropy"],
+    "q_msp_entropy":    ["q_softmax_top1", "q_entropy"],
     "q_only": Q_FEATS,
     "q_plus_image": Q_FEATS + IMAGE_FEATS,
     "fp_only": FP_FEATS,

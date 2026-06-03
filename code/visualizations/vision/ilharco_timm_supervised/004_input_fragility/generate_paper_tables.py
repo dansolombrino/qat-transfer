@@ -60,10 +60,17 @@ ALL_FEATS = FP_FEATS + Q_FEATS + CROSS_FEATS + IMAGE_FEATS
 
 SUBSETS = {
     "image_only": IMAGE_FEATS,
-    # MSP (max-softmax-prob) baseline of Hendrycks & Gimpel 2017 / Geifman &
-    # El-Yaniv 2017: threshold the quantized model's top-1 softmax probability.
-    # One-feature special case of `q_only`; we report it as a reference point.
-    "msp_only": ["q_softmax_top1"],
+    # Univariate Q-side ablations: each isolates one Q-side scalar.
+    # `msp_only` is the canonical max-softmax-prob baseline (Hendrycks & Gimpel 2017,
+    # Geifman & El-Yaniv 2017). `q_margin_only` and `q_entropy_only` test whether
+    # any single Q-side feature already matches the 3-feature `q_only` predictor.
+    "msp_only":         ["q_softmax_top1"],
+    "q_margin_only":    ["q_margin"],
+    "q_entropy_only":   ["q_entropy"],
+    # Pairwise Q-side ablations: each drops one of the three features.
+    "q_margin_msp":     ["q_margin", "q_softmax_top1"],
+    "q_margin_entropy": ["q_margin", "q_entropy"],
+    "q_msp_entropy":    ["q_softmax_top1", "q_entropy"],
     "q_only": Q_FEATS,
     "fp_only": FP_FEATS,
     "fp_plus_q_no_cross": FP_FEATS + Q_FEATS + IMAGE_FEATS,
@@ -73,6 +80,11 @@ SUBSETS = {
 SUBSET_HEADERS = {
     "image_only":         "image",
     "msp_only":           "MSP",
+    "q_margin_only":      "margin",
+    "q_entropy_only":     "entropy",
+    "q_margin_msp":       "margin+MSP",
+    "q_margin_entropy":   "margin+ent",
+    "q_msp_entropy":      "MSP+ent",
     "q_only":             "Q-only",
     "fp_only":            "FP-only",
     "fp_plus_q_no_cross": "FP+Q",
@@ -335,21 +347,23 @@ def emit_task_stats_table(cfg, args):
         # W4 stats
         if ds in primary:
             dv, dt, _ = primary[ds]
-            rec["n_val"]      = len(dv)
-            rec["n_test"]     = len(dt)
-            rec["n_bad_w4"]   = int(dt["bad"].sum())
-            rec["fp_w4"]      = float(dt["fp_correct"].mean())
-            rec["q_w4"]       = float(dt["q_correct"].mean())
-            rec["eligible_w4"] = (int(dv["bad"].sum()) >= args.min_bad_val
-                                  and rec["n_bad_w4"] >= args.min_bad_test)
+            rec["n_val"]        = len(dv)
+            rec["n_test"]       = len(dt)
+            rec["n_bad_val_w4"] = int(dv["bad"].sum())
+            rec["n_bad_w4"]     = int(dt["bad"].sum())
+            rec["fp_w4"]        = float(dt["fp_correct"].mean())
+            rec["q_w4"]         = float(dt["q_correct"].mean())
+            rec["eligible_w4"]  = (rec["n_bad_val_w4"] >= args.min_bad_val
+                                   and rec["n_bad_w4"] >= args.min_bad_test)
         # W3 stats
         if ds in secondary:
             dv2, dt2, _ = secondary[ds]
-            rec["n_bad_w3"]   = int(dt2["bad"].sum())
-            rec["fp_w3"]      = float(dt2["fp_correct"].mean())
-            rec["q_w3"]       = float(dt2["q_correct"].mean())
-            rec["eligible_w3"] = (int(dv2["bad"].sum()) >= args.min_bad_val
-                                  and rec["n_bad_w3"] >= args.min_bad_test)
+            rec["n_bad_val_w3"] = int(dv2["bad"].sum())
+            rec["n_bad_w3"]     = int(dt2["bad"].sum())
+            rec["fp_w3"]        = float(dt2["fp_correct"].mean())
+            rec["q_w3"]         = float(dt2["q_correct"].mean())
+            rec["eligible_w3"]  = (rec["n_bad_val_w3"] >= args.min_bad_val
+                                   and rec["n_bad_w3"] >= args.min_bad_test)
         rows.append(rec)
 
     short = _short_model(cfg.model_name)
@@ -363,22 +377,23 @@ def emit_task_stats_table(cfg, args):
         f"\\caption{{Per-task dataset statistics and FP/PTQ test accuracy "
         f"\\textbf{{for {short}}} at "
         f"W{args.bits_primary}-{args.granularity} and W{args.bits_secondary}-{args.granularity}. "
-        "$n_{\\text{bad}}$ is the count of test inputs that FP gets right and PTQ flips. "
+        "$n_{\\text{bad}}^{\\text{val}}$ and $n_{\\text{bad}}^{\\text{test}}$ count val and test inputs that FP gets right and PTQ flips. "
         "$\\Delta$ is the FP$\\to$PTQ test-accuracy gap (positive $=$ PTQ drop). "
         "Tasks marked $\\dagger$ are excluded from the analysis at that regime because "
-        f"$n_{{\\text{{bad}}}} < {args.min_bad_test}$ (PTQ barely degrades them).}}"
+        f"$n_{{\\text{{bad}}}}^{{\\text{{val}}}} < {args.min_bad_val}$ or $n_{{\\text{{bad}}}}^{{\\text{{test}}}} < {args.min_bad_test}$ "
+        "(PTQ barely degrades them); the dagger marks the row at the regime where eligibility fails.}}"
     )
     lines.append(f"\\label{{tab:task_stats_{label_slug}}}")
     lines.append("\\small")
     lines.append("\\setlength{\\tabcolsep}{4pt}")
-    lines.append("\\begin{tabular}{lrrrrrrrrrr}")
+    lines.append("\\begin{tabular}{lrrrrrrrrrrrr}")
     lines.append("\\toprule")
-    lines.append(f"& & & \\multicolumn{{4}}{{c}}{{W{args.bits_primary}-{args.granularity}}} "
-                 f"& \\multicolumn{{4}}{{c}}{{W{args.bits_secondary}-{args.granularity}}} \\\\")
-    lines.append("\\cmidrule(lr){4-7} \\cmidrule(lr){8-11}")
+    lines.append(f"& & & \\multicolumn{{5}}{{c}}{{W{args.bits_primary}-{args.granularity}}} "
+                 f"& \\multicolumn{{5}}{{c}}{{W{args.bits_secondary}-{args.granularity}}} \\\\")
+    lines.append("\\cmidrule(lr){4-8} \\cmidrule(lr){9-13}")
     lines.append("Task & $n_{\\text{val}}$ & $n_{\\text{test}}$ "
-                 "& $n_{\\text{bad}}$ & FP & PTQ & $\\Delta$ "
-                 "& $n_{\\text{bad}}$ & FP & PTQ & $\\Delta$ \\\\")
+                 "& $n_{\\text{bad}}^{\\text{val}}$ & $n_{\\text{bad}}^{\\text{test}}$ & FP & PTQ & $\\Delta$ "
+                 "& $n_{\\text{bad}}^{\\text{val}}$ & $n_{\\text{bad}}^{\\text{test}}$ & FP & PTQ & $\\Delta$ \\\\")
     lines.append("\\midrule")
     for r in rows:
         task = r["task"]
@@ -386,21 +401,25 @@ def emit_task_stats_table(cfg, args):
         nt = _fmt_count(r.get("n_test"))
         # W4 group
         if "n_bad_w4" in r:
-            nb4 = f"{r['n_bad_w4']:,}" + ("" if r["eligible_w4"] else "$^{\\dagger}$")
+            mark_w4 = "" if r["eligible_w4"] else "$^{\\dagger}$"
+            nbv4 = f"{r['n_bad_val_w4']:,}"
+            nbt4 = f"{r['n_bad_w4']:,}{mark_w4}"
             fp4 = _fmt_pct(r["fp_w4"], 1)
             q4  = _fmt_pct(r["q_w4"], 1)
             d4  = f"{(r['fp_w4'] - r['q_w4']) * 100:+.2f}"
         else:
-            nb4, fp4, q4, d4 = "---", "---", "---", "---"
+            nbv4, nbt4, fp4, q4, d4 = "---", "---", "---", "---", "---"
         # W3 group
         if "n_bad_w3" in r:
-            nb3 = f"{r['n_bad_w3']:,}" + ("" if r["eligible_w3"] else "$^{\\dagger}$")
+            mark_w3 = "" if r["eligible_w3"] else "$^{\\dagger}$"
+            nbv3 = f"{r['n_bad_val_w3']:,}"
+            nbt3 = f"{r['n_bad_w3']:,}{mark_w3}"
             fp3 = _fmt_pct(r["fp_w3"], 1)
             q3  = _fmt_pct(r["q_w3"], 1)
             d3  = f"{(r['fp_w3'] - r['q_w3']) * 100:+.2f}"
         else:
-            nb3, fp3, q3, d3 = "---", "---", "---", "---"
-        lines.append(f"{task} & {nv} & {nt} & {nb4} & {fp4} & {q4} & {d4} & {nb3} & {fp3} & {q3} & {d3} \\\\")
+            nbv3, nbt3, fp3, q3, d3 = "---", "---", "---", "---", "---"
+        lines.append(f"{task} & {nv} & {nt} & {nbv4} & {nbt4} & {fp4} & {q4} & {d4} & {nbv3} & {nbt3} & {fp3} & {q3} & {d3} \\\\")
     lines.append("\\bottomrule")
     lines.append("\\end{tabular}")
     lines.append("\\end{table}")
@@ -572,13 +591,18 @@ def emit_dual_ablation_table(cfg_a, cfg_b, args, short_a, short_b):
     deployment_labels = {
         "image_only":         "no model",
         "msp_only":           "MSP baseline",
-        "q_only":             "PTQ-first deployable",
+        "q_margin_only":      "margin (proposed)",
+        "q_entropy_only":     "entropy alone",
+        "q_margin_msp":       "margin + MSP",
+        "q_margin_entropy":   "margin + entropy",
+        "q_msp_entropy":      "MSP + entropy",
+        "q_only":             "all 3 Q-side (LogReg)",
         "fp_only":            "FP-side only",
         "fp_plus_q_no_cross": "both models",
         "all_features":       "ceiling (both+cross)",
     }
     for subset_name in SUBSETS:
-        label = deployment_labels[subset_name]
+        label = deployment_labels.get(subset_name, subset_name)
         escaped = subset_name.replace("_", "\\_")
         row = [
             f"\\texttt{{{escaped}}}",
@@ -736,13 +760,18 @@ def emit_dual_auroc_table(cfg_a, cfg_b, args, short_a, short_b):
     deployment_labels = {
         "image_only":         "no model",
         "msp_only":           "MSP baseline",
-        "q_only":             "PTQ-first deployable",
+        "q_margin_only":      "margin (proposed)",
+        "q_entropy_only":     "entropy alone",
+        "q_margin_msp":       "margin + MSP",
+        "q_margin_entropy":   "margin + entropy",
+        "q_msp_entropy":      "MSP + entropy",
+        "q_only":             "all 3 Q-side (LogReg)",
         "fp_only":            "FP-side only",
         "fp_plus_q_no_cross": "both models",
         "all_features":       "ceiling (both+cross)",
     }
     for subset_name in SUBSETS:
-        label = deployment_labels[subset_name]
+        label = deployment_labels.get(subset_name, subset_name)
         escaped = subset_name.replace("_", "\\_")
         row = [
             f"\\texttt{{{escaped}}}", label,
@@ -919,7 +948,7 @@ def emit_dual_threshold_table(cfg_a, cfg_b, args, short_a, short_b,
     lines.append("\\begin{table}[t]")
     lines.append("\\centering")
     qwen3_phrase = (
-        " The Qwen3-Emb-0.6B column extends the comparison to a decoder-only NLP backbone (see \\S\\ref{sec:qwen3})."
+        " The Qwen3-Emb-0.6B column extends the comparison to a decoder-only NLP backbone."
         if qwen3_res is not None else ""
     )
     lines.append(

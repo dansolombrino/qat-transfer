@@ -58,9 +58,14 @@ ALL_FEATURE_NAMES = Q_FEATS + FP_FEATS + CROSS_FEATS + TXT_FEATS
 
 SUBSETS = {
     "text_only":          TXT_FEATS,
-    # MSP baseline (Hendrycks & Gimpel 2017 / Geifman & El-Yaniv 2017):
-    # single-feature reference using the quantized model's top-1 softmax.
+    # Univariate Q-side ablations (one feature each).
     "msp_only":           ["q_softmax_top1"],
+    "q_margin_only":      ["q_margin"],
+    "q_entropy_only":     ["q_entropy"],
+    # Pairwise Q-side ablations (drop one of the three features).
+    "q_margin_msp":       ["q_margin", "q_softmax_top1"],
+    "q_margin_entropy":   ["q_margin", "q_entropy"],
+    "q_msp_entropy":      ["q_softmax_top1", "q_entropy"],
     "q_only":             Q_FEATS,
     "q_plus_text":        Q_FEATS + TXT_FEATS,
     "fp_only":            FP_FEATS,
@@ -442,17 +447,30 @@ def main():
             out.append(f"| `{s}` | {r['frac_mean']:.1f} ± {r['frac_std']:.1f} | {r['rec_mean']:.1f} ± {r['rec_std']:.1f} |")
     out.append("")
 
-    print(f"W{args.bits_secondary} oracle / baselines (regime comparison) ...")
-    out.append(f"## 6. W{args.bits_secondary} regime — oracle and random ceilings")
-    out.append("| baseline | mean X@90 | std |")
-    out.append("|---|---|---|")
+    print(f"W{args.bits_secondary} LOO X@90 per subset + oracle/random (regime comparison) ...")
+    out.append(f"## 6. W{args.bits_secondary} LOO X@90 per feature subset and baselines (Qwen3)")
+    out.append("| Subset | mean X@90 | std X@90 | mean AUROC | std AUROC |")
+    out.append("|---|---|---|---|---|")
+    for sname, cols in SUBSETS.items():
+        r = _loo(td_s, cols, el_s)
+        if not r:
+            out.append(f"| `{sname}` | — | — | — | — |")
+            continue
+        x = [v[0] for v in r.values() if not np.isnan(v[0])]
+        a = [v[1] for v in r.values() if not np.isnan(v[1])]
+        out.append(
+            f"| `{sname}` "
+            f"| {np.mean(x)*100:.1f}% | {np.std(x)*100:.1f} "
+            f"| {np.mean(a):.3f} | {np.std(a):.3f} |"
+            if x and a else f"| `{sname}` | — | — | — | — |"
+        )
     for kind in ("oracle", "random"):
         b = _baseline_x90(td_s, el_s, kind)
         v = [vv for vv in b.values() if not np.isnan(vv)]
         if v:
-            out.append(f"| {kind} | {np.mean(v)*100:.1f}% | {np.std(v)*100:.1f} |")
+            out.append(f"| {kind} | {np.mean(v)*100:.1f}% | {np.std(v)*100:.1f} | — | — |")
         else:
-            out.append(f"| {kind} | — | — |")
+            out.append(f"| {kind} | — | — | — | — |")
     out.append("")
 
     out_path = Path(args.out_path) if args.out_path else (

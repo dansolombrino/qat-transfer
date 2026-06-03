@@ -222,9 +222,33 @@ def main():
             eligible.append(ds)
     print(f"{len(eligible)} eligible tasks: {eligible}\n")
 
-    strategies = ["batch", "natural", "val_pct", "source_pct", "val_labeled"]
+    # Sliding-window streaming strategy: route input if current score exceeds the
+    # rolling target_percentile of the last `W` scores seen. Warm-up (buffer not
+    # yet full) routes nothing. This is a label-free, calibration-free recipe
+    # — no per-task val set required at deployment.
+    SLIDING_WINDOWS = [100, 500, 2000]
+    sliding_strategies = [f"sliding_W{w}" for w in SLIDING_WINDOWS]
+    strategies = ["batch", "natural", "val_pct", "source_pct", "val_labeled"] + sliding_strategies
     results = {s: {"frac": [], "rec": []} for s in strategies}
     per_task_rows = []
+
+    def _sliding_window_route(test_scores, fp_correct, q_correct, window_size, percentile):
+        n = len(test_scores)
+        fp_arr = np.asarray(fp_correct, dtype=bool)
+        q_arr = np.asarray(q_correct, dtype=bool)
+        routed = np.zeros(n, dtype=bool)
+        buf = []
+        for i in range(n):
+            s = float(test_scores[i])
+            if len(buf) >= window_size:
+                tau = float(np.percentile(buf, percentile))
+                routed[i] = s > tau
+            buf.append(s)
+            if len(buf) > window_size:
+                buf.pop(0)
+        frac = float(routed.mean())
+        correct = float(np.where(routed, fp_arr, q_arr).mean())
+        return frac, correct
 
     for target in eligible:
         df_val_tgt, df_test_tgt = task_data[target]
@@ -296,6 +320,19 @@ def main():
         results["val_labeled"]["frac"].append(f_lab)
         results["val_labeled"]["rec"].append(rec_lab)
 
+        # ----- sliding_W*: per-input streaming, rolling percentile -----
+        sliding_per_task = {}
+        for w in SLIDING_WINDOWS:
+            f_sw, a_sw = _sliding_window_route(
+                test_scores, fp_test_correct, q_test_correct,
+                window_size=w, percentile=args.target_percentile,
+            )
+            rec_sw = (a_sw - q_test_acc) / gap if gap > 1e-9 else float("nan")
+            results[f"sliding_W{w}"]["frac"].append(f_sw)
+            results[f"sliding_W{w}"]["rec"].append(rec_sw)
+            sliding_per_task[f"sliding_W{w}_frac"] = f_sw
+            sliding_per_task[f"sliding_W{w}_rec"] = rec_sw
+
         per_task_rows.append({
             "task": target,
             "gap": gap,
@@ -304,6 +341,7 @@ def main():
             "val_pct_frac": f_vp, "val_pct_rec": rec_vp,
             "source_pct_frac": f_sp, "source_pct_rec": rec_sp,
             "val_labeled_frac": f_lab, "val_labeled_rec": rec_lab,
+            **sliding_per_task,
         })
 
     # Markdown report
@@ -321,6 +359,8 @@ def main():
         "source_pct":  "source pool P(bad) (one global τ)",
         "val_labeled": "target val labels + P(bad) (labeled calibration)",
     }
+    for w in SLIDING_WINDOWS:
+        desc[f"sliding_W{w}"] = f"streaming, W={w} rolling buffer (calibration-free)"
     for s in strategies:
         fr = np.array(results[s]["frac"], dtype=float)
         rc = np.array(results[s]["rec"], dtype=float)
@@ -351,6 +391,10 @@ def main():
     fig = go.Figure()
     colors = {"batch": "#000000", "natural": "#9467bd", "val_pct": "#1f77b4",
               "source_pct": "#ff7f0e", "val_labeled": "#2ca02c"}
+    for w_idx, w in enumerate(SLIDING_WINDOWS):
+        # browns / olives for sliding-window variants
+        sliding_colors = ["#8c564b", "#bcbd22", "#17becf"]
+        colors[f"sliding_W{w}"] = sliding_colors[w_idx % len(sliding_colors)]
     for s in strategies:
         fr = np.array(results[s]["frac"], dtype=float) * 100
         rc = np.array(results[s]["rec"], dtype=float) * 100
