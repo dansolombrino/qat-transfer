@@ -420,9 +420,9 @@ def _check_table_diffs(args):
     tmp = Path("/tmp/qat_verify_tables")
     tmp.mkdir(parents=True, exist_ok=True)
     tables = [
-        f"appendix_task_stats_{sanitize_timm_model_name(args.model_name)}.tex",
+        f"appendix_task_stats_{sanitize_timm_model_name(args.model_name)}_{args.granularity}.tex",
         f"appendix_pareto_ablation_{sanitize_timm_model_name(args.model_name)}_bits{args.bits_primary}_{args.granularity}.tex",
-        f"appendix_task_stats_{sanitize_timm_model_name(args.also_model_name)}.tex",
+        f"appendix_task_stats_{sanitize_timm_model_name(args.also_model_name)}_{args.granularity}.tex",
         f"appendix_pareto_ablation_{sanitize_timm_model_name(args.also_model_name)}_bits{args.bits_primary}_{args.granularity}.tex",
         f"ablation_dual_{sanitize_timm_model_name(args.model_name)}_vs_{sanitize_timm_model_name(args.also_model_name)}_W{args.bits_primary}vsW{args.bits_secondary}_{args.granularity}.tex",
     ]

@@ -59,6 +59,13 @@ plt.rcParams.update({
 FIG_DIR = _PROJECT_ROOT / "paper" / "figs"
 
 
+def _save_fig(fig, out_path):
+    """Write the figure to `out_path` (typically .pdf) and a sibling .png."""
+    out_path = Path(out_path)
+    fig.savefig(out_path)
+    fig.savefig(out_path.with_suffix(".png"), dpi=200)
+
+
 # Feature sets — must match Script E.
 IMAGE_FEATS = ["img_brightness", "img_contrast", "img_edge_density", "img_high_freq_ratio"]
 TEXT_FEATS  = ["txt_n_tokens", "txt_n_unique_tokens", "txt_type_token_ratio", "txt_punct_ratio"]
@@ -84,7 +91,7 @@ SUBSET_COLORS = {
 }
 SUBSET_LABELS = {
     "image_only": "input-domain only",
-    "q_only": "Q only (deployable)",
+    "q_only": "Q-only LogReg",
     "fp_only": "FP only",
     "fp_plus_q_no_cross": "FP+Q, no cross",
     "all_features": "all features (ceiling)",
@@ -364,36 +371,37 @@ def fig_headline_pareto(cfg, bits, granularity, model_short, out_path):
 
     fig, ax = plt.subplots(figsize=(5.2, 3.6))
     series = [
-        ("Oracle (upper bound)", oracle, "#000000", "-"),
-        ("All features (ceiling, both models)", curves_all, "#d62728", "-"),
+        ("oracle", oracle, "#000000", "-"),
+        ("all features (ceiling)", curves_all, "#d62728", "-"),
         ("q_margin (deployable)", curves_q, "#1f77b4", "-"),
-        ("FP margin only", margin, "#ff7f0e", "--"),
+        ("FP margin (no LogReg)", margin, "#ff7f0e", "--"),
     ]
     if curves_input is not None:
-        series.append(("Input-domain only", curves_input, SUBSET_COLORS["image_only"], "--"))
-    series.append(("Random", rand, "#7f7f7f", ":"))
+        series.append(("input-domain only", curves_input, SUBSET_COLORS["image_only"], "--"))
+    series.append(("random", rand, "#7f7f7f", ":"))
+    annotate_labels = {"q_margin (deployable)", "FP margin (no LogReg)",
+                       "input-domain only", "random"}
     for label, curves, color, ls in series:
-        arr = _aggregate_to_grid(curves, grid)
-        if arr is None:
+        if not curves:
             continue
-        mean = arr.mean(axis=0)
-        lo = np.percentile(arr, 25, axis=0)
-        hi = np.percentile(arr, 75, axis=0)
-        ax.fill_between(grid * 100, lo * 100, hi * 100, color=color, alpha=0.10, linewidth=0)
-        ax.plot(grid * 100, mean * 100, color=color, linestyle=ls, label=label)
+        xs, ys = _headline_curve(curves)
+        if xs.size:
+            ax.plot(xs, ys, color=color, linestyle=ls, label=label)
+        if label in annotate_labels:
+            _annotate_mean_per_task_x90(ax, curves, color, 0.0)
 
     ax.axhline(90, color="green", linestyle=":", linewidth=0.8, alpha=0.7)
     ax.text(98, 91.5, "90% gap recovered", ha="right", va="bottom",
             fontsize=8, color="green")
     ax.set_xlim(0, 100)
     ax.set_ylim(-5, 105)
-    ax.set_xlabel("FP-compute fraction (%)")
-    ax.set_ylabel("Mean FP$\\to$PTQ gap recovery (%)")
+    ax.set_xlabel(r"Average FP-compute fraction $\mathrm{mean}_t[X_{@r}]$ (%)")
+    ax.set_ylabel("Gap recovery threshold r (%)")
     ax.set_title(f"LOO cross-task routing at W{bits}-{granularity} ({len(eligible)} {model_short} tasks)")
     ax.legend(loc="lower right", framealpha=0.95)
     ax.grid(True, linestyle=":", linewidth=0.4, alpha=0.7)
 
-    fig.savefig(out_path)
+    _save_fig(fig, out_path)
     plt.close(fig)
     print(f"  saved {out_path}")
 
@@ -408,40 +416,36 @@ def fig_feature_ablation(cfg, bits, granularity, model_short, out_path):
     if not eligible:
         print("  no eligible tasks; skipping.")
         return
-    grid = np.linspace(0, 1, 201)
-
     fig, ax = plt.subplots(figsize=(5.2, 3.6))
     for name, cols in _subsets_for(task_data).items():
         if not cols:
             continue
         curves = _loo_curves(task_data, cols, eligible)
-        arr = _aggregate_to_grid(curves, grid)
-        if arr is None:
+        if not curves:
             continue
-        mean = arr.mean(axis=0)
-        ax.plot(grid * 100, mean * 100,
-                color=SUBSET_COLORS[name], label=SUBSET_LABELS[name])
+        xs, ys = _headline_curve(curves)
+        if xs.size:
+            ax.plot(xs, ys, color=SUBSET_COLORS[name], label=SUBSET_LABELS[name])
 
     oracle, _, rand = _baseline_curves(task_data, eligible)
     for name, curves, color, ls in [("oracle", oracle, "#000000", "-"),
                                      ("random", rand, "#bbbbbb", ":")]:
-        arr = _aggregate_to_grid(curves, grid)
-        if arr is None:
+        if not curves:
             continue
-        ax.plot(grid * 100, arr.mean(axis=0) * 100,
-                color=color, linestyle=ls, linewidth=1.2,
-                label="oracle" if name == "oracle" else "random")
+        xs, ys = _headline_curve(curves)
+        if xs.size:
+            ax.plot(xs, ys, color=color, linestyle=ls, linewidth=1.2, label=name)
 
     ax.axhline(90, color="green", linestyle=":", linewidth=0.8, alpha=0.7)
     ax.set_xlim(0, 100)
     ax.set_ylim(-5, 105)
-    ax.set_xlabel("FP-compute fraction (%)")
-    ax.set_ylabel("Mean gap recovery (%)")
+    ax.set_xlabel(r"Average FP-compute fraction $\mathrm{mean}_t[X_{@r}]$ (%)")
+    ax.set_ylabel("Gap recovery threshold r (%)")
     ax.set_title(f"Feature-subset ablation, W{bits}-{granularity} LOO ({len(eligible)} {model_short} tasks)")
     ax.legend(loc="lower right", framealpha=0.95, fontsize=8)
     ax.grid(True, linestyle=":", linewidth=0.4, alpha=0.7)
 
-    fig.savefig(out_path)
+    _save_fig(fig, out_path)
     plt.close(fig)
     print(f"  saved {out_path}")
 
@@ -470,30 +474,30 @@ def fig_regime_comparison(cfg, primary_bits, secondary_bits, granularity, model_
         curves_all = _loo_curves(task_data, ALL_FEATS, eligible)
 
         for label, curves, color, ls in [
-            ("Oracle", oracle, "#000000", "-"),
-            ("All features (ceiling)", curves_all, "#d62728", "-"),
+            ("oracle", oracle, "#000000", "-"),
+            ("all features (ceiling)", curves_all, "#d62728", "-"),
             ("q_margin (deployable)", curves_q, "#1f77b4", "-"),
-            ("Random", rand, "#7f7f7f", ":"),
+            ("random", rand, "#7f7f7f", ":"),
         ]:
-            arr = _aggregate_to_grid(curves, grid)
-            if arr is None:
+            if not curves:
                 continue
-            ax.plot(grid * 100, arr.mean(axis=0) * 100,
-                    color=color, linestyle=ls, label=label)
+            xs, ys = _headline_curve(curves)
+            if xs.size:
+                ax.plot(xs, ys, color=color, linestyle=ls, label=label)
 
         ax.axhline(90, color="green", linestyle=":", linewidth=0.8, alpha=0.7)
         ax.set_xlim(0, 100)
         ax.set_ylim(-5, 105)
-        ax.set_xlabel("FP-compute fraction (%)")
+        ax.set_xlabel(r"Average FP-compute fraction $\mathrm{mean}_t[X_{@r}]$ (%)")
         title = f"W{bits}-{granularity} {label_suffix}".strip()
         ax.set_title(f"{title} ({len(eligible)} tasks)")
         ax.grid(True, linestyle=":", linewidth=0.4, alpha=0.7)
 
-    axes[0].set_ylabel("Mean gap recovery (%)")
+    axes[0].set_ylabel("Gap recovery threshold r (%)")
     axes[0].legend(loc="lower right", framealpha=0.95, fontsize=8)
 
     fig.suptitle(f"Regime comparison — {model_short}", fontsize=11, y=1.02)
-    fig.savefig(out_path)
+    _save_fig(fig, out_path)
     plt.close(fig)
     print(f"  saved {out_path}")
 
@@ -564,7 +568,7 @@ def fig_loo_vs_same_task(cfg, bits, granularity, model_short, out_path):
     ax.grid(True, linestyle=":", linewidth=0.4, alpha=0.7)
     ax.legend(loc="upper left", framealpha=0.95)
 
-    fig.savefig(out_path)
+    _save_fig(fig, out_path)
     plt.close(fig)
     print(f"  saved {out_path}")
 
@@ -573,20 +577,61 @@ def fig_loo_vs_same_task(cfg, bits, granularity, model_short, out_path):
 # Dual-backbone variants: two backbones side-by-side in one figure.
 # ============================================================================
 
-def _annotate_x_at_90(ax, grid, mean, color, y_offset_pp):
-    """Mark the X@90 point on a Pareto curve: scatter dot at (X@90, 90) plus
-    a small text label showing the X@90 value. Stagger labels with y_offset_pp
-    so multiple curves don't overlap labels at the 90% line."""
-    above = np.where(mean >= 0.9)[0]
-    if len(above) == 0:
+def _per_task_x90s(curves):
+    """Per-task X@90 = smallest f at which task t's recovery curve hits 0.9.
+    Returns a list of values in percent. Tasks that never reach 0.9 are dropped."""
+    xs = []
+    for _task, (frac, rec) in curves.items():
+        above = np.where(rec >= 0.9)[0]
+        if len(above) == 0:
+            continue
+        xs.append(float(frac[above[0]]) * 100)
+    return xs
+
+
+def _headline_curve(curves, r_grid=None):
+    """Curve (mean_t [X@r(t)], r) for r in r_grid.
+
+    At each recovery threshold r, take each task's per-task X@r (smallest f
+    at which that task's recovery hits r), then average across tasks. The
+    resulting curve passes through (mean_t [X@90(t)], 0.9) by construction.
+
+    Returns (x_array, y_array) in % units. Tasks where X@r is undefined at
+    a given r (curve never reaches r) are dropped at that r only."""
+    if r_grid is None:
+        r_grid = np.linspace(0.0, 1.0, 101)
+    xs, ys = [], []
+    for r in r_grid:
+        x_at_r = []
+        for _task, (frac, rec) in curves.items():
+            above = np.where(rec >= r)[0]
+            if len(above) == 0:
+                continue
+            x_at_r.append(float(frac[above[0]]))
+        if x_at_r:
+            xs.append(float(np.mean(x_at_r)) * 100.0)
+            ys.append(r * 100.0)
+    return np.array(xs), np.array(ys)
+
+
+def _annotate_mean_per_task_x90(ax, curves, color, y_offset_pp):
+    """Drop a vertical dashed line at mean_t X@90(t) and label its value.
+    This is the headline metric the paper reports: per-task X@90 averaged
+    across tasks (each task gets its own routing budget). The label is the
+    X@90 value, rotated and placed to the left of the dashed line; the
+    caption explains the color-coding."""
+    del y_offset_pp  # legacy stagger no longer needed with rotated labels
+    xs = _per_task_x90s(curves)
+    if not xs:
         return
-    x90 = float(grid[above[0]]) * 100
-    ax.scatter([x90], [90], s=22, color=color, zorder=5, edgecolor="white", linewidth=0.6)
+    mean_x = float(np.mean(xs))
+    ax.axvline(mean_x, color=color, linestyle="--", alpha=0.55, linewidth=0.9)
     ax.annotate(
-        f"{x90:.1f}%",
-        xy=(x90, 90),
-        xytext=(x90 + 2.0, 90 + y_offset_pp),
-        fontsize=7, color=color, ha="left", va="center",
+        f"{mean_x:.1f}%",
+        xy=(mean_x, 15),
+        xytext=(mean_x - 1.2, 15),
+        fontsize=8, color=color, ha="right", va="center",
+        rotation=90, rotation_mode="anchor",
         annotation_clip=True,
     )
 
@@ -607,40 +652,47 @@ def _plot_headline_on_ax(ax, task_data, bits, granularity, model_short, show_leg
     curves_all = _loo_curves(task_data, subsets["all_features"], eligible)
     curves_input = _loo_curves(task_data, subsets["image_only"], eligible) if subsets["image_only"] else None
     series = [
-        ("Oracle", oracle, "#000000", "-"),
-        ("All features (ceiling)", curves_all, "#d62728", "-"),
+        ("oracle", oracle, "#000000", "-"),
+        ("all features (ceiling)", curves_all, "#d62728", "-"),
         ("q_margin (deployable)", curves_q, "#1f77b4", "-"),
-        ("FP margin only", margin, "#ff7f0e", "--"),
+        ("FP margin (no LogReg)", margin, "#ff7f0e", "--"),
     ]
     if curves_input is not None:
-        series.append(("Input-domain only", curves_input, SUBSET_COLORS["image_only"], "--"))
-    series.append(("Random", rand, "#7f7f7f", ":"))
+        series.append(("input-domain only", curves_input, SUBSET_COLORS["image_only"], "--"))
+    series.append(("random", rand, "#7f7f7f", ":"))
     # Vertical stagger so X@90 labels don't collide.
     annotate_offsets = {
-        "Oracle": -6.0,
-        "All features (ceiling)": -3.0,
         "q_margin (deployable)": +3.0,
-        "FP margin only": +6.0,
+        "FP margin (no LogReg)": +6.0,
+        "input-domain only": +9.0,
     }
+    # Headline aggregation: at each recovery threshold r, take each task's
+    # per-task X@r (smallest f at which that task hits r), then average across
+    # tasks. The resulting (mean_X@r, r) curve passes through the headline
+    # mean_t[X@90(t)] = 22 / 18 / 20 at r=0.9 by construction.
     for label, curves, color, ls in series:
-        arr = _aggregate_to_grid(curves, grid)
-        if arr is None:
+        if not curves:
             continue
-        mean = arr.mean(axis=0)
-        lo = np.percentile(arr, 25, axis=0)
-        hi = np.percentile(arr, 75, axis=0)
-        ax.fill_between(grid * 100, lo * 100, hi * 100, color=color, alpha=0.10, linewidth=0)
-        ax.plot(grid * 100, mean * 100, color=color, linestyle=ls, label=label)
+        xs, ys = _headline_curve(curves)
+        if xs.size == 0:
+            continue
+        ax.plot(xs, ys, color=color, linestyle=ls, label=label)
         if label in annotate_offsets:
-            _annotate_x_at_90(ax, grid, mean, color, annotate_offsets[label])
+            _annotate_mean_per_task_x90(ax, curves, color, annotate_offsets[label])
+    legend_handles = None  # use the labels passed to ax.plot above
     ax.axhline(90, color="green", linestyle=":", linewidth=0.8, alpha=0.7)
     ax.set_xlim(0, 100)
     ax.set_ylim(-5, 105)
-    ax.set_xlabel("FP-compute fraction (%)")
+    ax.set_xlabel(r"Average FP-compute fraction $\mathrm{mean}_t[X_{@r}]$ (%)")
+    ax.set_ylabel("Gap recovery threshold r (%)")
     ax.set_title(f"{model_short} --- W{bits}-{granularity} ({len(eligible)} tasks)")
     ax.grid(True, linestyle=":", linewidth=0.4, alpha=0.7)
     if show_legend:
-        ax.legend(loc="lower right", framealpha=0.95, fontsize=8)
+        if legend_handles is None:
+            ax.legend(loc="lower right", framealpha=0.95, fontsize=8)
+        else:
+            ax.legend(handles=legend_handles, loc="lower right",
+                      framealpha=0.95, fontsize=8)
     return len(eligible)
 
 
@@ -653,44 +705,52 @@ def _plot_feature_ablation_on_ax(ax, task_data, bits, granularity, model_short, 
                 transform=ax.transAxes, ha="center", va="center")
         ax.set_title(f"{model_short} --- W{bits}-{granularity}")
         return 0
-    grid = np.linspace(0, 1, 201)
-    # Annotate only the three subsets the paper actually highlights: q_only,
-    # all_features, and oracle. Others would crowd the figure.
-    annotate_offsets = {"q_only": +3.0, "all_features": -3.0}
+    annotate_offsets = {"q_only": +3.0,
+                        "fp_only": +6.0, "fp_plus_q_no_cross": -6.0,
+                        "image_only": +9.0}
     subsets = _subsets_for(task_data)
     for name, cols in subsets.items():
-        if not cols:  # skip image_only on backbones that have no input-domain features
+        if not cols:
             continue
         curves = _loo_curves(task_data, cols, eligible)
-        arr = _aggregate_to_grid(curves, grid)
-        if arr is None:
+        if not curves:
             continue
-        mean = arr.mean(axis=0)
-        ax.plot(grid * 100, mean * 100,
-                color=SUBSET_COLORS[name], label=SUBSET_LABELS[name])
+        color = SUBSET_COLORS[name]
+        xs, ys = _headline_curve(curves)
+        if xs.size:
+            ax.plot(xs, ys, color=color, label=SUBSET_LABELS[name])
         if name in annotate_offsets:
-            _annotate_x_at_90(ax, grid, mean, SUBSET_COLORS[name], annotate_offsets[name])
+            _annotate_mean_per_task_x90(ax, curves, color, annotate_offsets[name])
     oracle, _, rand = _baseline_curves(task_data, eligible)
     for name, curves, color, ls in [("oracle", oracle, "#000000", "-"),
                                      ("random", rand, "#bbbbbb", ":")]:
-        arr = _aggregate_to_grid(curves, grid)
-        if arr is None:
+        if not curves:
             continue
-        mean = arr.mean(axis=0)
-        ax.plot(grid * 100, mean * 100,
-                color=color, linestyle=ls, linewidth=1.2,
-                label="oracle" if name == "oracle" else "random")
-        if name == "oracle":
-            _annotate_x_at_90(ax, grid, mean, color, -6.0)
+        xs, ys = _headline_curve(curves)
+        if xs.size:
+            ax.plot(xs, ys, color=color, linestyle=ls, linewidth=1.2, label=name)
+        if name in annotate_offsets:
+            _annotate_mean_per_task_x90(ax, curves, color, annotate_offsets[name])
     ax.axhline(90, color="green", linestyle=":", linewidth=0.8, alpha=0.7)
     ax.set_xlim(0, 100)
     ax.set_ylim(-5, 105)
-    ax.set_xlabel("FP-compute fraction (%)")
+    ax.set_xlabel(r"Average FP-compute fraction $\mathrm{mean}_t[X_{@r}]$ (%)")
+    ax.set_ylabel("Gap recovery threshold r (%)")
     ax.set_title(f"{model_short} --- W{bits}-{granularity} ({len(eligible)} tasks)")
     ax.grid(True, linestyle=":", linewidth=0.4, alpha=0.7)
     if show_legend:
         ax.legend(loc="lower right", framealpha=0.95, fontsize=7)
     return len(eligible)
+
+
+_HEADLINE_FONT_RC = {
+    "font.size": 11,
+    "axes.labelsize": 11,
+    "axes.titlesize": 11,
+    "legend.fontsize": 11,
+    "xtick.labelsize": 12,
+    "ytick.labelsize": 12,
+}
 
 
 def fig_headline_pareto_dual(cfg_a, cfg_b, bits, granularity, short_a, short_b, out_path,
@@ -701,16 +761,21 @@ def fig_headline_pareto_dual(cfg_a, cfg_b, bits, granularity, short_a, short_b, 
     width = 5.2 * n_panels
     print(f"Generating {n_panels}-panel headline Pareto: {cfg_a.sanitized} vs {cfg_b.sanitized}"
           f"{' vs Qwen3' if qwen3_data else ''}, W{bits}-{granularity} ...")
-    fig, axes = plt.subplots(1, n_panels, figsize=(width, 3.8), sharey=True)
     td_a = _load_all(cfg_a, bits, granularity)
     td_b = _load_all(cfg_b, bits, granularity)
-    _plot_headline_on_ax(axes[0], td_a, bits, granularity, short_a, show_legend=False)
-    _plot_headline_on_ax(axes[1], td_b, bits, granularity, short_b, show_legend=(n_panels == 2))
-    if qwen3_data:
-        _plot_headline_on_ax(axes[2], qwen3_data, bits, granularity, qwen3_short, show_legend=True)
-    axes[0].set_ylabel("Mean FP$\\to$PTQ gap recovery (%)")
-    fig.savefig(out_path)
-    plt.close(fig)
+    with plt.rc_context(_HEADLINE_FONT_RC):
+        fig, axes = plt.subplots(1, n_panels, figsize=(width, 3.8), sharey=True)
+        _plot_headline_on_ax(axes[0], td_a, bits, granularity, short_a, show_legend=False)
+        _plot_headline_on_ax(axes[1], td_b, bits, granularity, short_b, show_legend=False)
+        if qwen3_data:
+            _plot_headline_on_ax(axes[2], qwen3_data, bits, granularity, qwen3_short, show_legend=False)
+        axes[0].set_ylabel("Gap recovery threshold r (%)")
+        handles, labels = axes[0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc="lower center", ncol=len(labels),
+                   framealpha=0.95, bbox_to_anchor=(0.5, -0.02))
+        fig.subplots_adjust(bottom=0.24)
+        _save_fig(fig, out_path)
+        plt.close(fig)
     print(f"  saved {out_path}")
 
 
@@ -721,16 +786,21 @@ def fig_feature_ablation_dual(cfg_a, cfg_b, bits, granularity, short_a, short_b,
     width = 5.2 * n_panels
     print(f"Generating {n_panels}-panel feature ablation: {cfg_a.sanitized} vs {cfg_b.sanitized}"
           f"{' vs Qwen3' if qwen3_data else ''}, W{bits}-{granularity} ...")
-    fig, axes = plt.subplots(1, n_panels, figsize=(width, 3.8), sharey=True)
     td_a = _load_all(cfg_a, bits, granularity)
     td_b = _load_all(cfg_b, bits, granularity)
-    _plot_feature_ablation_on_ax(axes[0], td_a, bits, granularity, short_a, show_legend=False)
-    _plot_feature_ablation_on_ax(axes[1], td_b, bits, granularity, short_b, show_legend=(n_panels == 2))
-    if qwen3_data:
-        _plot_feature_ablation_on_ax(axes[2], qwen3_data, bits, granularity, qwen3_short, show_legend=True)
-    axes[0].set_ylabel("Mean gap recovery (%)")
-    fig.savefig(out_path)
-    plt.close(fig)
+    with plt.rc_context(_HEADLINE_FONT_RC):
+        fig, axes = plt.subplots(1, n_panels, figsize=(width, 3.8), sharey=True)
+        _plot_feature_ablation_on_ax(axes[0], td_a, bits, granularity, short_a, show_legend=False)
+        _plot_feature_ablation_on_ax(axes[1], td_b, bits, granularity, short_b, show_legend=False)
+        if qwen3_data:
+            _plot_feature_ablation_on_ax(axes[2], qwen3_data, bits, granularity, qwen3_short, show_legend=False)
+        axes[0].set_ylabel("Gap recovery threshold r (%)")
+        handles, labels = axes[0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc="lower center", ncol=len(labels),
+                   framealpha=0.95, bbox_to_anchor=(0.5, -0.02))
+        fig.subplots_adjust(bottom=0.24)
+        _save_fig(fig, out_path)
+        plt.close(fig)
     print(f"  saved {out_path}")
 
 
@@ -759,28 +829,28 @@ def fig_regime_comparison_dual(cfg_a, cfg_b, primary_bits, secondary_bits, granu
             curves_q = _loo_curves(task_data, ["q_margin"], eligible)
             curves_all = _loo_curves(task_data, ALL_FEATS, eligible)
             for label, curves, color, ls in [
-                ("Oracle", oracle, "#000000", "-"),
-                ("All features (ceiling)", curves_all, "#d62728", "-"),
+                ("oracle", oracle, "#000000", "-"),
+                ("all features (ceiling)", curves_all, "#d62728", "-"),
                 ("q_margin (deployable)", curves_q, "#1f77b4", "-"),
-                ("Random", rand, "#7f7f7f", ":"),
+                ("random", rand, "#7f7f7f", ":"),
             ]:
-                arr = _aggregate_to_grid(curves, grid)
-                if arr is None:
+                if not curves:
                     continue
-                ax.plot(grid * 100, arr.mean(axis=0) * 100,
-                        color=color, linestyle=ls, label=label)
+                xs, ys = _headline_curve(curves)
+                if xs.size:
+                    ax.plot(xs, ys, color=color, linestyle=ls, label=label)
             ax.axhline(90, color="green", linestyle=":", linewidth=0.8, alpha=0.7)
             ax.set_xlim(0, 100)
             ax.set_ylim(-5, 105)
             ax.set_title(f"{short} --- W{bits}-{granularity} {suffix} ({len(eligible)} tasks)".strip())
             ax.grid(True, linestyle=":", linewidth=0.4, alpha=0.7)
             if r == 1:
-                ax.set_xlabel("FP-compute fraction (%)")
+                ax.set_xlabel(r"Average FP-compute fraction $\mathrm{mean}_t[X_{@r}]$ (%)")
             if c == 0:
-                ax.set_ylabel("Mean gap recovery (%)")
+                ax.set_ylabel("Gap recovery threshold r (%)")
     axes[0, 1].legend(loc="lower right", framealpha=0.95, fontsize=8)
     fig.tight_layout()
-    fig.savefig(out_path)
+    _save_fig(fig, out_path)
     plt.close(fig)
     print(f"  saved {out_path}")
 
@@ -848,7 +918,7 @@ def fig_loo_vs_same_task_dual(cfg_a, cfg_b, bits, granularity, short_a, short_b,
     _scatter_loo_vs_same_on_ax(axes[0], cfg_a, bits, granularity, short_a)
     _scatter_loo_vs_same_on_ax(axes[1], cfg_b, bits, granularity, short_b)
     axes[0].set_ylabel("LOO cross-task X@90% (%)")
-    fig.savefig(out_path)
+    _save_fig(fig, out_path)
     plt.close(fig)
     print(f"  saved {out_path}")
 
