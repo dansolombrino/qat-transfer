@@ -1,0 +1,37 @@
+hydra:
+  searchpath:
+    - file://${oc.env:PWD}/config
+  sweep:
+    dir: logs/config/experiments/vision/ilharco_timm_supervised/003_qat_transfer_activ/precompute_steering
+    subdir: ${model_name}/seed=${source.seed}/qat=bits=${qat.bits}_gran=${qat.granularity}/strategy=${steering_strategy}
+
+model_name: ???
+batch_size: ???
+limit_num_batches: null   # cap donor-inference batches (null -> all val batches)
+log_to_file: false
+
+# Shared training hyperparameters used to LOCATE the fp_source and qat_source
+# checkpoints (and recorded in steering_meta.json).
+lr: ???
+wd: ???
+ls: ???
+wl: ???
+max_grad_norm: ???
+
+gpu: ???
+
+# Where activations are captured / a steering vector lives. Part of the cache path.
+# per_block is implemented; per_linear / per_attn_mlp are TODO stubs in src/vision/steering.py.
+steering_strategy: ???     # per_block | per_linear | per_attn_mlp
+
+source:
+  dataset_names: ???       # list of donor dataset names to iterate over internally
+  seed: ???
+  limit_num_epochs: null   # null -> DATASET_NAME_TO_EPOCHS[dataset_name]
+
+# Used to LOCATE the QAT source checkpoint. The donor is run in FULL PRECISION
+# (the QAT checkpoint's plain weights); no PTQ is applied here.
+qat:
+  bits: ???          # int
+  granularity: ???   # "tensor" or "channel"
+  skip_modules: ???  # list of child-module attribute names that were skipped during QAT training, e.g. [head]
