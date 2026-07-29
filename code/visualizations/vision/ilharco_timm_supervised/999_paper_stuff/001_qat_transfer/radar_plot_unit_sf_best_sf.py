@@ -319,6 +319,7 @@ def plot_radar(all_data, model_labels, args, qat_frag, metric_tag):
     out_dir = os.path.join(
         "plots", "vision", "ilharco_timm_supervised", "999_paper_stuff", "001_qat_transfer",
         "radar_plot_unit_sf_best_sf", model_tag, f"seed={args.seed}", qat_frag,
+        _ptq_frag(args),
     )
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"radar_plot_unit_sf_best_sf_{metric_tag}.pdf")

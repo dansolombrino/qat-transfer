@@ -256,6 +256,7 @@ def plot_scatterplot(all_data, model_labels, args, qat_frag):
     out_dir = os.path.join(
         "plots", "vision", "ilharco_timm_supervised", "999_paper_stuff", "001_qat_transfer",
         "scatterplot_multi", model_tag, f"seed={args.seed}", qat_frag,
+        _ptq_frag(args),
     )
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, "scatterplot_multi.pdf")

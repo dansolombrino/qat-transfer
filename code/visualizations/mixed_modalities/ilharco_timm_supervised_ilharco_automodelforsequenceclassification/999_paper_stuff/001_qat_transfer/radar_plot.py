@@ -354,6 +354,7 @@ def plot_radar(vision_data, text_data, args,
         "999_paper_stuff", "001_qat_transfer", "radar_plot",
         f"{vision_model_tag}__{text_model_tag}",
         f"seed={args.seed}", combined_qat_frag,
+        f"vision={_vision_ptq_frag(args)}__text={_text_ptq_frag(args)}",
     )
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"radar_plot_{metric_tag}.pdf")

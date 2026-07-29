@@ -280,6 +280,7 @@ def plot_radar(all_data, model_labels, args, optim_frag, qat_frag):
     out_dir = os.path.join(
         "plots", "vision", "ilharco_open_clip", "999_paper_stuff", "001_qat_transfer",
         "radar_plot", f"seed={args.seed}", optim_frag, qat_frag,
+        _ptq_frag(args),
     )
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, "radar_plot.pdf")

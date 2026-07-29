@@ -473,6 +473,7 @@ def plot_all_models(all_data_fixed, all_data_best, args, metric_tag):
         "999_paper_stuff", "001_qat_transfer",
         "qv_transfer_heatmap_alpha_fixed_vs_best_all_models",
         f"seed={args.seed}", optim_path_frag, qat_frag,
+        _ptq_frag(args.ptq_bits, args.granularity, args.skip_modules),
         _qv_frag(args.qv_alpha), _split_frag(args.eval_split),
     )
     os.makedirs(out_dir, exist_ok=True)

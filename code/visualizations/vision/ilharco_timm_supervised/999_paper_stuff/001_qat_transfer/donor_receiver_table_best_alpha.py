@@ -299,6 +299,7 @@ def main():
         "plots", "vision", "ilharco_timm_supervised",
         "999_paper_stuff", "001_qat_transfer", "donor_receiver_table_best_alpha",
         f"seed={args.seed}", qat_frag,
+        _ptq_frag(args),
     )
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, "donor_receiver_table_best_alpha.tex")

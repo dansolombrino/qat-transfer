@@ -232,6 +232,7 @@ def plot_all(all_model_data, args):
     out_dir = os.path.join(
         "plots", "vision", "ilharco_timm_supervised", "999_paper_stuff",
         "000_baselines", "baseline_bar_all_models", f"seed={args.seed}",
+        _ptq_frag(args),
     )
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, "baseline_bar_all_models.pdf")

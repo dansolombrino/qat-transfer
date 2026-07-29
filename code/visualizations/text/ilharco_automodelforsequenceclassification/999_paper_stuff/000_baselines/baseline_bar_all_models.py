@@ -243,6 +243,7 @@ def plot_all(all_model_data, args):
         "plots", "text", "ilharco_automodelforsequenceclassification",
         "999_paper_stuff", "000_baselines", "baseline_bar_all_models",
         f"seed={args.seed}",
+        f"ptq=bits={args.ptq_bits}_gran={args.granularity}",
     )
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, "baseline_bar_all_models.pdf")

@@ -254,6 +254,7 @@ def plot_stacked_bar(data, model_dir, args, qat_frag):
     out_dir = os.path.join(
         "plots", "vision", "ilharco_timm_supervised", "999_paper_stuff", "001_qat_transfer",
         "stacked_bar", model_dir, f"seed={args.seed}", qat_frag,
+        _ptq_frag(args),
     )
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, "stacked_bar.pdf")

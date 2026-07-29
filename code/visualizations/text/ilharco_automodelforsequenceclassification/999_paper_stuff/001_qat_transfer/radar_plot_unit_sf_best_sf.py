@@ -325,6 +325,7 @@ def plot_radar(all_data, model_labels, args, metric_tag):
         "plots", "text", "ilharco_automodelforsequenceclassification",
         "999_paper_stuff", "001_qat_transfer",
         "radar_plot_unit_sf_best_sf", model_tag, f"seed={args.seed}", qat_frag_out,
+        _ptq_frag(args, args.skip_modules[0]),
     )
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"radar_plot_unit_sf_best_sf_{metric_tag}.pdf")

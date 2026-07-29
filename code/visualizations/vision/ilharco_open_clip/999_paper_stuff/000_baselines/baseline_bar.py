@@ -216,6 +216,7 @@ def plot_bar(data, model_dir, model_name, args):
     out_dir = os.path.join(
         "plots", "vision", "ilharco_open_clip", "999_paper_stuff", "000_baselines",
         "baseline_bar", model_dir, f"seed={args.seed}",
+        _ptq_frag(args),
     )
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, "baseline_bar.pdf")

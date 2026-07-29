@@ -461,7 +461,9 @@ def plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag, qat_
 
     out_dir = os.path.join(
         "plots", "vision", "ilharco_open_clip", "001_qat_transfer", "qv_transfer_heatmap",
-        model_dir, f"seed={args.seed}", optim_frag, qat_frag, "qv=alpha=best",
+
+        model_dir, f"seed={args.seed}", optim_frag, qat_frag, _ptq_frag(args.ptq_bits, args.granularity, args.skip_modules),
+        "qv=alpha=best",
         "split=test",
     )
     os.makedirs(out_dir, exist_ok=True)
