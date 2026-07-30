@@ -5,14 +5,27 @@ compute_donor_benefit.py:
 
     x   the compute spent producing that donor's quantization vector, i.e. one
         QAT run over the donor's training set, in millions of training samples.
-    y   how many of the other tasks that single QV helps, averaged over the
-        backbones of the family, with the across-backbone range as error bars.
+    y   what that single QV buys, selected with --y:
 
-Good donors sit top-left: cheap to produce, useful to many receivers.  The slope
-of the line from the origin to a marker is the amortized price of one successful
-deployment, so dashed iso-lines of constant cost-per-win are drawn across the
-plot and the Pareto frontier (no other donor is both cheaper and better) is
-highlighted.
+        mean_delta      (default) the mean Top-1 gain over vanilla PTQ across
+                        the donor's receivers and the family's backbones, in
+                        percentage points.  This is the quantity the cost is
+                        actually being paid for, and unlike a win count it keeps
+                        the magnitude: a donor that wins narrowly on 18 tasks and
+                        one that wins decisively on 18 tasks are different buys.
+        median_delta    the same, robust to a single receiver carrying the mean.
+        mean_wins       how many receivers the QV helps at all, averaged over
+                        backbones — a binarization of the above, kept because it
+                        is what the win/loss table reports.
+
+Under the delta metrics a zero line is drawn, since donors do land below it: a
+negative mean is a donor whose vector hurts the average receiver, which no win
+count can express.
+
+Each donor gets its own colour and a legend entry, since the markers crowd
+together on the cost axis and in-plot text labels overlap.  Nothing else is
+drawn: the reading of the plot — cheap donors that buy a lot sit top-left — is
+left to the axes.
 
 Writes an HTML figure to plots/998_rebuttal/002_cost_amortization/.
 """
@@ -44,16 +57,36 @@ import plotly.graph_objects as go
 EVAL_ROOT = "evaluations/998_rebuttal/002_cost_amortization"
 PLOT_ROOT = "plots/998_rebuttal/002_cost_amortization"
 
-COLOR_PARETO = "#2F6E8F"     # Pareto-optimal donors
-COLOR_OTHER = "#9AA5AC"      # dominated donors
-COLOR_OTHER_ERR = "rgba(154, 165, 172, 0.40)"
-COLOR_ISO = "#B24C3F"        # iso-cost-per-win lines
-COLOR_FRONT = "rgba(47, 110, 143, 0.45)"
+# Kelly's 22 colours of maximum contrast, with the near-white entry swapped for
+# a cyan so every donor stays legible on the white template.
+PALETTE = [
+    "#00A0B0", "#222222", "#F3C300", "#875692", "#F38400", "#A1CAF1",
+    "#BE0032", "#C2B280", "#848482", "#008856", "#E68FAC", "#0067A5",
+    "#F99379", "#604E97", "#F6A600", "#B3446C", "#DCD300", "#882D17",
+    "#8DB600", "#654522", "#E25822", "#2B3D26",
+]
 
 SAMPLES_PER_UNIT = 1e6       # axes are reported in millions of samples
 UNIT_LABEL = "M training samples"
 
-ISO_LINES = [0.01, 0.02, 0.04, 0.08]   # M training samples per receiver helped
+COLOR_ZERO = "#8A8A8A"       # the delta = 0 line
+
+# What the donor's QAT run buys.  `scale` converts the stored value to the
+# plotted unit (deltas are stored as fractions, reported as percentage points).
+Y_METRICS = {
+    "mean_delta": dict(
+        key="mean_delta", scale=100.0, signed=True,
+        title="mean Top-1 gain over PTQ (p.p.), across receivers and backbones",
+    ),
+    "median_delta": dict(
+        key="median_delta", scale=100.0, signed=True,
+        title="median Top-1 gain over PTQ (p.p.), across receivers and backbones",
+    ),
+    "mean_wins": dict(
+        key="mean_wins", scale=1.0, signed=False,
+        title="receivers helped (of {n_receivers}), mean over backbones",
+    ),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -67,9 +100,10 @@ def parse_args():
         help="File read from evaluations/998_rebuttal/002_cost_amortization/.",
     )
     parser.add_argument(
-        "--label-all",
-        action="store_true",
-        help="Label every donor, not just ImageNet and the Pareto-optimal ones.",
+        "--y",
+        default="mean_delta",
+        choices=sorted(Y_METRICS),
+        help="What the donor buys: the size of the gain (default) or a count of wins.",
     )
     parser.add_argument(
         "--log-x",
@@ -81,7 +115,7 @@ def parse_args():
         action="store_true",
         help="Also write a PDF next to the HTML (needs kaleido).",
     )
-    parser.add_argument("--width", type=int, default=900)
+    parser.add_argument("--width", type=int, default=1000)
     parser.add_argument("--height", type=int, default=560)
     return parser.parse_args()
 
@@ -93,161 +127,42 @@ def _scaled(value):
     return value / SAMPLES_PER_UNIT
 
 
-def _hover(d):
-    return (
-        f"<b>{d['donor']}</b><br>"
-        f"QAT cost: {_scaled(d['cost_samples']):.3f} {UNIT_LABEL}"
-        f" ({d['epochs']} epochs x {d['train_size']:,})<br>"
-        f"helps {d['mean_wins']:.1f} / {d['n_receivers']} receivers"
-        f" (range {d['min_wins']}-{d['max_wins']} across backbones)<br>"
-        f"win rate: {d['win_rate'] * 100:.1f}%<br>"
-        f"mean gain: {d['mean_delta'] * 100:+.2f} p.p.<br>"
-        f"cost per win: {_scaled(d['cost_per_win']):.3f} {UNIT_LABEL}"
-        "<extra></extra>"
-    )
-
-
-def _label_positions(group, donors):
-    """Nudge labels apart: donors that crowd on the cost axis alternate above/below."""
-    x_span = max(o["cost_samples"] for o in donors)
-    threshold = 0.08 * x_span
-    ordered = sorted(group, key=lambda d: d["cost_samples"])
-    xs = [d["cost_samples"] for d in ordered]
-
-    positions = {}
-    flip = False
-    for i, d in enumerate(ordered):
-        crowded = (i > 0 and xs[i] - xs[i - 1] < threshold) or (
-            i + 1 < len(xs) and xs[i + 1] - xs[i] < threshold
-        )
-        if d["cost_samples"] >= 0.6 * x_span:
-            positions[d["donor"]] = "middle left"
-        elif crowded:
-            positions[d["donor"]] = "bottom center" if flip else "top center"
-            flip = not flip
-        else:
-            positions[d["donor"]] = "top center"
-    return [positions[d["donor"]] for d in group]
-
-
 # ---------------------------------------------------------------------------
 # Figure
 # ---------------------------------------------------------------------------
 def build_figure(results, args):
+    metric = Y_METRICS[args.y]
     donors = [d for d in results["donors"] if d["cost_samples"] is not None]
     assert donors, "no donor has a cost entry; check dataset_sizes.json"
-
-    pareto = sorted(
-        (d for d in donors if d["pareto_optimal"]), key=lambda d: d["cost_samples"]
+    assert len(donors) <= len(PALETTE), (
+        f"{len(donors)} donors but only {len(PALETTE)} colours in PALETTE"
     )
-    others = [d for d in donors if not d["pareto_optimal"]]
 
+    ys = [d[metric["key"]] * metric["scale"] for d in donors]
     x_max = _scaled(max(d["cost_samples"] for d in donors)) * 1.18
-    y_max = max(d["max_wins"] for d in donors) * 1.10
+    # Signed metrics need room below zero: a donor with a negative mean gain is a
+    # real outcome, not a clipping artefact.
+    y_span = max(ys) - min(min(ys), 0.0)
+    y_range = [min(min(ys), 0.0) - 0.08 * y_span, max(ys) + 0.10 * y_span]
     n_receivers = donors[0]["n_receivers"]
 
     fig = go.Figure()
-
-    ############################################################################
-    # BEGIN iso-cost-per-win lines
-    ############################################################################
-    for cost_per_win in ISO_LINES:
-        # wins = cost / cost_per_win, a ray through the origin.
-        x_end = min(x_max, y_max * cost_per_win)
-        y_end = x_end / cost_per_win
+    # One trace per donor: the trace name is what the legend keys the colour to.
+    for d, y, color in zip(donors, ys, PALETTE):
         fig.add_trace(
             go.Scatter(
-                x=[0, x_end],
-                y=[0, y_end],
-                mode="lines",
-                line=dict(color=COLOR_ISO, width=1, dash="dot"),
-                hoverinfo="skip",
-                showlegend=False,
-            )
-        )
-        fig.add_annotation(
-            x=x_end,
-            y=y_end,
-            text=f"{cost_per_win * 1000:.0f}k / win",
-            showarrow=False,
-            xanchor="left" if x_end < x_max * 0.98 else "right",
-            yanchor="bottom",
-            font=dict(size=10, color=COLOR_ISO),
-        )
-    # One legend entry standing in for the whole iso-line family.
-    fig.add_trace(
-        go.Scatter(
-            x=[None],
-            y=[None],
-            mode="lines",
-            line=dict(color=COLOR_ISO, width=1, dash="dot"),
-            name="constant cost per receiver helped",
-        )
-    )
-    ############################################################################
-    # END iso-cost-per-win lines
-    ############################################################################
-
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    ############################################################################
-    # BEGIN Pareto frontier
-    ############################################################################
-    fig.add_trace(
-        go.Scatter(
-            x=[_scaled(d["cost_samples"]) for d in pareto],
-            y=[d["mean_wins"] for d in pareto],
-            mode="lines",
-            line=dict(color=COLOR_FRONT, width=2, shape="hv"),
-            hoverinfo="skip",
-            name="Pareto frontier",
-        )
-    )
-    ############################################################################
-    # END Pareto frontier
-    ############################################################################
-
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    ############################################################################
-    # BEGIN donor markers
-    ############################################################################
-    for group, color, err_color, name, size in (
-        (others, COLOR_OTHER, COLOR_OTHER_ERR, "dominated donors", 9),
-        (pareto, COLOR_PARETO, COLOR_PARETO, "Pareto-optimal donors", 13),
-    ):
-        if not group:
-            continue
-        labelled = [
-            d["donor"] if (args.label_all or d["pareto_optimal"] or d["donor"] == "ImageNet")
-            else ""
-            for d in group
-        ]
-        fig.add_trace(
-            go.Scatter(
-                x=[_scaled(d["cost_samples"]) for d in group],
-                y=[d["mean_wins"] for d in group],
-                error_y=dict(
-                    type="data",
-                    symmetric=False,
-                    array=[d["max_wins"] - d["mean_wins"] for d in group],
-                    arrayminus=[d["mean_wins"] - d["min_wins"] for d in group],
-                    color=err_color,
-                    thickness=1,
-                    width=3,
+                x=[_scaled(d["cost_samples"])],
+                y=[y],
+                mode="markers",
+                marker=dict(
+                    color=color, size=12, line=dict(color="white", width=1)
                 ),
-                mode="markers+text",
-                marker=dict(color=color, size=size, line=dict(color="white", width=1)),
-                text=labelled,
-                textposition=_label_positions(group, donors),
-                textfont=dict(size=10, color=color),
-                hovertemplate=[_hover(d) for d in group],
-                name=name,
+                name=d["donor"],
             )
         )
-    ############################################################################
-    # END donor markers
-    ############################################################################
+
+    if metric["signed"]:
+        fig.add_hline(y=0.0, line=dict(color=COLOR_ZERO, width=1, dash="dot"))
 
     fig.update_xaxes(
         title_text=f"cost of the donor's QAT run ({UNIT_LABEL})",
@@ -256,8 +171,8 @@ def build_figure(results, args):
         zeroline=False,
     )
     fig.update_yaxes(
-        title_text=f"receivers helped (of {n_receivers}), mean over backbones",
-        range=[0, y_max],
+        title_text=metric["title"].format(n_receivers=n_receivers),
+        range=y_range,
         zeroline=False,
     )
 
@@ -265,45 +180,19 @@ def build_figure(results, args):
         template="plotly_white",
         width=args.width,
         height=args.height,
-        margin=dict(l=80, r=40, t=100, b=110),
-        legend=dict(orientation="h", yanchor="top", y=-0.16, xanchor="left", x=0),
-        title=dict(text=_headline(results, donors), x=0.5, xanchor="center",
-                   font=dict(size=14)),
-    )
-    fig.add_annotation(
-        text=(
-            "Up and to the left is better. The slope from the origin to a marker is the "
-            "amortized cost of one successful deployment."
+        margin=dict(l=70, r=20, t=30, b=60),
+        legend=dict(
+            title_text="",
+            itemsizing="constant",
+            font=dict(size=11),
+            yanchor="top",
+            y=1,
+            xanchor="left",
+            x=1.02,
         ),
-        xref="paper",
-        yref="paper",
-        x=0,
-        y=-0.30,
-        showarrow=False,
-        xanchor="left",
-        align="left",
-        font=dict(size=11, color="#5A5A5A"),
     )
 
     return fig
-
-
-def _headline(results, donors):
-    """State the finding in words: what the extra ImageNet compute actually buys."""
-    by_cost = sorted(donors, key=lambda d: d["cost_samples"])
-    cheapest = by_cost[0]
-    priciest = by_cost[-1]
-    best = max(donors, key=lambda d: d["mean_wins"])
-    ratio = priciest["cost_samples"] / cheapest["cost_samples"]
-    cpw_ratio = priciest["cost_per_win"] / cheapest["cost_per_win"]
-    return (
-        f"What one donor QAT run buys, per receiver it helps<br>"
-        f"<sup>{best['donor']} helps the most receivers "
-        f"({best['mean_wins']:.1f}/{best['n_receivers']}), but costs "
-        f"{cpw_ratio:.1f}x more per win than {cheapest['donor']}, "
-        f"which is {ratio:.1f}x cheaper to produce and still helps "
-        f"{cheapest['mean_wins']:.1f}/{cheapest['n_receivers']}</sup>"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -322,7 +211,11 @@ def main():
     fig = build_figure(results, args)
 
     os.makedirs(PLOT_ROOT, exist_ok=True)
+    # The win-count figure keeps its original stem; the gain metrics add a
+    # suffix so the two do not overwrite each other.
     stem = f"donor_benefit_scatter_{results['family']}_{results['settings']['alpha_regime']}"
+    if args.y != "mean_wins":
+        stem = f"{stem}_{args.y}"
     html_path = os.path.join(PLOT_ROOT, f"{stem}.html")
     fig.write_html(html_path, include_plotlyjs="cdn")
     print(f"wrote {html_path}")
