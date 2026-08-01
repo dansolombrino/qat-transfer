@@ -39,8 +39,21 @@ METRIC_KEYS = {
     "qat_head_ptq": "val_accuracy_qat_head_ptq",
 }
 
-# Allowed QV scaling factors for the restricted sweep. Any qv=alpha=* directory
-# on disk whose alpha is not in this set is silently ignored.
+# DEAD CODE -- do not "fix" this without reading the note.
+#
+# This filter has never been applied.  In the parse loop below, `alpha_val` is
+# assigned before `_is_allowed_alpha` is consulted, and the `continue` there
+# advances the inner `for part in parts` loop rather than skipping the file.  So
+# every alpha present on disk has always been considered, and every published
+# number for the two BERTs was selected over their full 40-value 0.05..2.00
+# grid, not over these 11 values.  Making the filter effective now would
+# silently restrict that grid and change results that are already in the paper.
+#
+# It is kept only to record what was once intended.  Grid restriction is done
+# explicitly by --min-alpha / --max-alpha, whose defaults reproduce the
+# historical behaviour: everything on disk at or above lambda = 0.  That default
+# is what keeps the negative-lambda sweep (998_rebuttal/003) out of lambda*
+# selection, where it would otherwise silently change the headline protocol.
 ALLOWED_ALPHAS = (0.15, 0.30, 0.45, 0.60, 0.75, 0.90, 1.00, 1.05, 1.20, 1.35, 1.50)
 _ALPHA_TOL = 1e-9
 
@@ -94,6 +107,17 @@ def parse_args():
     p.add_argument("--bits",          required=True, type=int)
     p.add_argument("--granularity",   required=True, choices=["tensor", "channel"])
     p.add_argument("--skip-modules",  required=True, nargs="+")
+
+    # Defaulted, unlike every other path-affecting argument, because the defaults
+    # reproduce the selection protocol every existing result was produced under.
+    # The lower bound matters: negative lambdas now exist on disk for bert-base
+    # (998_rebuttal/003 sweeps the left arm of the sensitivity curve), and they
+    # must not enter lambda* selection unless asked for explicitly.
+    p.add_argument("--min-alpha",     default=0.0, type=float,
+                   help="lowest lambda considered for selection (default 0.0: "
+                        "excludes the negative-lambda sensitivity sweep)")
+    p.add_argument("--max-alpha",     default=float("inf"), type=float,
+                   help="highest lambda considered for selection (default: no bound)")
 
     p.add_argument("--slurm-timeout",  required=True, type=int,
                    help="SLURM job timeout in minutes")
@@ -185,6 +209,13 @@ def find_best_alphas(args):
 
         if src_dataset is None or tgt_dataset is None or alpha_val is None:
             print(f"  [SKIP] could not parse: {fpath}", file=sys.stderr)
+            continue
+
+        # Explicit grid restriction, applied where it actually takes effect.
+        # The default lower bound of 0.0 is what keeps the negative-lambda sweep
+        # out of lambda* selection: those runs exist to measure the left arm of
+        # the sensitivity curve, not to widen the protocol the paper reports.
+        if not (args.min_alpha <= alpha_val <= args.max_alpha):
             continue
 
         try:
