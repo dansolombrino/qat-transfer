@@ -150,20 +150,6 @@ qat-transfer/
 | `code/src/text/data/common.py` | Text dataset constants and HFTextDataset class |
 | `code/src/text/data/registry.py` | Text dataset registry and get_dataset factory |
 
-### Third-party PTQ baselines
-
-Vendored competitor implementations live directly under `code/src/`, outside the `{vision,text}/{family}/` taxonomy, because they are architecture-specific rather than family-specific:
-
-| Module | Method | Consumed by |
-|---|---|---|
-| `code/src/repqvit/` | RepQ-ViT (ICCV 2023), W+A PTQ | `evaluate_fp_repqvit.py` |
-| `code/src/aphq_vit/` | APHQ-ViT (CVPR 2025), Hessian-based block reconstruction | `evaluate_fp_aphq_vit.py` |
-| `code/src/ptq4vit/` | PTQ4ViT (ECCV 2022), W+A PTQ | `evaluate_ptq4vit.py` |
-
-`aphq_vit/` exposes an `adapter.py` that bridges the vendored code to our `ImageClassifier`; prefer extending the adapter over editing the vendored quantizer internals. GPTQ and REx have no vendored module — they are driven from their evaluation scripts directly.
-
-`journal.md` holds the competitor comparison table, which methods were excluded and why, and per-baseline run progress with the exact sweep commands. Consult it before adding a new baseline.
-
 ### Formal proofs
 
 `proofs/` contains Lean formalizations backing the paper's theory:
@@ -207,7 +193,7 @@ Experiments are organized in numbered directories. New experiments get the next 
 
 | Phase | Question | Location |
 |---|---|---|
-| `000_baselines` | What do FP, QAT, PTQ and the competitor PTQ methods score on their own? | per family |
+| `000_baselines` | What do FP, QAT and PTQ score on their own? | per family |
 | `001_qat_transfer` | Does `FP_tgt + alpha * QV_src` recover `QAT_tgt`? The core experiment. | per family |
 | `002_qat_transfer_reversed` | Does the QV work in reverse — `ptq(QAT_tgt) - alpha * QV_src`? | `vision/ilharco_timm_supervised` |
 | `002z_qat_transfer_reversed_ptq_after_reverse` | Same as 002, but PTQ is applied *after* the subtraction rather than before. | `vision/ilharco_timm_supervised` |
@@ -379,7 +365,7 @@ Baselines:
 {EVALUATION_BASE_PATH}/{vision,text}/{family}/{phase}/{vision,text}/{experiment_type}/{sanitized_model}/{dataset}/[optim=.../][qat=.../][ptq=.../]seed={seed}/eval_results.json
 ```
 
-`{experiment_type}` is the baseline variant and names the directory directly: `fp`, `fp_ptq`, `qat`, `qat_ptq`, `pretrained`, `pretrained_ptq`, `fp_repqvit`, `fp_aphq_vit`, `fp_ptq4vit`, `fp_rex`, plus `*_dryrun` counterparts.
+`{experiment_type}` is the baseline variant and names the directory directly: `fp`, `fp_ptq`, `qat`, `qat_ptq`, `pretrained`, `pretrained_ptq`, plus `*_dryrun` counterparts.
 
 Transfer:
 ```
@@ -572,7 +558,7 @@ Analysis scripts under `998_rebuttal` follow the same rule for their aggregates:
 ### Files
 
 - Finetuning scripts: `finetune_fp.py`, `finetune_qat.py`
-- Evaluation scripts: `evaluate_{fp,qat,pretrained}{_ptq}.py`; competitor baselines append the method name (`evaluate_fp_repqvit.py`, `evaluate_fp_aphq_vit.py`, `evaluate_fp_gptq.py`, `evaluate_ptq4vit.py`, `evaluate_rex.py`)
+- Evaluation scripts: `evaluate_{fp,qat,pretrained}{_ptq}.py`
 - Transfer scripts: `qv_transfer.py`
 - Alpha selection: `pick_best_alpha.py`
 - Analysis scripts: `compute_*.py`, `aggregate_*.py`, `collect_*.py`, `measure_*.py`
