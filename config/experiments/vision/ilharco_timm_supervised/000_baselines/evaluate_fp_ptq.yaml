@@ -15,6 +15,11 @@ wl: ???
 max_grad_norm: ???
 seed: ???
 gpu: ???
+# Evaluation split: "test" or "val". Defaulted, unlike the other path-affecting
+# keys, so that every existing documented invocation keeps writing exactly where
+# it always did; the value is recorded in the results JSON and, for anything
+# other than test, in the output path.
+split: test
 limit_num_epochs: null
 limit_num_batches: null
 log_to_file: false

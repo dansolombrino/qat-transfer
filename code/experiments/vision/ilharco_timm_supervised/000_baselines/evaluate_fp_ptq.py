@@ -40,9 +40,10 @@ def evaluate(
     model: torch.nn.Module,
     device: torch.device,
     limit_num_batches: int = None,
+    split: str = "test",
 ):
 
-    loader = dataset.test_loader
+    loader = dataset.val_loader if split == "val" else dataset.test_loader
 
     num_batches = len(loader)
     effective_num_batches = min(limit_num_batches, num_batches) if limit_num_batches is not None else num_batches
@@ -60,7 +61,7 @@ def evaluate(
         batch_bar = tqdm(
             enumerate(loader),
             total=effective_num_batches,
-            desc="Evaluating (test)",
+            desc=f"Evaluating ({split})",
             colour=batch_color,
             leave=False
         )
@@ -216,14 +217,15 @@ def main(cfg: DictConfig):
     # BEGIN evaluation
     ############################################################################
 
-    test_accuracy = evaluate(
+    accuracy_value = evaluate(
         dataset=dataset,
         model=image_classifier,
         device=device,
         limit_num_batches=cfg.limit_num_batches,
+        split=cfg.split,
     )
 
-    print(f"\n    eval test_accuracy (PTQ): {test_accuracy}\n")
+    print(f"\n    eval {cfg.split}_accuracy (PTQ): {accuracy_value}\n")
 
     num_classes = len(dataset.class_names)
     random_chance = 1.0 / num_classes
@@ -243,7 +245,7 @@ def main(cfg: DictConfig):
 
     skip_modules_tag = "-".join(sorted(cfg.ptq.skip_modules)) if len(cfg.ptq.skip_modules) > 0 else "none"
 
-    eval_dir = os.path.join(
+    eval_dir_parts = [
         evaluation_base_path,
         "vision",
         "ilharco_timm_supervised",
@@ -255,7 +257,13 @@ def main(cfg: DictConfig):
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
         f"ptq=bits={cfg.ptq.bits}_gran={cfg.ptq.granularity}_skip={skip_modules_tag}",
         f"seed={cfg.seed}",
-    )
+    ]
+    # Test-split baselines predate any notion of a split in this path and are
+    # read by 001, 002, 003 and every visualization, so they stay exactly where
+    # they are; other splits get their own leaf rather than shadowing them.
+    if cfg.split != "test":
+        eval_dir_parts.append(f"split={cfg.split}")
+    eval_dir = os.path.join(*eval_dir_parts)
 
     results = {
         "model_name": cfg.model_name,
@@ -271,7 +279,8 @@ def main(cfg: DictConfig):
         "limit_num_batches": cfg.limit_num_batches,
         "epochs": epochs,
         "device": str(device),
-        "test_accuracy": test_accuracy,
+        "eval_split": cfg.split,
+        f"{cfg.split}_accuracy": accuracy_value,
         "random_chance": random_chance,
         "num_classes": num_classes,
         "encoder_path": classifier_path,
