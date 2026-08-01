@@ -1,14 +1,19 @@
 """998 — Lambda sensitivity curves (text, AutoModelForSequenceClassification)
 
 Text counterpart of compute_lambda_curves_timm_supervised.py; see that script's
-docstring for what the curve statistics mean and why lambda_star is kept
-distinct from the validation-selected alpha_best.
+docstring for what the curve statistics mean, why lambda_star is kept distinct
+from the validation-selected alpha_best, and why the dense grids force the
+analysis onto the validation split with the lambda = 1 default as the reference
+rather than vanilla PTQ.
 
 This family carries the models the reviewers singled out: BERT-large has the
 worst mean unit-scale transfer in the submission (-29.1%), and reviewer 3HFP
 asks whether that is overshoot along a well-aligned direction or a genuinely
-anti-aligned one.  The safe interval and the unit retention computed here bear
-directly on that question, within the limit that the grid is positive-only.
+anti-aligned one.  Both BERTs were swept on the finer 0.05..2.0 grid, so
+`--grid full` gives them 40 points per cell against the 11 the embedding models
+have, and the width of the region around the optimum bears directly on that
+question -- within the limit that the grid is positive-only, so an anti-aligned
+donor can only ever be inferred, never observed.
 
 Note that skip_modules is per-model in this family (classifier for BERT, score
 for the embedding models), so the qat/ptq path fragments are rebuilt per model.
@@ -36,9 +41,13 @@ from src.text.data.common import DATASET_NAME_TO_EPOCHS
 from src.vision.utils import sanitize_hf_model_name
 
 from lambda_curves_common import (
-    GRID,
+    BASELINE_FP_PTQ,
+    BASELINE_UNIT,
+    UNIT_ALPHA,
     curve_key,
     curve_stats,
+    discover_grid,
+    resolve_grid,
     summarize_cells,
 )
 
@@ -54,11 +63,8 @@ EVAL_ROOT_QV        = "evaluations/text/ilharco_automodelforsequenceclassificati
 
 EVAL_ROOT_OUT = "evaluations/998_rebuttal/003_lambda_sensitivity"
 
-TEST_METRIC_KEY = "test_accuracy_fp_head_ptq"
-TEST_ACC_KEY    = "test_accuracy"
-
 # Validation-selected best scaling, written by pick_best_alpha.py.  Kept for
-# reference only: the curve statistics use the test-side grid argmax.
+# reference only: the curve statistics use the grid argmax on the evaluated split.
 BEST_ALPHA_FILE = "best_alpha_fp_head_ptq.json"
 BEST_ALPHA_KEY  = "val_accuracy_fp_head_ptq"
 
@@ -68,6 +74,22 @@ MODEL_DISPLAY_NAMES = {
     "google/embeddinggemma-300m":      "EmbeddingGemma",
     "Qwen/Qwen3-Embedding-0.6B":       "Qwen3-Embedding",
 }
+
+
+def _metric_key(split):
+    """Patched-model accuracy key in a transfer eval_results.json."""
+    return f"{split}_accuracy_fp_head_ptq"
+
+
+def _baseline_key(split):
+    """Vanilla-PTQ accuracy key in a 000_baselines eval_results.json."""
+    return f"{split}_accuracy"
+
+
+def _frac_positive_meaning(baseline):
+    if baseline == BASELINE_FP_PTQ:
+        return "Delta > 0: the patched model beats vanilla PTQ"
+    return "r > 0: the patched model beats the lambda = 1 default"
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +116,21 @@ def parse_args():
     parser.add_argument("--skip-modules",    required=True, nargs="+",
                         help="One skip-module name per model, parallel to --model-names "
                              "(e.g. classifier classifier score score).")
+
+    parser.add_argument("--split",           required=True, choices=["val", "test"],
+                        help="Evaluation split the curves are read from. The dense "
+                             "lambda grids exist only on val; test has two or three "
+                             "points per cell.")
+    parser.add_argument("--baseline",        required=True,
+                        choices=[BASELINE_FP_PTQ, BASELINE_UNIT],
+                        help="What the curve is measured against: 'fp_ptq' for "
+                             "Delta(lambda) against vanilla PTQ (needs a "
+                             "vanilla-PTQ evaluation on the same split), 'unit' "
+                             "for r(lambda) against the lambda = 1 default.")
+    parser.add_argument("--grid",            required=True, choices=["shared", "full"],
+                        help="'shared' restricts to the lambdas swept for every "
+                             "model, for cross-backbone comparability; 'full' uses "
+                             "every lambda present on disk.")
 
     parser.add_argument("--universal-donor", default=None,
                         help="Donor to report separately as the data-free default. "
@@ -126,11 +163,21 @@ def _ptq_frag(args, skip_module):
 # ---------------------------------------------------------------------------
 # Path builders
 # ---------------------------------------------------------------------------
-def _fp_ptq_path(model_dir, dataset, seed, optim_frag, ptq_frag):
-    return os.path.join(
+def _fp_ptq_path(model_dir, dataset, seed, optim_frag, ptq_frag, split):
+    """Vanilla-PTQ baseline for one receiver.
+
+    The test-split baselines predate any notion of a split in this path and are
+    read by 001, 002 and every visualization, so their location is left alone;
+    val-split baselines get a split= leaf below seed=.
+    """
+    parts = [
         EVAL_ROOT_BASELINES, "fp_ptq", model_dir, dataset,
-        optim_frag, ptq_frag, f"seed={seed}", "eval_results.json",
-    )
+        optim_frag, ptq_frag, f"seed={seed}",
+    ]
+    if split != "test":
+        parts.append(f"split={split}")
+    parts.append("eval_results.json")
+    return os.path.join(*parts)
 
 
 def _qv_cell_prefix(model_dir, donor, receiver, seed, optim_frag, qat_frag, ptq_frag):
@@ -179,41 +226,71 @@ def _load_value(path, key):
 # ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
-def load_pairs(model_dir, datasets, args, optim_frag, qat_frag, ptq_frag):
-    """Delta(lambda) over the shared grid for every (donor, receiver) cell."""
+def cell_prefixes(model_dir, datasets, args, optim_frag, qat_frag, ptq_frag):
+    """Every donor-receiver cell directory for one model."""
+    return [
+        _qv_cell_prefix(model_dir, donor, receiver, args.seed,
+                        optim_frag, qat_frag, ptq_frag)
+        for receiver in datasets
+        for donor in datasets
+    ]
+
+
+def load_pairs(model_dir, datasets, args, grid, optim_frag, qat_frag, ptq_frag):
+    """The curve over `grid` for every (donor, receiver) cell."""
     pairs = []
     missing = []
 
+    metric_key   = _metric_key(args.split)
+    baseline_key = _baseline_key(args.split)
+    unit_key     = curve_key(UNIT_ALPHA)
+
     for receiver in datasets:
-        baseline_path = _fp_ptq_path(model_dir, receiver, args.seed, optim_frag, ptq_frag)
-        baseline = _load_value(baseline_path, TEST_ACC_KEY)
-        if baseline is None:
-            missing.append(baseline_path)
-            continue
+        baseline = None
+        if args.baseline == BASELINE_FP_PTQ:
+            baseline_path = _fp_ptq_path(model_dir, receiver, args.seed,
+                                         optim_frag, ptq_frag, args.split)
+            baseline = _load_value(baseline_path, baseline_key)
+            if baseline is None:
+                missing.append(baseline_path)
+                continue
 
         for donor in datasets:
             cell_prefix = _qv_cell_prefix(model_dir, donor, receiver, args.seed,
                                           optim_frag, qat_frag, ptq_frag)
 
-            curve = {}
-            for alpha in GRID:
-                path = _qv_eval_path(cell_prefix, alpha, "test")
-                acc = _load_value(path, TEST_METRIC_KEY)
+            accs = {}
+            for alpha in grid:
+                path = _qv_eval_path(cell_prefix, alpha, args.split)
+                acc = _load_value(path, metric_key)
                 if acc is None:
                     missing.append(path)
                     continue
-                curve[curve_key(alpha)] = acc - baseline
+                accs[curve_key(alpha)] = acc
 
-            if not curve:
+            if not accs:
                 continue
+
+            if args.baseline == BASELINE_FP_PTQ:
+                reference = baseline
+            else:
+                # r(lambda) is undefined without the default it is measured
+                # against, so such a cell is dropped rather than silently
+                # rebased on some other lambda.
+                if unit_key not in accs:
+                    missing.append(_qv_eval_path(cell_prefix, UNIT_ALPHA, args.split))
+                    continue
+                reference = accs[unit_key]
+
+            curve = {k: v - reference for k, v in accs.items()}
 
             pairs.append({
                 "donor":        donor,
                 "receiver":     receiver,
-                "baseline_acc": baseline,
+                "reference_acc": reference,
                 "same_task":    donor == receiver,
                 "curve":        curve,
-                "stats":        curve_stats(curve),
+                "stats":        curve_stats(curve, grid, args.baseline),
                 # Validation-selected scaling, for reference against 001 only.
                 "alpha_best_val": _load_best_alpha(cell_prefix),
             })
@@ -230,8 +307,39 @@ def _out_dir(args):
         f"seed={args.seed}",
         f"qat=bits={args.qat_bits}_gran={args.granularity}",
         f"ptq=bits={args.ptq_bits}_gran={args.granularity}",
-        "split=test",
+        f"split={args.split}",
+        f"baseline={args.baseline}",
+        f"grid={args.grid}",
     )
+
+
+# ---------------------------------------------------------------------------
+# Reporting
+# ---------------------------------------------------------------------------
+def _print_model_summary(entry, baseline):
+    summary = entry["cross_task"]
+    if summary["n"] == 0:
+        print(f"  {entry['display_name']}: no cross-task pairs found")
+        return
+
+    unit = summary["curve"].get(curve_key(UNIT_ALPHA))
+    bits = [f"{summary['n']} cross-task pairs",
+            f"grid={entry['n_grid_points']} pts"]
+    if unit and unit["frac_positive"] is not None:
+        bits.append(f"frac_positive@1={unit['frac_positive'] * 100:.1f}%")
+    if summary["interval_width"]["median"] is not None:
+        bits.append(f"median interval width={summary['interval_width']['median']:.2f}")
+    if summary["plateau_width"]["median"] is not None:
+        bits.append(f"median plateau width={summary['plateau_width']['median']:.2f}")
+    if baseline == BASELINE_FP_PTQ:
+        if summary["unit_retention"]["median"] is not None:
+            bits.append(f"median unit retention={summary['unit_retention']['median']:.2f}")
+    else:
+        if summary["unit_regret"]["median"] is not None:
+            bits.append(f"median unit regret={summary['unit_regret']['median'] * 100:.2f}pp")
+        if summary["frac_unit_optimal"] is not None:
+            bits.append(f"unit optimal in {summary['frac_unit_optimal'] * 100:.1f}%")
+    print(f"  {entry['display_name']}: " + ", ".join(bits))
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +360,16 @@ def main():
         ptq_frag   = _ptq_frag(args, skip_module)
 
         print(f"Loading {model_name} ...")
-        pairs, missing = load_pairs(model_dir, datasets, args,
+        prefixes   = cell_prefixes(model_dir, datasets, args,
+                                   optim_frag, qat_frag, ptq_frag)
+        discovered = discover_grid(prefixes, args.split)
+        grid       = resolve_grid(args.grid, discovered)
+        if not grid:
+            print(f"  {model_name}: no lambdas found on split={args.split}",
+                  file=sys.stderr)
+            continue
+
+        pairs, missing = load_pairs(model_dir, datasets, args, grid,
                                     optim_frag, qat_frag, ptq_frag)
 
         cross = [p for p in pairs if not p["same_task"]]
@@ -265,26 +382,20 @@ def main():
             "skip_modules":     [skip_module],
             "n_datasets":       len(datasets),
             "n_cells_expected": len(datasets) ** 2,
+            "grid":             grid,
+            "n_grid_points":    len(grid),
             "pairs":            pairs,
-            "cross_task":       summarize_cells(cross),
-            "same_task":        summarize_cells(same),
+            "cross_task":       summarize_cells(cross, grid, args.baseline),
+            "same_task":        summarize_cells(same, grid, args.baseline),
             "universal_donor":  summarize_cells(
-                [p for p in cross if p["donor"] == args.universal_donor]
+                [p for p in cross if p["donor"] == args.universal_donor],
+                grid, args.baseline,
             ) if args.universal_donor else None,
             "missing":          missing,
         }
         models[model_name] = entry
 
-        summary = entry["cross_task"]
-        if summary["n"] == 0:
-            print(f"  {entry['display_name']}: no cross-task pairs found")
-        else:
-            unit = summary["curve"][curve_key(1.0)]
-            print(f"  {entry['display_name']}: {summary['n']} cross-task pairs, "
-                  f"win_rate={unit['win_rate'] * 100:.1f}% at lambda=1, "
-                  f"median safe width={summary['safe_width']['median']:.2f}, "
-                  f"median plateau width={summary['plateau_width']['median']:.2f}, "
-                  f"median unit retention={summary['unit_retention']['median']:.2f}")
+        _print_model_summary(entry, args.baseline)
         if missing:
             print(f"  {entry['display_name']}: {len(missing)} missing files",
                   file=sys.stderr)
@@ -304,10 +415,11 @@ def main():
             "ptq_bits":        args.ptq_bits,
             "granularity":     args.granularity,
             "skip_modules":    list(args.skip_modules),
-            "grid":            GRID,
-            "eval_split":      "test",
-            "metric_key":      TEST_METRIC_KEY,
-            "baseline":        "fp_ptq",
+            "grid_mode":       args.grid,
+            "eval_split":      args.split,
+            "metric_key":      _metric_key(args.split),
+            "baseline":        args.baseline,
+            "frac_positive_meaning": _frac_positive_meaning(args.baseline),
             "universal_donor": args.universal_donor,
         },
         "datasets": datasets,
