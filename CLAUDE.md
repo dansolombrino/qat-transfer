@@ -365,7 +365,7 @@ Baselines:
 {EVALUATION_BASE_PATH}/{vision,text}/{family}/{phase}/{vision,text}/{experiment_type}/{sanitized_model}/{dataset}/[optim=.../][qat=.../][ptq=.../]seed={seed}/eval_results.json
 ```
 
-`{experiment_type}` is the baseline variant and names the directory directly: `fp`, `fp_ptq`, `qat`, `qat_ptq`, `pretrained`, `pretrained_ptq`, plus `*_dryrun` counterparts.
+`{experiment_type}` is the baseline variant and names the directory directly: `fp`, `fp_ptq`, `fp_gptq`, `qat`, `qat_ptq`, `pretrained`, `pretrained_ptq`, plus `*_dryrun` counterparts. `fp_gptq` paths carry a `gptq=bits=..._gran=..._skip=..._ncal=..._percdamp=..._actorder=...` fragment in place of the `ptq=` fragment (`block_size` is deliberately excluded — result-invariant solver batching).
 
 Transfer:
 ```
