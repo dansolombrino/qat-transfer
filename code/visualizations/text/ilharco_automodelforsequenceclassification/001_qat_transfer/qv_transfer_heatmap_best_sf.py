@@ -400,7 +400,12 @@ def plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag,
 
         fp_ptq_acc = data[target_dataset]["fp_ptq"]
 
-        for qv_dataset in qv_col_labels:
+        # Iterate the raw dataset names, not qv_col_labels: those are the
+        # display labels produced by DATASET_LABEL_RENAMES, while `data` is
+        # keyed by the raw names.  Any renamed dataset (AmazonCounterfactual ->
+        # Counterfactual, and seven others here) raises KeyError otherwise.
+        # qv_col_labels stays the axis labelling, which is all it is for.
+        for qv_dataset in datasets:
             cell           = data[target_dataset]["qv_transfer"][qv_dataset][metric_tag]
             best_alpha_acc = cell["best_alpha_acc"]
             best_alpha_val = cell["best_alpha_val"]

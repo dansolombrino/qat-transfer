@@ -345,7 +345,7 @@ def plot_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag, metric_ta
         qv_row_z, qv_row_text = [], []
         b_row_z,  b_row_text  = [], []
 
-        for qv_dataset in qv_col_labels:
+        for qv_dataset in datasets:
             qv_val = data[target_dataset]["qv_transfer"][qv_dataset][metric_tag]
             if qv_val is not None:
                 qv_row_z.append(qv_val)
@@ -473,7 +473,7 @@ def plot_difference_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag
 
         sub_val = data[target_dataset][subtractor]
 
-        for qv_dataset in qv_col_labels:
+        for qv_dataset in datasets:
             qv_val = data[target_dataset]["qv_transfer"][qv_dataset][metric_tag]
             if qv_val is not None and sub_val is not None:
                 diff = qv_val - sub_val
