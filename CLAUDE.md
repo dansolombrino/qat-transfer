@@ -26,12 +26,15 @@ This holds for two independent reasons, and either alone is sufficient:
 | Path | Runnable? | Needs |
 |---|---|---|
 | `code/src/**` | **No** — read-only reference | GPU + datasets |
-| `code/experiments/{vision,text}/**` | **No** — read-only reference | GPU + checkpoints |
+| `code/experiments/{vision,text}/**` | **No** — read-only reference (except the two argparse analysis phases below) | GPU + checkpoints |
+| `code/experiments/vision/ilharco_timm_supervised/004_qv_alignment/**` | Yes | `storage/` checkpoints (CPU only) |
 | `code/experiments/998_rebuttal/**` | Yes (except `measure_step_time.py`) | the `evaluations/` tree only |
 | `code/visualizations/**` | Yes | the `evaluations/` tree only |
 | `code/test/**` | Only with datasets present | HF datasets cache |
 
 The one exception inside `998_rebuttal` is `002_cost_amortization/measure_step_time.py`, which is a Hydra script that builds a real model and times QAT steps on a GPU — treat it like `code/src/`.
+
+Two analysis phases read `CHECKPOINT_BASE_PATH` even though the rule below says analysis scripts do not: `998_rebuttal/004_quantization_mechanism` and `vision/ilharco_timm_supervised/004_qv_alignment`. Both still build no model for inference, run no forward pass and need no GPU or dataset, so they keep the property that rule protects — but neither is runnable in a code-only clone, since both need `storage/`. The `pick_best_alpha.py` helpers under each `00N_qat_transfer/` are likewise argparse and CPU-only, but read `evaluations/` rather than checkpoints.
 
 `collect_dataset_sizes.py` reads HuggingFace dataset metadata; pass `--offline` to keep it on the local cache.
 
@@ -209,6 +212,7 @@ Experiments are organized in numbered directories. New experiments get the next 
 | `002_qat_transfer_reversed` | Does the QV work in reverse — `ptq(QAT_tgt) - alpha * QV_src`? | `vision/ilharco_timm_supervised` |
 | `002z_qat_transfer_reversed_ptq_after_reverse` | Same as 002, but PTQ is applied *after* the subtraction rather than before. | `vision/ilharco_timm_supervised` |
 | `003_qat_transfer_activ` | Does the same transfer work in **activation** space instead of weight space? | `vision/ilharco_timm_supervised` |
+| `004_qv_alignment` | Does the similarity between donor and receiver QVs predict the observed transfer gain `Delta(D,R)`? The Euclidean, measurable side of Proposition 1's `cos^2` law. | `vision/ilharco_timm_supervised` |
 | `998_rebuttal` | Reviewer-driven analyses; cross-family, reads existing evaluations. | top-level |
 | `999_paper_stuff` | Camera-ready figures and LaTeX tables. Visualization-only, apart from one FLOPs computation. | per family |
 
@@ -221,6 +225,7 @@ Suffix conventions: a trailing letter (`002z`) marks a variant of the preceding 
 | `001_zero_shot_reframing` | How does the method read when framed as zero-shot? Win rates at `lambda=1` vs `lambda*`, recovery ratios, the `lambda_best` distribution, and how many `lambda=1` failures are merely overshoot of a positively-aligned direction. |
 | `002_cost_amortization` | The donor's QAT run is a real one-off cost. Over how many receivers does it amortize before QV transfer undercuts per-task QAT? Also: which donors are worth their cost. |
 | `003_lambda_sensitivity` | How sensitive is patching to `lambda`? Safe interval, plateau width, unit retention, unimodality. **In progress** — only the timm curves have been computed; open_clip and text are pending. |
+| `004_quantization_mechanism` | *Why* does patching help — does it make the weights easier to quantize (H1), or leave the quantization error the same size but move it somewhere the function ignores (H2)? Weight-space only, with `random` / `shuffle` / `taskvec` nulls. |
 
 Within `998_rebuttal`, the per-family scripts are named `<verb>_<noun>_<family>.py` (`compute_win_loss_timm_supervised.py`, `compute_lambda_curves_open_clip.py`, ...) and share family-independent math via a `*_common.py` module in the same directory. Only path logic differs between families and it stays in the per-family script — follow this split when adding a family.
 
