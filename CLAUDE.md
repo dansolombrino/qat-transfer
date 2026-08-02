@@ -144,6 +144,7 @@ qat-transfer/
 |---|---|
 | `code/src/quantization.py` | Core quantize/dequantize/fake-quantize functions, QATLinear, enable_qat_/disable_qat_/apply_ptq_ |
 | `code/src/task_vectors.py` | TaskVector class for computing and applying checkpoint deltas |
+| `code/src/pv_tuning.py` | PV-Tuning on the project's uniform grid: PVLinear, enable_pv_/pv_step_/settle_pv_/disable_pv_, and `pv_path_frag` (the single source of the `pv=` path fragment) |
 | `code/src/vision/utils.py` | Sanitizers, set_seed, accuracy, LR schedulers, LabelSmoothing, tqdm helpers |
 | `code/src/vision/data/common.py` | Vision dataset constants (DATASET_NAME_TO_EPOCHS, DATASET_NAME_TO_NUM_CLASSES), split helpers |
 | `code/src/vision/data/registry.py` | Vision dataset registry and get_dataset factory |
@@ -199,6 +200,7 @@ Experiments are organized in numbered directories. New experiments get the next 
 | `002z_qat_transfer_reversed_ptq_after_reverse` | Same as 002, but PTQ is applied *after* the subtraction rather than before. | `vision/ilharco_timm_supervised` |
 | `003_qat_transfer_activ` | Does the same transfer work in **activation** space instead of weight space? | `vision/ilharco_timm_supervised` |
 | `004_qv_alignment` | Does the similarity between donor and receiver QVs predict the observed transfer gain `Delta(D,R)`? The Euclidean, measurable side of Proposition 1's `cos^2` law. | `vision/ilharco_timm_supervised` |
+| `008_pv_transfer` | Does a stronger quantization-aware *finetuner* produce a better-transferring QV? Same patch, same RTN `apply_ptq_` as 001; only the donor's finetuner changes (STE -> PV-Tuning), so the two phases' heatmaps differ by exactly that. | `vision/ilharco_timm_supervised` |
 | `998_rebuttal` | Reviewer-driven analyses; cross-family, reads existing evaluations. | top-level |
 | `999_paper_stuff` | Camera-ready figures and LaTeX tables. Visualization-only, apart from one FLOPs computation. | per family |
 
@@ -358,6 +360,14 @@ Paths are built with `os.path.join(*parts_list)` — never pathlib for runtime p
 {CHECKPOINT_BASE_PATH}/text/{family}/{fp,qat}/{sanitized_model}/{dataset}/optim=adamw_lr={lr}_wd={wd}_ls={ls}_mgn={max_grad_norm}_bs={batch_size}_ml={max_length}/[qat=bits={bits}_gran={granularity}_skip={skip_tag}/]seed={seed}/backbone_epoch_{N}.pt
 ```
 
+A `pv/` checkpoint subtree sits alongside `fp/` and `qat/`, replacing the `qat=` fragment with one naming the finetuner that produced it:
+
+```
+pv=bits=..._gran=..._skip=..._delta=..._tau=..._trust=..._pevery=..._temp=...
+```
+
+`trust=none` when the trust ratio is disabled. Never spell this fragment by hand — call `pv_path_frag` in `code/src/pv_tuning.py`, which every writer and reader of the `pv=` tree already uses. Alongside the classifier and head, `finetune_pv.py` writes a `pv_state_epoch_{N}.pt` sidecar holding `{codes, scale, latent}` per layer; the latent straight-through buffer is the one thing the settled checkpoint cannot reconstruct, and it is what `008_pv_transfer` builds its QV from.
+
 ### Evaluation paths
 
 Baselines:
@@ -365,7 +375,7 @@ Baselines:
 {EVALUATION_BASE_PATH}/{vision,text}/{family}/{phase}/{vision,text}/{experiment_type}/{sanitized_model}/{dataset}/[optim=.../][qat=.../][ptq=.../]seed={seed}/eval_results.json
 ```
 
-`{experiment_type}` is the baseline variant and names the directory directly: `fp`, `fp_ptq`, `fp_gptq`, `qat`, `qat_ptq`, `pretrained`, `pretrained_ptq`, plus `*_dryrun` counterparts. `fp_gptq` paths carry a `gptq=bits=..._gran=..._skip=..._ncal=..._percdamp=..._actorder=...` fragment in place of the `ptq=` fragment (`block_size` is deliberately excluded — result-invariant solver batching).
+`{experiment_type}` is the baseline variant and names the directory directly: `fp`, `fp_ptq`, `fp_gptq`, `qat`, `qat_ptq`, `pv`, `pv_ptq`, `pretrained`, `pretrained_ptq`, plus `*_dryrun` counterparts. `fp_gptq` paths carry a `gptq=bits=..._gran=..._skip=..._ncal=..._percdamp=..._actorder=...` fragment in place of the `ptq=` fragment (`block_size` is deliberately excluded — result-invariant solver batching). `pv` / `pv_ptq` carry the `pv=` fragment where `qat` / `qat_ptq` carry `qat=`, and are expected to report *identical* accuracies: `finetune_pv.py` settles the model onto the grid before saving, so `apply_ptq_` recovers the same integer codes. `evaluate_pv_ptq.py` records `ptq_codes_changed` (must be 0) to keep that a measurement rather than an assumption; the companion `ptq_max_abs_weight_delta` is ~1 ulp on GPU because `scale = absmax/qmax` round-trips through a CUDA division, and is context rather than a tripwire.
 
 Transfer:
 ```

@@ -24,6 +24,15 @@ baseline-related asks:
    quantization** (reviewers named GPTQ, AWQ, SmoothQuant; PV-tuning is a
    separate stronger-QAT question, out of scope here).
 
+   PV-tuning is still out of scope for *this* plan, but it is no longer
+   unaddressed: it is its own line of work under phase `008_pv_transfer`
+   (`code/src/pv_tuning.py`, `finetune_pv.py`, `000_baselines/evaluate_pv*.py`).
+   It asks whether a stronger *finetuner* yields a better-transferring QV,
+   which is orthogonal to this plan's question about stronger *quantizers*, and
+   it shares none of their code paths. Answer, on the full 22x22 grid: no —
+   cross-task mean PV minus QAT is -0.0020 over n=462, PV better in 43.1% of
+   pairs. See journal.md.
+
 **Resolution of the "those are LLM methods" problem.** The named methods are
 examples, not the requirement; the objection is "your baseline is vanilla RTN".
 GPTQ is architecture-agnostic (layer-wise Hessian-compensated quantization of

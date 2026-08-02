@@ -177,3 +177,94 @@ Two worth repeating here:
 - An ImageNet QAT epoch took **24 h on the 4090** (32 cores, 16 workers) and
   **55 min on behemoth** with `TORCH_NUM_WORKERS=96`. Dataloader-bound, not
   GPU-bound.
+
+# 2026-08-01/02 — 008_pv_transfer: does a stronger finetuner give a better QV?
+
+Every QV in this repo is `QAT_D - FP_D`, and every QAT checkpoint behind it
+came from one finetuner: STE. The central claim says nothing about *how* the
+QAT optimum was found, so this phase swaps the finetuner and nothing else.
+PV-Tuning (Malinovskii et al., NeurIPS'24, arXiv 2405.14852; reference vendored
+at `references/AQLM/`) exists precisely because STE is a biased estimator at
+extreme compression, which is the 3-bit regime we care about.
+
+Ported to this repo's uniform symmetric grid, P = the integer codes, V = the
+straight-through buffer plus every non-quantized parameter (the per-channel
+scale stays derived, not learned — that is what keeps `apply_ptq_` a no-op on
+the saved checkpoint). At `delta_decay=0, max_code_change_per_step=1` PVLinear
+is **bitwise** QATLinear, so existing QAT is a corner of the PV knob grid; that
+is a free regression test and was verified end-to-end on a 4-step ViT-B/16 run
+(identical straight-through buffer, identical codes on all 48 layers).
+
+## Two corrections the runs forced
+
+**delta_decay > 0 freezes training.** AQLM's LLM regime uses delta=0.9. Here
+the pull-to-grid term is O(delta * scale) ~= 0.045 per step against an AdamW
+step of ~1e-5 at lr=1e-5 — about 4500x — so the buffer's drift converges to
+(1-delta)*step/delta, far below one scale step, no code ever moves, and the
+backbone stays pinned to the *pretrained* quantization. Measured before the
+sweep was killed at 19/22: CIFAR10 0.395 vs QAT's 0.868, MNIST 0.499 vs 0.980,
+and SUN397 0.031 — below even FP+PTQ's 0.054. Rejected. The sweep was redone at
+delta=0, where tau is the only knob and tau=1 is exactly QAT. Those delta=0.9
+checkpoints are kept as a documented negative control.
+
+**The QV must come from the latent buffer, not the saved checkpoint.** A PV
+checkpoint stores settled `q*s` weights, so `PV_ckpt - FP` is dominated by
+quantization rounding error rather than by anything PV learned: on MNIST its
+norm is 293.8 against the QAT QV's 12.4, with cosine 0.035 — essentially
+orthogonal. The control settles a *QAT* checkpoint and reproduces the same
+orthogonality with no PV involved, which is what identifies it as an artifact.
+The `pv_state_epoch_N.pt` sidecar's straight-through buffer is the exact
+analogue of what a QAT checkpoint stores: norm 12.37, cosine 0.909. That is the
+comparable object, and `qv.weights: latent` is now the default. Had this gone
+unnoticed the phase would have produced a confident, meaningless heatmap.
+
+## Checkpoint contract, verified on hardware
+
+`finetune_pv.py` settles onto the grid before saving, so `apply_ptq_` must
+recover the same codes. Across all 22 real ViT-B/16 checkpoints: **0 of ~1.87e9
+codes changed**, and `pv` / `pv_ptq` report identical accuracies on 22/22.
+`ptq_max_abs_weight_delta` comes back at ~1-2 ulp (2.4e-07) because
+`scale = absmax/qmax` round-trips through a CUDA division that is not
+bit-identical to the CPU's; it is exactly 0 on CPU. An earlier version of the
+check warned on `delta != 0` and fired on every healthy run — the code count is
+the invariant, the weight delta is context.
+
+## Result — a null, and it is the useful kind
+
+Full 22x22 grid, 506/506 cells, vit_base_patch16_224.orig_in21k, seed 2038,
+3-bit/channel/skip=[head], alpha=1, split=test, delta=0/tau=0.01. Every
+receiver landed exactly 23 cells.
+
+    cross-task (transfer)   n=462   mean PV-QAT = -0.0020   PV better 43.1%
+    same-task (ceiling)     n=22    mean PV-QAT = -0.0053   PV better 45.5%
+    win rate vs fp_ptq              PV 344/462   QAT 354/462
+
+The mean was stable at -0.002..-0.004 across n=25, 91, 108, 210, 226, 420, 462,
+and the win rate never left 41-48%. **PV-Tuning does not produce a
+better-transferring QV** — marginally worse, on a scale where the QAT-vs-FP
+ceiling gap is ~45 points.
+
+That is a negative result for PV and a positive one for the paper's claim: the
+transferable content is a property of the quantization grid that any
+quantization-aware finetuner recovers, not an artifact of STE's particular
+optimum. It is corroborated by the two QVs being 0.909-cosine aligned at equal
+norm — measured before the grid ran. The same-task row rules out the obvious
+confound: PV's own ceiling is also slightly below QAT's, so the cross-task
+deficit tracks a marginally worse optimum rather than a transfer-specific
+weakness. tau=0.01 acts as a mild handicap at lr=1e-5, not an improvement.
+
+Caveat on tau: 0.01 and 0.1 differed by 0.01% of codes on MNIST and gave
+identical accuracy, so tau is likely not load-bearing at this learning rate.
+The tau=0.1 finetunes exist (22/22) but its transfer grid was not run.
+
+## Infrastructure
+
+44 finetunes across behemoth GPUs 0/2/4/5/6/7 + rig-4090 + rig-3090-ti (~2 h);
+the 506-cell grid on behemoth's 6 GPUs (~2 h 17 m); 44 baselines (~15 min).
+rig-3090-ti had to be provisioned first (no `CHECKPOINT_BASE_PATH`, no
+`storage/`, unrelated git history) and all three rigs were rsynced to identical
+code, since a version skew across hosts silently produces inconsistent cells.
+The transfer grid ran on behemoth alone: a cell needs FP + PV + sidecar for
+*every* donor co-located, and `qv_transfer` returns 0 while skipping donors
+whose checkpoints are absent (multi-rig-dispatch rule 3), so a host with a
+partial donor set emits quietly incomplete rows.
