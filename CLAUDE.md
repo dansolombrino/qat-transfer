@@ -144,6 +144,7 @@ qat-transfer/
 |---|---|
 | `code/src/quantization.py` | Core quantize/dequantize/fake-quantize functions, QATLinear, enable_qat_/disable_qat_/apply_ptq_ |
 | `code/src/task_vectors.py` | TaskVector class for computing and applying checkpoint deltas |
+| `code/src/awq.py` | AWQ (activation-aware weight quantization) on the project's grid: AWQ solver, `apply_awq_`, and `awq_path_frag` (the single source of the `awq=` path fragment) |
 | `code/src/pv_tuning.py` | PV-Tuning on the project's uniform grid: PVLinear, enable_pv_/pv_step_/settle_pv_/disable_pv_, and `pv_path_frag` (the single source of the `pv=` path fragment) |
 | `code/src/vision/utils.py` | Sanitizers, set_seed, accuracy, LR schedulers, LabelSmoothing, tqdm helpers |
 | `code/src/vision/data/common.py` | Vision dataset constants (DATASET_NAME_TO_EPOCHS, DATASET_NAME_TO_NUM_CLASSES), split helpers |
@@ -201,6 +202,7 @@ Experiments are organized in numbered directories. New experiments get the next 
 | `003_qat_transfer_activ` | Does the same transfer work in **activation** space instead of weight space? | `vision/ilharco_timm_supervised` |
 | `004_qv_alignment` | Does the similarity between donor and receiver QVs predict the observed transfer gain `Delta(D,R)`? The Euclidean, measurable side of Proposition 1's `cos^2` law. | `vision/ilharco_timm_supervised` |
 | `008_pv_transfer` | Does a stronger quantization-aware *finetuner* produce a better-transferring QV? Same patch, same RTN `apply_ptq_` as 001; only the donor's finetuner changes (STE -> PV-Tuning), so the two phases' heatmaps differ by exactly that. | `vision/ilharco_timm_supervised` |
+| `009_qat_transfer_awq` | Does QV patching still add gain on top of **AWQ**? Same shape as `005_qat_transfer_gptq` with `apply_awq_` in place of `apply_gptq_`. Two strong-PTQ phases rather than one because GPTQ (error compensation) and AWQ (activation-aware rescaling) leave different residuals, so a result that reproduces across both is about the regime rather than about one method. | `vision/ilharco_timm_supervised` |
 | `998_rebuttal` | Reviewer-driven analyses; cross-family, reads existing evaluations. | top-level |
 | `999_paper_stuff` | Camera-ready figures and LaTeX tables. Visualization-only, apart from one FLOPs computation. | per family |
 
@@ -372,7 +374,7 @@ Baselines:
 {EVALUATION_BASE_PATH}/{vision,text}/{family}/{phase}/{vision,text}/{experiment_type}/{sanitized_model}/{dataset}/[optim=.../][qat=.../][ptq=.../]seed={seed}/eval_results.json
 ```
 
-`{experiment_type}` is the baseline variant and names the directory directly: `fp`, `fp_ptq`, `fp_gptq`, `qat`, `qat_ptq`, `pv`, `pv_ptq`, `pretrained`, `pretrained_ptq`, plus `*_dryrun` counterparts. `fp_gptq` paths carry a `gptq=bits=..._gran=..._skip=..._ncal=..._percdamp=..._actorder=...` fragment in place of the `ptq=` fragment (`block_size` is deliberately excluded — result-invariant solver batching). `pv` / `pv_ptq` carry the `pv=` fragment where `qat` / `qat_ptq` carry `qat=`, and are expected to report *identical* accuracies: `finetune_pv.py` settles the model onto the grid before saving, so `apply_ptq_` recovers the same integer codes. `evaluate_pv_ptq.py` records `ptq_codes_changed` (must be 0) to keep that a measurement rather than an assumption; the companion `ptq_max_abs_weight_delta` is ~1 ulp on GPU because `scale = absmax/qmax` round-trips through a CUDA division, and is context rather than a tripwire.
+`{experiment_type}` is the baseline variant and names the directory directly: `fp`, `fp_ptq`, `fp_gptq`, `fp_awq`, `qat`, `qat_ptq`, `pv`, `pv_ptq`, `pretrained`, `pretrained_ptq`, plus `*_dryrun` counterparts. `pv` / `pv_ptq` carry the `pv=` fragment where `qat` / `qat_ptq` carry `qat=`, and are expected to report *identical* accuracies: `finetune_pv.py` settles the model onto the grid before saving, so `apply_ptq_` is a no-op on a PV checkpoint. `evaluate_pv_ptq.py` records `ptq_max_abs_weight_delta` to keep that a measurement rather than an assumption — a non-zero value means the checkpoint did not come from the settle path and must not be used to build a QV. `fp_gptq` paths carry a `gptq=bits=..._gran=..._skip=..._ncal=..._percdamp=..._actorder=...` fragment in place of the `ptq=` fragment (`block_size` is deliberately excluded — result-invariant solver batching). `fp_awq` paths likewise carry `awq=bits=..._gran=..._skip=..._ncal=..._ngrid=..._clip=...` in place of `ptq=`; never spell it by hand — call `awq_path_frag` in `code/src/awq.py`, which every writer and reader of the `awq=` tree already uses. AWQ and GPTQ each *replace* `apply_ptq_` rather than preceding it: `apply_ptq_` must never run after either, and for AWQ this is destructive rather than merely redundant, since AWQ's output `Q(W·diag(s))·diag(1/s)` does not sit on the plain absmax grid a following RTN pass would re-round it onto.
 
 Transfer:
 ```

@@ -6,8 +6,19 @@ alpha values swept on disk.  Then loads the *test* result for that alpha.
 Produces one heatmap per head variant (FP head / QAT head):
 
   heatmap_qv_transfer_<variant>_best_alpha_minus_fp_ptq.png
-      Left-panel cell value  = test_acc_at_best_alpha[target, qv] - fp_ptq_acc[target]
+  heatmap_qv_transfer_<variant>_best_alpha_minus_awq.png   (with --awq-*)
+  heatmap_qv_transfer_<variant>_best_alpha_minus_gptq.png  (with --gptq-*)
+      Left-panel cell value  = test_acc_at_best_alpha[target, qv] - <subtractor>[target]
       Right-panel cell value = test_accuracy of the corresponding baseline.
+
+The `awq` and `gptq` subtractors read the 000_baselines `fp_awq` / `fp_gptq`
+trees and answer the rebuttal's Task-1 question at lambda* rather than at a
+fixed lambda: is QV+RTN competitive with strong PTQ? Their arguments are
+conditionally required, all-or-none per competitor; passing none of a
+competitor's flags skips it, so omitting both reproduces this script's previous
+output byte-for-byte at the same paths. See qv_transfer_heatmap.py for the full
+rationale, including why the baselines come from 000_baselines rather than from
+a transfer sweep's alpha=0 self-pair.
 
 Cells where the best alpha differs from --qv-alpha (the fixed reference) are
 annotated with a trailing '*' in the cell text.
@@ -37,6 +48,8 @@ os.chdir(_PROJECT_ROOT)
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from src.awq import awq_path_frag
+from src.gptq import gptq_path_frag
 from src.vision.data.common import DATASET_NAME_TO_EPOCHS
 from src.vision.utils import sanitize_timm_model_name
 
@@ -58,6 +71,38 @@ BASELINE_METHOD_LABELS = {
     "qat":        "QAT",
     "qat_ptq":    "QAT+PTQ",
 }
+
+# Competitor PTQ baselines, mirroring qv_transfer_heatmap.py. Each is opt-in and
+# therefore NOT in BASELINE_METHODS: a competitor joins the right panel only on
+# the figure that subtracts it, so the pre-existing fp_ptq figure keeps
+# identical content at an identical path.
+COMPETITORS = {
+    "awq": {
+        "label":  "AWQ(FP)",
+        "subdir": "fp_awq",
+        "args":   ("awq_bits", "awq_ncal", "awq_ngrid", "awq_clip"),
+        "frag":   lambda a: awq_path_frag(
+            bits=a.awq_bits, granularity=a.granularity, skip_modules=a.skip_modules,
+            num_calib_batches=a.awq_ncal, n_grid=a.awq_ngrid, clip=a.awq_clip,
+        ),
+        "title":  lambda a: (f" | awq_bits={a.awq_bits},ncal={a.awq_ncal},"
+                             f"ngrid={a.awq_ngrid},clip={a.awq_clip}"),
+    },
+    "gptq": {
+        "label":  "GPTQ(FP)",
+        "subdir": "fp_gptq",
+        "args":   ("gptq_bits", "gptq_ncal", "gptq_percdamp", "gptq_actorder"),
+        "frag":   lambda a: gptq_path_frag(
+            bits=a.gptq_bits, granularity=a.granularity, skip_modules=a.skip_modules,
+            num_calib_batches=a.gptq_ncal, percdamp=a.gptq_percdamp,
+            actorder=a.gptq_actorder,
+        ),
+        "title":  lambda a: (f" | gptq_bits={a.gptq_bits},ncal={a.gptq_ncal},"
+                             f"percdamp={a.gptq_percdamp},actorder={a.gptq_actorder}"),
+    },
+}
+
+BASELINE_METHOD_LABELS.update({k: v["label"] for k, v in COMPETITORS.items()})
 
 # Number of classes per dataset, used to compute the random-chance baseline
 # (1 / num_classes). Mirrors the class_names sizes in code/src/vision/data/*.py.
@@ -144,7 +189,51 @@ def parse_args():
                         help="Fixed reference alpha. Cells whose best alpha differs "
                              "from this value are annotated with a trailing '*'.")
 
-    return parser.parse_args()
+    # AWQ baseline (000_baselines/fp_awq) — conditionally required: all or none.
+    # Granularity and skip_modules deliberately reuse --granularity /
+    # --skip-modules: the AWQ baseline must quantize the same layer set at the
+    # same granularity as the RTN column or the comparison is not like-for-like.
+    parser.add_argument("--awq-bits",        type=int)
+    parser.add_argument("--awq-ncal",        type=int)
+    parser.add_argument("--awq-ngrid",       type=int)
+    parser.add_argument("--awq-clip",        choices=["True", "False"],
+                        help="Rendered verbatim in the path fragment (Python bool str).")
+    parser.add_argument("--gptq-bits",       type=int)
+    parser.add_argument("--gptq-ncal",       type=int)
+    parser.add_argument("--gptq-percdamp",   type=float)
+    parser.add_argument("--gptq-actorder",   choices=["True", "False"],
+                        help="Rendered verbatim in the path fragment (Python bool str).")
+
+    args = parser.parse_args()
+
+    _resolve_competitors(parser, args)
+
+    return args
+
+
+def _resolve_competitors(parser, args):
+    """
+    Decide which competitor baselines are enabled and precompute their path
+    fragments, storing the result on *args*.
+
+    All-or-none per competitor: a partially specified competitor is an error
+    rather than a silent fallback, because its flags jointly name one sweep on
+    disk and a missing one cannot be guessed.
+    """
+    args.enabled_competitors = []
+    args.competitor_frags = {}
+    for name, spec in COMPETITORS.items():
+        dests = spec["args"]
+        given = [d for d in dests if getattr(args, d) is not None]
+        if given and len(given) != len(dests):
+            missing = [d for d in dests if getattr(args, d) is None]
+            parser.error(
+                f"--{name}-* arguments are all-or-none (they name one sweep on "
+                f"disk); got {sorted(given)} but missing {sorted(missing)}"
+            )
+        if given:
+            args.enabled_competitors.append(name)
+            args.competitor_frags[name] = spec["frag"](args)
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +286,16 @@ def _fp_ptq_path(model_dir, dataset, seed, optim_frag, ptq_frag):
     return os.path.join(
         EVAL_ROOT_BASELINES, "fp_ptq", model_dir, dataset,
         optim_frag, ptq_frag, f"seed={seed}", "eval_results.json",
+    )
+
+
+def _competitor_path(subdir, model_dir, dataset, seed, optim_frag, frag):
+    """A 000_baselines competitor cell: the `ptq=` slot holds the method's own
+    fragment (`awq=` / `gptq=`), since the method replaces RTN rather than
+    following it."""
+    return os.path.join(
+        EVAL_ROOT_BASELINES, subdir, model_dir, dataset,
+        optim_frag, frag, f"seed={seed}", "eval_results.json",
     )
 
 
@@ -287,6 +386,15 @@ def load_data(args):
             "qv_transfer": {},
         }
 
+        for name in args.enabled_competitors:
+            data[target_dataset][name] = _load_value(
+                _competitor_path(
+                    COMPETITORS[name]["subdir"], model_dir, target_dataset,
+                    args.seed, optim_frag, args.competitor_frags[name],
+                ),
+                TEST_ACC_KEY,
+            )
+
         for qv_dataset in datasets:
             cell_prefix = _qv_transfer_cell_prefix(
                 model_dir, qv_dataset, target_dataset, args.seed,
@@ -368,13 +476,15 @@ def _robust_symmetric_bounds(values, center, min_span=0.05, q_low=0.05, q_high=0
 # ---------------------------------------------------------------------------
 # Plot: best-alpha minus FP+PTQ
 # ---------------------------------------------------------------------------
-def plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag,
-                                          qat_frag, metric_tag):
+def plot_best_alpha_minus_baseline_heatmap(data, args, model_dir, optim_frag,
+                                           qat_frag, metric_tag,
+                                           subtractor="fp_ptq"):
     datasets = sorted(data.keys())
     head_label = QV_METRIC_LABELS[metric_tag]
 
     qv_col_labels       = datasets
-    baseline_col_labels = [BASELINE_METHOD_LABELS[m] for m in BASELINE_METHODS]
+    baseline_methods    = BASELINE_METHODS + ([subtractor] if subtractor in COMPETITORS else [])
+    baseline_col_labels = [BASELINE_METHOD_LABELS[m] for m in baseline_methods]
 
     qv_z, qv_text     = [], []
     base_z, base_text = [], []
@@ -383,14 +493,14 @@ def plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag,
         qv_row_z, qv_row_text = [], []
         b_row_z,  b_row_text  = [], []
 
-        fp_ptq_acc = data[target_dataset]["fp_ptq"]
+        sub_acc = data[target_dataset][subtractor]
 
         for qv_dataset in qv_col_labels:
             cell           = data[target_dataset]["qv_transfer"][qv_dataset][metric_tag]
             best_alpha_acc = cell["best_alpha_acc"]
             best_alpha_val = cell["best_alpha_val"]
-            if best_alpha_acc is not None and fp_ptq_acc is not None:
-                diff = best_alpha_acc - fp_ptq_acc
+            if best_alpha_acc is not None and sub_acc is not None:
+                diff = best_alpha_acc - sub_acc
                 star = "*" if (best_alpha_val is not None
                                and best_alpha_val != args.qv_alpha) else ""
                 qv_row_z.append(diff)
@@ -399,7 +509,7 @@ def plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag,
                 qv_row_z.append(None)
                 qv_row_text.append("")
 
-        for method in BASELINE_METHODS:
+        for method in baseline_methods:
             val = data[target_dataset][method]
             if val is not None:
                 b_row_z.append(val)
@@ -416,7 +526,7 @@ def plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag,
     qv_cmin, qv_cmax = _robust_symmetric_bounds(
         _finite_values(qv_z), center=0.0, min_span=0.02,
     )
-    qv_colorbar_title = "Acc \u0394 (best \u03b1 \u2212 fp_ptq)"
+    qv_colorbar_title = f"Acc \u0394 (best \u03b1 \u2212 {subtractor})"
 
     fig = make_subplots(
         rows=1, cols=2,
@@ -456,11 +566,15 @@ def plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag,
     _add_diagonal_borders(fig, datasets, xref="x", yref="y")
 
     skip_str = ",".join(sorted(args.skip_modules))
+    competitor_str = (
+        COMPETITORS[subtractor]["title"](args) if subtractor in COMPETITORS else ""
+    )
     title = (
-        f"QV Transfer ({head_label}, QAT+PTQ, Best Alpha) \u2212 FP+PTQ<br>"
+        f"QV Transfer ({head_label}, QAT+PTQ, Best Alpha) \u2212 "
+        f"{BASELINE_METHOD_LABELS[subtractor]}<br>"
         f"<sup>{args.model_name} | seed={args.seed} | optim={args.optim} | "
         f"qat_bits={args.qat_bits} | ptq_bits={args.ptq_bits} | granularity={args.granularity} | skip={skip_str} | "
-        f"alpha=best</sup>"
+        f"alpha=best{competitor_str}</sup>"
     )
 
     fig.update_layout(
@@ -493,16 +607,22 @@ def plot_best_alpha_minus_fp_ptq_heatmap(data, args, model_dir, optim_frag,
     )
     fig.update_yaxes(row=1, col=2, showticklabels=False, autorange="reversed")
 
-    out_dir = os.path.join(
+    out_parts = [
         "plots", "vision", "ilharco_timm_supervised", "001_qat_transfer", "qv_transfer_heatmap",
-
-        model_dir, f"seed={args.seed}", optim_frag, qat_frag, _ptq_frag(args.ptq_bits, args.granularity, args.skip_modules),
-        "qv=alpha=best",
-        "split=test",
-    )
+        model_dir, f"seed={args.seed}", optim_frag, qat_frag,
+        _ptq_frag(args.ptq_bits, args.granularity, args.skip_modules),
+    ]
+    # Only a competitor's own figure is qualified by the sweep it subtracts;
+    # adding the fragment unconditionally would relocate the pre-existing fp_ptq
+    # figure the moment any competitor flag is passed.
+    if subtractor in COMPETITORS:
+        out_parts.append(args.competitor_frags[subtractor])
+    out_parts += ["qv=alpha=best", "split=test"]
+    out_dir = os.path.join(*out_parts)
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(
-        out_dir, f"heatmap_qv_transfer_{metric_tag}_best_alpha_minus_fp_ptq.png",
+        out_dir,
+        f"heatmap_qv_transfer_{metric_tag}_best_alpha_minus_{subtractor}.png",
     )
     fig.write_image(out_path, scale=300 / 96)
     print(f"Saved: {out_path}")
@@ -515,9 +635,15 @@ def main():
     args = parse_args()
     data, model_dir, optim_frag, qat_frag = load_data(args)
     for metric_tag in TEST_METRIC_KEYS:
-        plot_best_alpha_minus_fp_ptq_heatmap(
+        plot_best_alpha_minus_baseline_heatmap(
             data, args, model_dir, optim_frag, qat_frag, metric_tag,
+            subtractor="fp_ptq",
         )
+        for name in args.enabled_competitors:
+            plot_best_alpha_minus_baseline_heatmap(
+                data, args, model_dir, optim_frag, qat_frag, metric_tag,
+                subtractor=name,
+            )
 
 
 if __name__ == "__main__":

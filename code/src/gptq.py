@@ -86,6 +86,37 @@ log = logging.getLogger(__name__)
 _MAX_DAMP_RETRIES = 3
 
 
+def gptq_path_frag(
+    bits: int,
+    granularity: str,
+    skip_modules,
+    num_calib_batches: int,
+    percdamp: float,
+    actorder: bool,
+) -> str:
+    """
+    The `gptq=` path fragment, in one place.
+
+    Historical note: this fragment predates the helper and is spelled by hand at
+    eight sites (both `evaluate_fp_gptq.py` twins, `qv_transfer_gptq.py`,
+    `compute_gptq_checkpoints.py`, `qv_transfer_gptqv.py`, and three
+    visualizations). Those are left alone — they work, and rewriting them is a
+    separate cleanup — but new callers use this, following `awq_path_frag` in
+    `src/awq.py` and `pv_path_frag` in `src/pv_tuning.py`.
+
+    Carries every knob that changes the numbers and nothing that does not:
+    `block_size` is deliberately excluded, being result-invariant solver
+    batching that would otherwise split identical results across paths. Booleans
+    render as Python `str(bool)` ("True"/"False"), matching what is on disk.
+    """
+    skip_modules_sorted = sorted(skip_modules)
+    skip_tag = "-".join(skip_modules_sorted) if skip_modules_sorted else "none"
+    return (
+        f"gptq=bits={bits}_gran={granularity}_skip={skip_tag}"
+        f"_ncal={num_calib_batches}_percdamp={percdamp}_actorder={actorder}"
+    )
+
+
 # =============================================================================
 # Per-layer solver
 # =============================================================================

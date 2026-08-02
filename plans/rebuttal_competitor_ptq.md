@@ -22,16 +22,15 @@ baseline-related asks:
    per-channel PTQ (`apply_ptq_`). Reviewers named GPTQ, VPTQ, SliM-LLM.
 2. **Task 2 — show QV patching retains benefit *on top of* stronger
    quantization** (reviewers named GPTQ, AWQ, SmoothQuant; PV-tuning is a
-   separate stronger-QAT question, out of scope here).
+   separate stronger-QAT question, out of scope here). GPTQ is WP3
+   (`005_qat_transfer_gptq`); AWQ is WP7 (`009_qat_transfer_awq`).
 
    PV-tuning is still out of scope for *this* plan, but it is no longer
-   unaddressed: it is its own line of work under phase `008_pv_transfer`
+   unaddressed: it is now its own line of work under phase `008_pv_transfer`
    (`code/src/pv_tuning.py`, `finetune_pv.py`, `000_baselines/evaluate_pv*.py`).
    It asks whether a stronger *finetuner* yields a better-transferring QV,
-   which is orthogonal to this plan's question about stronger *quantizers*, and
-   it shares none of their code paths. Answer, on the full 22x22 grid: no —
-   cross-task mean PV minus QAT is -0.0020 over n=462, PV better in 43.1% of
-   pairs. See journal.md.
+   which is orthogonal to WP1–WP6's question about stronger *quantizers*, and
+   it shares none of their code paths.
 
 **Resolution of the "those are LLM methods" problem.** The named methods are
 examples, not the requirement; the objection is "your baseline is vanilla RTN".
@@ -46,7 +45,7 @@ first). The rebuttal text will state this substitution explicitly.
 architecture suffices per reviewer 3HFP; more is better):
 
 ```
-{RTN, GPTQ, RepQ-ViT[, APHQ-ViT, PTQ4ViT]}  ×  {FP, FP + QV}
+{RTN, GPTQ, AWQ, RepQ-ViT[, APHQ-ViT, PTQ4ViT]}  ×  {FP, FP + QV}
 ```
 
 Row block `× FP` answers Task 1 (is QV+RTN competitive with strong PTQ on FP?).
@@ -226,6 +225,76 @@ Execute in order; WP1 unblocks both tasks.
   "from scratch"). Review the vendored code carefully; strip anything unused.
 - `evaluate_fp_repqvit.py` + YAML in `000_baselines/`, `experiment_type=fp_repqvit`.
 - QV combination (RepQ-ViT on `FP + alpha·QV`) reuses the WP3 script shape.
+
+### WP7 — AWQ  `[x]`  (Priority 1, added 2026-08-01)
+
+> Code done 2026-08-01 (executor session). Delivered `code/src/awq.py` (from
+> scratch against `references/llm-awq/`, on the project's grid) and
+> `code/test/awq.py` (10 CPU tests, all passing), plus
+> `000_baselines/evaluate_fp_awq.py`, `009_qat_transfer_awq/qv_transfer_awq.py`
+> and its visualization, all with mirrored YAMLs. Both 001 heatmap scripts gained
+> an `awq` subtractor.
+> **Wave 1 LANDED 2026-08-01**: vit_base x 22 datasets, 3-bit/channel, 22/22,
+> zero failures, ~40 s/run on behemoth GPUs 4/5/6/7. Strict ordering with no
+> exceptions: RTN << AWQ < GPTQ < FP. AWQ > RTN on 22/22 (mean +0.530);
+> AWQ < GPTQ on 22/22 (mean -0.042). Task 1: cross-task QV+RTN at lambda=1 beats
+> RTN fp_ptq on 76.6 % of 462 cells but reaches AWQ(FP) on 0.0 % — the GPTQ
+> conclusion, reproduced by a method with the opposite mechanism. See journal.md.
+> 009 itself is coded and unrun.
+> **2026-08-02**: both 001 heatmap scripts now carry a `gptq` subtractor too, so
+> each emits `minus_fp_ptq`, `minus_awq` and `minus_gptq`. The competitor
+> baselines are read from `000_baselines/{fp_awq,fp_gptq}` and the per-competitor
+> flags are all-or-none, so omitting them reproduces earlier output byte-for-byte.
+> This **supersedes and replaces**
+> `code/visualizations/.../005_qat_transfer_gptq/qv_transfer_rtn_heatmap_minus_gptq_fp.py`,
+> now **deleted** — its left panel was always 001's RTN cells, so the figure
+> belongs in 001. Verified equivalent first: `000_baselines/fp_gptq` and 005's
+> alpha=0 self-pair agree bit-for-bit on all 22 datasets. Do not resurrect it.
+> A `gptq_path_frag` helper was added to `code/src/gptq.py` (mirroring
+> `awq_path_frag`) and is used by the new call sites; migrating the eight
+> pre-existing hand-spelled `gptq=` sites onto it remains an optional cleanup.
+
+AWQ was named by reviewers under Task 2 but had no work package; §1's "the named
+methods are examples" covers the substitution argument, not the omission of a
+method that ports *perfectly* well. AWQ quantizes `nn.Linear` weights using only
+activation statistics, so like GPTQ it is architecture-agnostic and needs no
+vendoring.
+
+**Why a second strong-PTQ method at all.** WP3's answer was negative — at
+lambda=1, QV patching does not add gain on top of GPTQ. One method cannot
+distinguish "strong PTQ in general leaves nothing to recover" from "error
+compensation specifically leaves nothing to recover". GPTQ and AWQ attack the
+problem from opposite ends (post-hoc error feedback vs. pre-emptive salience
+rescaling) and leave different residuals, so agreement across both is evidence
+about the regime.
+
+**Decisions taken (do not re-litigate)**
+
+- *Search objective*: per-Linear output MSE, not official AWQ's enclosing
+  `module2inspect`. timm's ViT/DeiT/Swin fuse QKV, so official AWQ's shared-scale
+  groups are singletons and the grouping coincides; only the measurement point
+  differs. Buys architecture-agnosticism (no block pair table, no `Catcher`).
+- *Clipping*: official `auto_clip` included, gated by `awq.clip` (default true).
+  Shipping AWQ without it would be the weakened baseline reviewers object to.
+- *No scale folding*: the simulated weight `Q(W·diag(s))·diag(1/s)` is written
+  in place. This is accuracy-equivalent to official AWQ's folding (exact for
+  LN->FC and FC->FC) and to its `ScaledActivation` wrapper, while preserving the
+  `apply_ptq_` contract that no module is replaced.
+- *Grid*: the project's symmetric per-channel grid, not official AWQ's
+  asymmetric group-128 one — the §5 comparability requirement. AWQ at
+  `n_grid=1, clip=false` is bit-exact RTN, which is the tested contract.
+- *Scope*: vision `ilharco_timm_supervised` only; `apply_awq_` takes a
+  `forward_fn`, so the text twin is a cheap follow-up.
+- *`awq=` fragment*: `bits/gran/skip + ncal/ngrid/clip`, rendered by
+  `awq_path_frag` in `code/src/awq.py` (the `pv_path_frag` precedent). The
+  clip-grid constants are fixed in code, not config, so they cannot enter the
+  fragment; they are recorded in each results JSON.
+
+**Acceptance criteria** — as WP1: `n_grid=1, clip=false` reproduces
+`apply_ptq_` bit-exactly; AWQ's layer-output error is strictly below RTN's on
+salient-channel inputs; `weight * scale` lands on the integer grid (the property
+that makes the unfolded form a genuine b-bit model). All CPU, all in
+`code/test/awq.py`.
 
 ### WP5 — APHQ-ViT / PTQ4ViT / REx  `[ ]`  (Priority 3, only if time allows)
 

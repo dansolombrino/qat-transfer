@@ -384,6 +384,77 @@ not because any quantization displacement happens to transfer — a
 displacement of near-identical norm (GPTQ's) does not. The EuroSAT diagonal
 reproduced 005's GPTQ(FP) bit-exactly (0.9751852), validating the pipeline.
 
+# 2026-08-01 — rebuttal WP7: AWQ as a second strong-PTQ column
+
+AWQ was named by reviewers under Task 2 but had no work package — §1 of
+`plans/rebuttal_competitor_ptq.md` argued the substitution of ViT-native SOTA
+for LLM-bound methods, which never applied to AWQ: like GPTQ it quantizes
+`nn.Linear` weights from activation statistics alone and ports directly.
+
+New code (WP7): `code/src/awq.py` + `code/test/awq.py` (10 CPU tests),
+`000_baselines/evaluate_fp_awq.py`, `009_qat_transfer_awq/qv_transfer_awq.py`
+and its heatmap, all with mirrored YAMLs; both 001 heatmap scripts gained an
+`awq` subtractor (`heatmap_qv_transfer_{fp,qat}_head_ptq_minus_awq.png`),
+opt-in via all-or-none `--awq-*` flags so existing invocations regenerate
+byte-identical output.
+
+Written from `references/llm-awq/` on the **project's own grid**, with three
+deviations that matter: the search objective is each Linear's output MSE rather
+than an enclosing `module2inspect` (timm fuses QKV, so AWQ's shared-scale
+groups are singletons anyway and only the measurement point differs); the
+scale is **not folded** into the preceding LayerNorm/Linear but kept as
+`Q(W·diag(s))·diag(1/s)` in the weight — accuracy-equivalent to official
+folding and to its `ScaledActivation` wrapper, but it preserves the
+`apply_ptq_` contract that no module is replaced; and clipping uses official
+`auto_clip` with the fused-`qkv` skip. Tested contracts: `n_grid=1, clip=false`
+is bit-exact `apply_ptq_`, and `weight * scale` lands on the integer grid.
+
+## Wave 1 LANDED (2026-08-01, 22:56–22:59)
+
+vit_base_patch16_224.orig_in21k x 22 datasets, 3-bit/channel/skip=[head],
+ncal=4/ngrid=20/clip=True. behemoth GPUs **4/5/6/7 only** — 0/2, the 4090 and
+the 3090-ti were held by the PV wave and left untouched. 22/22 artifacts, zero
+failures, ~40 s/run, 3.5 min wall. AWQ turned out to be GPTQ-priced, not the
+2-4x initially estimated: the 20-point scale search plus 10-step clip search
+costs 3.1 s across all 48 layers, because each candidate is a matmul on cached
+activations. The cost is the calibration forwards, as with GPTQ.
+
+**Strict ordering, no exceptions: RTN << AWQ < GPTQ < FP.**
+
+- AWQ(FP) > RTN(FP) on **22/22**, mean **+0.530** (e.g. MNIST 0.905 vs 0.143,
+  GTSRB 0.901 vs 0.197). Smallest gain RenderedSST2 (+0.024), the one task RTN
+  never collapsed — exactly where GPTQ's margin was smallest too.
+- AWQ(FP) < GPTQ(FP) on **22/22**, mean **-0.042**. Tight and consistent:
+  worst EMNIST (-0.159), KMNIST (-0.095), SVHN (-0.079); essentially tied on
+  ImageNet (-0.004), STL10 (-0.004), RenderedSST2 (-0.001). Error compensation
+  beats salience rescaling at 3 bits on this backbone, but only by a few points
+  — the two methods agree far more than they differ.
+
+## Task 1 under AWQ: QV+RTN loses to AWQ(FP) on 462/462 cross-task cells
+
+Same computation as the GPTQ Task-1 view, fp head, lambda=1, cross-task only:
+
+| baseline | mean Δ | median | win rate |
+|---|---|---|---|
+| RTN `fp_ptq` (the paper's own reference) | **+0.097** | +0.054 | **76.6 %** |
+| AWQ(FP) | **-0.433** | -0.446 | **0.0 %** |
+
+Best AWQ cell is -0.0016, i.e. not a single cross-task pair reaches AWQ(FP).
+This is the GPTQ conclusion again, harder: **two independent strong-PTQ methods
+agree that on this backbone one-shot calibration closes far more of the 3-bit
+gap than a data-free QV patch does.** That the agreement holds across methods
+with opposite mechanisms (post-hoc error feedback vs. pre-emptive salience
+rescaling) makes it a fact about the regime, not about GPTQ.
+
+Rebuttal framing, unchanged from WP2/WP3 but now on two legs: lead with
+complementarity and with the settings where calibration is not available or not
+enough (the 2-bit cliff, where GPTQ2 collapses to 0.289 mean), not with
+competition on 3-bit vit_base. The honest Task-1 sentence is that QV+RTN beats
+the RTN baseline it was designed against on 77 % of pairs, and does not reach
+either strong-PTQ baseline.
+
+Open, and the reason 009 exists: whether QV patching adds gain *on top of* AWQ
+(Task 2). 005 said no for GPTQ at lambda=1. 009 is coded and unrun.
 
 # 2026-08-01/02 — 008_pv_transfer: does a stronger finetuner give a better QV?
 
