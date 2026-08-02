@@ -26,15 +26,14 @@ This holds for two independent reasons, and either alone is sufficient:
 | Path | Runnable? | Needs |
 |---|---|---|
 | `code/src/**` | **No** — read-only reference | GPU + datasets |
-| `code/experiments/{vision,text}/**` | **No** — read-only reference (except the two argparse analysis phases below) | GPU + checkpoints |
-| `code/experiments/vision/ilharco_timm_supervised/004_qv_alignment/**` | Yes | `storage/` checkpoints (CPU only) |
+| `code/experiments/{vision,text}/**` | **No** — read-only reference | GPU + checkpoints |
 | `code/experiments/998_rebuttal/**` | Yes (except `measure_step_time.py`) | the `evaluations/` tree only |
 | `code/visualizations/**` | Yes | the `evaluations/` tree only |
 | `code/test/**` | Only with datasets present | HF datasets cache |
 
 The one exception inside `998_rebuttal` is `002_cost_amortization/measure_step_time.py`, which is a Hydra script that builds a real model and times QAT steps on a GPU — treat it like `code/src/`.
 
-Two analysis phases read `CHECKPOINT_BASE_PATH` even though the rule below says analysis scripts do not: `998_rebuttal/004_quantization_mechanism` and `vision/ilharco_timm_supervised/004_qv_alignment`. Both still build no model for inference, run no forward pass and need no GPU or dataset, so they keep the property that rule protects — but neither is runnable in a code-only clone, since both need `storage/`. The `pick_best_alpha.py` helpers under each `00N_qat_transfer/` are likewise argparse and CPU-only, but read `evaluations/` rather than checkpoints.
+`998_rebuttal/004_quantization_mechanism` reads `CHECKPOINT_BASE_PATH` even though the rule below says analysis scripts do not. It still builds no model for inference, runs no forward pass and needs no GPU or dataset, so it keeps the property that rule protects — but it is not runnable in a code-only clone, since it needs `storage/`. The `pick_best_alpha.py` helpers under each `00N_qat_transfer/` are likewise argparse and CPU-only, but read `evaluations/` rather than checkpoints.
 
 `collect_dataset_sizes.py` reads HuggingFace dataset metadata; pass `--offline` to keep it on the local cache.
 
@@ -200,7 +199,6 @@ Experiments are organized in numbered directories. New experiments get the next 
 | `002_qat_transfer_reversed` | Does the QV work in reverse — `ptq(QAT_tgt) - alpha * QV_src`? | `vision/ilharco_timm_supervised` |
 | `002z_qat_transfer_reversed_ptq_after_reverse` | Same as 002, but PTQ is applied *after* the subtraction rather than before. | `vision/ilharco_timm_supervised` |
 | `003_qat_transfer_activ` | Does the same transfer work in **activation** space instead of weight space? | `vision/ilharco_timm_supervised` |
-| `004_qv_alignment` | Does the similarity between donor and receiver QVs predict the observed transfer gain `Delta(D,R)`? The Euclidean, measurable side of Proposition 1's `cos^2` law. | `vision/ilharco_timm_supervised` |
 | `008_pv_transfer` | Does a stronger quantization-aware *finetuner* produce a better-transferring QV? Same patch, same RTN `apply_ptq_` as 001; only the donor's finetuner changes (STE -> PV-Tuning), so the two phases' heatmaps differ by exactly that. | `vision/ilharco_timm_supervised` |
 | `009_qat_transfer_awq` | Does QV patching still add gain on top of **AWQ**? Same shape as `005_qat_transfer_gptq` with `apply_awq_` in place of `apply_gptq_`. Two strong-PTQ phases rather than one because GPTQ (error compensation) and AWQ (activation-aware rescaling) leave different residuals, so a result that reproduces across both is about the regime rather than about one method. | `vision/ilharco_timm_supervised` |
 | `998_rebuttal` | Reviewer-driven analyses; cross-family, reads existing evaluations. | top-level |
@@ -391,13 +389,6 @@ evaluations/998_rebuttal/{sub_phase}/seed={seed}/qat=.../ptq=.../split={split}/<
 ```
 with `002_cost_amortization` writing flat files directly under its sub-phase directory.
 
-`004_qv_alignment` puts an `agg=` fragment where the transfer grammar has `qv=alpha=...`, and an `alignment` leaf where it has `split=`:
-```
-.../qv_alignment/{sanitized_model}/seed=.../optim=.../qat=.../ptq=.../agg=metrics=..._grans=...[_modes=...]_ops=.../alignment/qv_alignment.json
-```
-
-The lists are sorted and dash-joined, so the fragment is a function of the requested set and not of CLI argument order; `modes=` is omitted when `neuron` was not requested. The fragment exists because the aggregations disagree — on ViT-B/16 the same donor-receiver pair reads `cosine/model = 0.074` and `cosine/layer/mean = 0.167` — so a file that does not record how it was aggregated is not interpretable. Readers never rebuild the fragment: they glob `agg=*` and fail loudly on zero or several matches, with `--in-agg` to disambiguate (`resolve_agg_dir` in `qv_alignment_common.py`).
-
 ### Plot paths
 
 Visualization output mirrors the evaluation grammar:
@@ -406,8 +397,6 @@ plots/{vision,text,mixed_modalities}/{family}/{phase}/{plot_name}/{model_tag}/se
 ```
 
 The fragments are built by module-level helpers (`_ptq_frag`, `_split_frag`, ...) shared by shape across the visualization scripts. **The `ptq_frag` segment is mandatory** — it was added so that runs sharing a QAT configuration but differing in evaluation-time PTQ no longer overwrite each other. When adding a plot script, include it.
-
-The `004_qv_alignment` plots carry an `agg=` fragment too, but a *per-figure* one — `agg={metric}_{granularity}[_{mode}][_{operator}]` — not the whole requested set the evaluations path names. A figure showing one aggregation gets its own directory; anything else that changes the picture without changing the aggregation stays in the filename (`heatmap_robust={0,1}.pdf`). The exception is `qv_alignment_distribution.py`, which spans several aggregations by construction and therefore has no single fragment to name a directory with — its variants go in the stem instead.
 
 ### Path construction pattern
 
