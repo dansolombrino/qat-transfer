@@ -360,13 +360,10 @@ Paths are built with `os.path.join(*parts_list)` — never pathlib for runtime p
 {CHECKPOINT_BASE_PATH}/text/{family}/{fp,qat}/{sanitized_model}/{dataset}/optim=adamw_lr={lr}_wd={wd}_ls={ls}_mgn={max_grad_norm}_bs={batch_size}_ml={max_length}/[qat=bits={bits}_gran={granularity}_skip={skip_tag}/]seed={seed}/backbone_epoch_{N}.pt
 ```
 
-A `pv/` checkpoint subtree sits alongside `fp/` and `qat/`, replacing the `qat=` fragment with one naming the finetuner that produced it:
+Two further checkpoint subtrees sit alongside `fp/` and `qat/`, each replacing the `qat=` fragment with one naming the method that produced it:
 
-```
-pv=bits=..._gran=..._skip=..._delta=..._tau=..._trust=..._pevery=..._temp=...
-```
-
-`trust=none` when the trust ratio is disabled. Never spell this fragment by hand — call `pv_path_frag` in `code/src/pv_tuning.py`, which every writer and reader of the `pv=` tree already uses. Alongside the classifier and head, `finetune_pv.py` writes a `pv_state_epoch_{N}.pt` sidecar holding `{codes, scale, latent}` per layer; the latent straight-through buffer is the one thing the settled checkpoint cannot reconstruct, and it is what `008_pv_transfer` builds its QV from.
+- `gptq/` — `gptq=bits=..._gran=..._skip=..._ncal=..._percdamp=..._actorder=...` (written by `007_gptq_transfer/compute_gptq_checkpoints.py`)
+- `pv/` — `pv=bits=..._gran=..._skip=..._delta=..._tau=..._trust=..._pevery=..._temp=...` (written by `finetune_pv.py`; `trust=none` when the trust ratio is disabled). Never spell this fragment by hand — call `pv_path_frag` in `code/src/pv_tuning.py`, which every writer and reader of the `pv=` tree already uses. Alongside the classifier and head, `finetune_pv.py` writes a `pv_state_epoch_{N}.pt` sidecar holding `{codes, scale, latent}` per layer; the latent straight-through buffer is the one thing the settled checkpoint cannot reconstruct.
 
 ### Evaluation paths
 

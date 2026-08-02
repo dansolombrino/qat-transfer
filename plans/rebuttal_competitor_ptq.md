@@ -124,12 +124,40 @@ Execute in order; WP1 unblocks both tasks.
   `code/test/`.
 - No GPU required for tests (small tensors, CPU).
 
-### WP2 — GPTQ baseline evaluation phase  `[ ]`  (Priority 1, needs WP1)
+### WP2 — GPTQ baseline evaluation phase  `[x]`  (Priority 1, needs WP1)
+
+> Code done 2026-08-01 (executor session): `000_baselines/evaluate_fp_gptq.py` +
+> mirrored YAML for BOTH the timm vision family and the text family (text twin
+> confirmed in-scope by coordinator; it passes a tokenizer-carrying `forward_fn`
+> to `apply_gptq_` since text loaders yield raw (texts, labels)). `gptq=`
+> fragment per the confirmed rule (bits/gran/skip + ncal/percdamp/actorder, no
+> `block_size`); calibration = receiver's own train split; dryrun runs write to
+> `fp_gptq_dryrun`. Wave 1 (user-confirmed scope): vit_base_patch16_224.orig_in21k
+> x 22 datasets, 3-bit/channel/skip=[head], behemoth GPUs 0/2/4 (WP3's live sweep
+> holds 5/6/7 — trees/GPUs disjoint, verified). Wave-1 fp_gptq numbers double as a
+> cross-check of 005's alpha=0 self-pair cells.
+> **Wave 1 LANDED 2026-08-01**: 22/22, zero failures, mean 45.6 s/run.
+> GPTQ(FP) > RTN(FP) on 22/22, mean +0.572; EuroSAT cell matches 005's alpha=0
+> bit-for-bit. See journal.md.
+> **Text wave LANDED 2026-08-01**: bert-base-uncased x 11 active datasets
+> (AmazonPolarity retired — no epochs entry, no RTN twin), 11/11, zero
+> failures, mean 38.9 s/run; GPTQ > RTN on 11/11, mean +0.100.
+> **2-bit wave LANDED 2026-08-01**: both models, 33/33. GPTQ2 >> RTN2 (which
+> is at chance in vision) but collapses vs GPTQ3 (vision means 0.289 vs
+> 0.791; text 0.363 vs 0.835) — 2-bit is past one-shot PTQ's reach, i.e. the
+> max-headroom regime for QV/QAT (see journal.md). Marked done: the plan's
+> "one architecture suffices" bar is met (vit_base full grid + bert-base +
+> 2-bit extension), sanity anchor §5 passed 33/33. Optional follow-up, not
+> blocking: wider vision model grid (7-model ≈ 1.5-2 h, 12-model ≈ 2.5-3 h
+> on behemoth GPUs 0/2/4; runners already bit- and (for the next executor)
+> easily model-parameterizable).
 
 > Notes from the WP1 executor: (1) `gptq=` fragment — recommend carrying
 > `bits/gran/skip` + `ncal`/`percdamp`/`actorder` but NOT `block_size`, which is
 > result-invariant (solver batching) and would split identical results across
-> paths; coordinator to confirm. (2) Smoke-validated on this box (4090):
+> paths; **coordinator confirmed 2026-08-01: exclude `block_size` from the
+> fragment; carry bits/gran/skip + ncal/percdamp/actorder. Same rule applies to
+> the WP3 `gptq=` fragment.** (2) Smoke-validated on this box (4090):
 > deit3_base/EuroSAT/seed 2038 FP ckpt at 3-bit/channel gives GPTQ(FP)=0.9796
 > vs recorded fp_ptq(RTN)=0.8237 and fp=0.9874; 48 layers, ~32 s calib+solve
 > per invocation at `num_calib_batches=4`, zero Cholesky retries.
@@ -144,7 +172,30 @@ Execute in order; WP1 unblocks both tasks.
 - Optional (decide with coordinator): text-family twin
   `evaluate_fp_gptq.py` under the text family.
 
-### WP3 — QV + GPTQ transfer phase (Task 2)  `[ ]`  (Priority 1, needs WP1)
+### WP3 — QV + GPTQ transfer phase (Task 2)  `[x]`  (Priority 1, needs WP1)
+
+> Runs landed 2026-08-01: 506/506 cells (484 alpha=1 + 22 alpha=0), behemoth GPUs
+> 5/6/7, wall-clock 11:26–16:5x, zero failures. JSONs gathered to the 4090 tree.
+> Full-grid Task-2 headline (fp head, cross-task, alpha=1 vs alpha=0): mean
+> Delta=-3.2 pts, median -2.2, win rate 9.3% (43/462), best +2.8 — at lambda=1 QV
+> does NOT add gain on top of GPTQ; QV+GPTQ nonetheless crushes RTN off-diagonal,
+> and GPTQ *hurts* the pure QAT checkpoint on the diagonal (objective mismatch:
+> GPTQ reconstructs the FP function, which for a QAT ckpt is the bad one — RTN(QAT)
+> remains the proper ceiling). Details + figures: journal.md, two viz scripts under
+> code/visualizations/vision/ilharco_timm_supervised/005_qat_transfer_gptq/.
+
+> Code done 2026-08-01 (executor session); smoke-validated on behemoth (pre-quant
+> accuracies bit-identical to 001 RTN cells); full 22x22 sweep dispatched 11:26 on
+> behemoth GPUs 5/6/7 (tmux qat_005_full_gpu{5,6,7}), see journal.md. Delivered
+> `005_qat_transfer_gptq/qv_transfer_gptq.py` + mirrored YAML. Deviations from the
+> 001 template, both deliberate: (1) `qv.alphas` is a *list* looped internally
+> (alpha=0 runs on the self-pair only — it is the donor-independent GPTQ(FP)
+> baseline); (2) `skip_existing: true` resume guard skips cells whose
+> eval_results.json exists. Calibration batches are materialized once per receiver
+> so every (donor, alpha, head) GPTQ call of that receiver shares bit-identical
+> calibration. `gptq=` fragment per the confirmed rule (no `block_size`).
+> Sweep scope (user-confirmed): vit_base_patch16_224.orig_in21k, 22x22 grid,
+> alphas=[0.0, 1.0], test split, behemoth GPUs 5/6/7.
 
 **Deliverables**
 - New numbered phase under `code/experiments/vision/ilharco_timm_supervised/`

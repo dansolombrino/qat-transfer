@@ -178,6 +178,213 @@ Two worth repeating here:
   **55 min on behemoth** with `TORCH_NUM_WORKERS=96`. Dataloader-bound, not
   GPU-bound.
 
+# 2026-08-01 — rebuttal WP3: QV transfer under GPTQ (005_qat_transfer_gptq)
+
+New phase `005_qat_transfer_gptq` (Task 2 of `plans/rebuttal_competitor_ptq.md`):
+`001_qat_transfer` with the final quantizer swapped from RTN `apply_ptq_` to the
+native GPTQ of `code/src/gptq.py` (WP1). Same QV, same patching, same path grammar
+with a `gptq=` fragment (bits/gran/skip + ncal/percdamp/actorder; `block_size`
+excluded — result-invariant).
+
+## What was DISPATCHED (2026-08-01 11:26, behemoth GPUs 5/6/7)
+
+vit_base_patch16_224.orig_in21k, seed 2038, 3-bit/channel/skip=[head], full 22×22
+grid, `qv.alphas=[0.0,1.0]`, `split=test` only, calibration = first 4 train batches
+of the receiver, materialized once per receiver and shared by every donor/alpha/head
+GPTQ call of that receiver. α=0 runs on the self-pair only (donor-independent): it
+IS GPTQ(FP_receiver), the Task-1/Task-2 baseline column, under calibration identical
+to the α=1 cells. 506 cells total. tmux sessions `qat_005_full_gpu{5,6,7}`, logs in
+`logs/dispatch/005_gptq/`, receivers split by eval cost across the three lanes.
+`skip_existing=true` makes relaunch idempotent.
+
+## Smoke result (EuroSAT receiver) — script validated, and an early signal
+
+Pre-quantization accuracies match the 001 RTN cells **bit-for-bit** (patching
+pipeline provably identical); only the quantizer differs:
+
+| cell | pre-quant | RTN (001) | GPTQ (005) |
+|---|---|---|---|
+| DTD→EuroSAT α=1, FP head | 0.9644 | 0.5004 | **0.9604** |
+| EuroSAT α=0 (= FP ckpt) | 0.9826 | 0.9707 (`fp_ptq`) | **0.9752** |
+| EuroSAT self α=1 (= QAT ckpt) | 0.3356 | 0.9589 | **0.3574** |
+
+Two early observations to test on the full grid:
+1. GPTQ rescues the *patched* cross-task model dramatically (+46 pts over RTN on
+   DTD→EuroSAT) — but GPTQ(FP) is also strong, so the Task-2 delta
+   (α=1 vs α=0 under GPTQ) may be small or negative on easy receivers.
+2. GPTQ *hurts* the pure QAT checkpoint (0.357 vs RTN's 0.959). Mechanism: GPTQ's
+   objective reconstructs the layer's FP function, and a 3-bit QAT checkpoint's FP
+   function is the bad one (FP-forward acc 0.31); RTN instead snaps weights onto
+   the grid they were trained for. GPTQ and QAT-style checkpoints are objective-
+   mismatched — worth a sentence in the rebuttal.
+
+# 2026-08-01 — rebuttal WP2: GPTQ(FP) baseline (000_baselines/evaluate_fp_gptq)
+
+New baseline scripts (Task 1 of `plans/rebuttal_competitor_ptq.md`):
+`evaluate_fp_ptq.py` with the quantizer swapped from RTN `apply_ptq_` to the
+native GPTQ of `code/src/gptq.py` (WP1), for BOTH the timm vision family and the
+text family (text twin passes a tokenizer-carrying `forward_fn` since text
+loaders yield raw `(texts, labels)`). Calibration = first 4 train batches of the
+task's own training split; `experiment_type=fp_gptq`; `gptq=` fragment carries
+bits/gran/skip + ncal/percdamp/actorder (no `block_size` — result-invariant).
+
+## Smoke (local 4090)
+
+deit3_base/EuroSAT, 3-bit/channel: test_accuracy **0.97963** — matches WP1's
+recorded smoke number (0.9796) exactly. RTN `fp_ptq` twin is 0.8237, FP 0.9874.
+
+## DISPATCHED (2026-08-01, behemoth GPUs 0/2/4)
+
+Wave 1: vit_base_patch16_224.orig_in21k × all 22 datasets, seed 2038,
+3-bit/channel/skip=[head], defaults ncal=4/percdamp=0.01/actorder=False.
+Dispatcher `scripts/dispatch/fp_gptq_wave1.sh` (pull-queue + flock + rssh,
+heavy-eval datasets first), runner `runners/v_fp_gptq.sh`. GPUs 5/6/7 are WP3's
+005 sweep and were left untouched; output trees are disjoint. Purpose: fill the
+000_baselines GPTQ column AND measure per-run wall time to price the full
+7-/12-model grid. The wave's cells double as a cross-check of 005's alpha=0
+self-pair cells (same recipe, independent code path).
+
+## LANDED (2026-08-01, same day)
+
+22/22 artifacts verified on behemoth and rsynced home (fp_gptq subtree only —
+WP3's in-flight trees untouched). Zero failures. Timing: mean 45.6 s/run,
+1004 s serial, ~8 min wall on 3 GPUs — a full 22-dataset model sweep costs
+~17 min serial. Extrapolated: 7-model canonical grid ≈ 1.5-2 h, all-12-model
+grid ≈ 2.5-3 h on GPUs 0/2/4.
+
+Headline: **GPTQ(FP) > RTN(FP) on 22/22 datasets, mean +0.572** on
+vit_base_patch16_224.orig_in21k at 3-bit/channel. RTN collapses this backbone
+(often near chance); GPTQ restores it to within a few points of FP (e.g.
+ImageNet 0.683 vs RTN 0.110, FP 0.744; MNIST 0.984 vs 0.143). Smallest gap:
+RenderedSST2 (+0.024), where RTN never collapsed. Cross-check: the EuroSAT
+fp_gptq cell (0.9752) equals WP3's independently-computed alpha=0 self-pair
+cell bit-for-bit — the two code paths agree.
+
+Implication for the rebuttal: on this backbone the interesting Task-2 question
+is entirely "does QV still add gain **under GPTQ**" (005's alpha=1 vs alpha=0),
+since GPTQ(FP) alone already closes most of the RTN gap that QV+RTN was
+closing. Task-1 framing must lead with complementarity, not competition.
+
+## Text wave LANDED (2026-08-01, same day)
+
+bert-base-uncased x 11 active text datasets (AmazonPolarity is retired from
+DATASET_NAME_TO_EPOCHS — stale FP ckpt, no RTN twin; dropped from the queue),
+3-bit/channel/skip=[classifier], behemoth GPUs 0/2/4. 11/11 artifacts, zero
+failures, mean 38.9 s/run (~4 min wall).
+
+**GPTQ(FP) > RTN(FP) on 11/11, mean +0.100.** Text is far less RTN-fragile
+than the vit_base vision backbone (+0.572): BERT under 3-bit RTN loses points,
+not orders of magnitude, so GPTQ's headroom is smaller — largest gain
+Banking77 (+0.354), smallest AmazonCounterfactual (+0.006); on
+ToxicConversations GPTQ even edges out FP (0.9460 vs 0.9428). Same rebuttal
+implication as vision, weaker form: GPTQ(FP) is a strong Task-1 column, so the
+QV story leans on complementarity (Task 2).
+
+## 2-bit wave LANDED (2026-08-01, same day)
+
+Same two models, same FP checkpoints (bit-independent), gptq.bits=2, mixed
+33-run queue on behemoth GPUs 0/2/4; 33/33, zero failures, ~42 s/run (runners
+now take BITS as arg 1; dispatcher scripts/dispatch/fp_gptq_wave_b2.sh).
+
+The 3->2 bit cliff is the story:
+
+- **Vision (vit_base orig_in21k):** RTN2 is chance (mean 0.103 vs chance
+  0.092). GPTQ2 beats RTN2 on 21/22 and beats chance on 22/22, but its mean
+  (0.289) is nowhere near GPTQ3 (0.791). Fine-grained tasks (ImageNet 0.003,
+  Cars 0.009, SUN397 0.011) stay destroyed; only coarse/MNIST-like tasks
+  survive partially (MNIST 0.794, FashionMNIST 0.678, EuroSAT 0.618). Sole
+  GPTQ2<RTN2 loss: PCAM (0.530 vs 0.630, binary task near chance).
+- **Text (bert-base):** same shape, softer — GPTQ2 0.363 vs RTN2 0.240 vs
+  GPTQ3 0.835; 11/11 wins but most many-class tasks stay collapsed.
+
+Reading: 2-bit one-shot PTQ is beyond GPTQ's error-compensation reach on
+these models (consistent with the GPTQ paper's sub-3-bit behavior). This is
+the regime where trained robustness (QAT / QV patching) has maximal headroom
+over any calibration-only method — the strongest possible Task-2 setting if
+005 is extended to 2-bit.
+
+## 2026-08-01 — WP3 sweep landed (506/506)
+
+All three lanes finished clean (11:26–16:5x wall-clock, behemoth GPUs 5/6/7, zero
+failures; the only log traceback was a benign multiprocessing temp-dir cleanup
+race at a receiver transition). JSONs gathered back to the 4090 tree.
+
+**Full-grid Task-2 headline** (fp head, α=1 cross-task vs the receiver's α=0
+GPTQ(FP) baseline, identical calibration): mean Δ = −3.2 pts, median −2.2,
+win rate 9.3 % (43/462), best cell +2.8, worst −32.6 (KMNIST receivers hurt
+most; RenderedSST2 the only receiver with positive mean). **At λ=1, QV patching
+does not add gain on top of GPTQ.** The smoke-run observations held at scale:
+
+- Off-diagonal, QV+GPTQ ≫ QV+RTN (GPTQ rescues patched models RTN collapses),
+  and GPTQ(FP) ≫ RTN fp_ptq everywhere (e.g. RESISC45 0.887 vs 0.286) — the
+  Task-1 comparison lives in a much stronger regime than the paper's RTN world.
+- Diagonal (= the receiver's own QAT checkpoint): GPTQ *destroys* it
+  (≈FP-forward accuracy) — objective mismatch, GPTQ(QAT) ≈ QAT-in-FP. The QAT
+  ceiling under GPTQ framing must remain RTN(QAT) (= 001's qat_ptq), never
+  GPTQ(QAT).
+
+Rebuttal framing note: the honest Task-2 sentence is "under GPTQ there is far
+less accuracy left to recover, and λ=1 patching does not recover it" — mirroring
+the 4-bit Δ_ceiling scope boundary (see the bitwidth-sweep entry): QV's benefit
+tracks how much the quantizer actually hurts. A λ* sweep under GPTQ (val split)
+remains the open question if the negative-at-λ=1 result needs softening.
+
+Figures: `code/visualizations/vision/ilharco_timm_supervised/005_qat_transfer_gptq/`
+(`qv_transfer_heatmap.py`: raw + Δ vs GPTQ(FP) + Δ vs RTN fp_ptq;
+`qv_transfer_rtn_heatmap_minus_gptq_fp.py`: 001 QV+RTN − GPTQ(FP), the Task-1 view).
+
+# 2026-08-01 — phase 007: is GPTQ itself transferrable? (007_gptq_transfer)
+
+Follow-up question after WP3: define `QV_gptq = GPTQ(FP_donor) − FP_donor` — a
+pure quantization displacement, no training — patch `FP_tgt + α·QV_gptq`, and
+evaluate **raw** (no quantizer after patching; the displacement IS the
+quantization under test). Diagonal at α=1 is algebraically GPTQ(FP_tgt).
+
+Two new Hydra scripts under `007_gptq_transfer/` (phase 006 was taken mid-day by
+WP4's `006_qat_transfer_repqvit`): `compute_gptq_checkpoints.py` materializes
+GPTQ(FP) checkpoints into a new `storage/.../gptq/` subtree paralleling fp/qat
+(GPTQ ckpts existed nowhere on disk — every prior consumer quantized in-memory
+at eval time), and `qv_transfer_gptqv.py` (001-shaped, single FP-head raw eval,
+`qv.alphas` list + resume guard; α=0 deliberately absent — it equals the
+recorded fp baseline).
+
+## Dispatched (2026-08-01 18:42 / 18:55, behemoth)
+
+- Step A: 22 GPTQ(FP) checkpoints, GPU 0, 22/22 saved, zero errors.
+- Smoke: EuroSAT diagonal = 0.9751852 — **bit-identical** to 005's α=0
+  GPTQ(FP) cell (same materialized calibration batches by construction:
+  same seed, same loader, same batch count). DTD→EuroSAT raw = 0.9252.
+- Step B: full 22×22, α=1, test split, GPUs 0/2/4/7 (WP4's RepQ-ViT sweep
+  still held 5/6 at launch), tmux `qat_007_full_gpu{0,2,4,7}`, logs under
+  `logs/dispatch/007_gptq/`.
+
+Early signal from the smoke: a *foreign* GPTQ displacement applied raw costs
+only ~5 pts vs the receiver's own GPTQ run (0.9252 vs 0.9752 on EuroSAT) —
+GPTQ displacement transfer may be surprisingly real. Full grid will tell.
+
+## 2026-08-01 — 007 landed (484/484): GPTQ is NOT transferrable the way QAT is
+
+All lanes clean (GPUs 0/2/4/5/6/7 as WP4 freed them, ~18:55–20:1x). Full-grid
+verdict (fp head, raw eval, 462 cross-task cells):
+
+- vs the receiver's OWN GPTQ run: mean gap **−16.7 pts** (median −15.1,
+  min −58.5, best +1.6); only 5 % of cells within 2 pts.
+- vs the receiver's FP checkpoint (the cost of applying a foreign
+  displacement): mean −19.4 pts.
+- Worst receivers: EMNIST (−35), KMNIST (−34), OxfordIIITPet (−26);
+  most tolerant: STL10/CIFAR10 (−5), RenderedSST2 (−0).
+
+Interpretation: QV_gptq is weight-conditioned, not task-agnostic. GPTQ's error
+feedback is computed for the donor's exact weight matrix and calibration
+Hessian; added to a different task's weights the compensation lands in the
+wrong coordinates, and the patched model is neither on a grid nor
+error-compensated. This is a clean *negative control* for the paper's claim:
+the QAT QV transfers because QAT learns a task-agnostic robustness direction,
+not because any quantization displacement happens to transfer — a
+displacement of near-identical norm (GPTQ's) does not. The EuroSAT diagonal
+reproduced 005's GPTQ(FP) bit-exactly (0.9751852), validating the pipeline.
+
+
 # 2026-08-01/02 — 008_pv_transfer: does a stronger finetuner give a better QV?
 
 Every QV in this repo is `QAT_D - FP_D`, and every QAT checkpoint behind it
