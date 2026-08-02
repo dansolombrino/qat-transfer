@@ -1,0 +1,29 @@
+hydra:
+  searchpath:
+    - file://${oc.env:PWD}/config
+  sweep:
+    dir: logs/config/experiments/vision/ilharco_timm_supervised/000_baselines/evaluate_fp_repqvit
+    subdir: ${model_name}/${dataset_name}/optim=adamw_lr=${lr}_wd=${wd}_ls=${ls}_wl=${wl}_mgn=${max_grad_norm}_bs=${batch_size}/seed=${seed}
+
+model_name: ???
+dataset_name: ???
+batch_size: ???
+lr: ???
+wd: ???
+ls: ???
+wl: ???
+max_grad_norm: ???
+seed: ???
+gpu: ???
+split: test
+limit_num_epochs: null
+limit_num_batches: null
+log_to_file: false
+
+# Official RepQ-ViT performs weight + activation PTQ and calibrates on one
+# training batch. Every run-defining value is explicit in the output path.
+repqvit:
+  skip_modules: ???      # child attribute names to exclude, e.g. [head]
+  w_bits: ???            # weight bit-width, 2-8
+  a_bits: ???            # activation bit-width, 2-8
+  calib_batch_size: ???  # number of receiver-training samples in the one calibration batch

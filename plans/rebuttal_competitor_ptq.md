@@ -209,7 +209,16 @@ Execute in order; WP1 unblocks both tasks.
   receiver — gives Task 1 and Task 2 numbers from one sweep and guarantees
   identical calibration between the compared cells).
 
-### WP4 — RepQ-ViT  `[ ]`  (Priority 2)
+### WP4 — RepQ-ViT  `[~]`  (Priority 2)
+
+> Code done 2026-08-01 (executor session): minimal Apache-2.0 official
+> classification code vendored under `code/src/repqvit/` and adapted to timm
+> 1.0.26 ViT/DeiT/Swin; delivered `000_baselines/evaluate_fp_repqvit.py` and
+> `006_qat_transfer_repqvit/qv_transfer_repqvit.py` with mirrored YAMLs. The
+> transfer phase follows 005's alpha=0 self-pair dedupe, per-receiver frozen
+> calibration, and resume guard. CPU tests cover quantizers, current-timm
+> attention equivalence, LayerNorm folding, and end-to-end ViT/Swin W3/A3.
+> Remaining before `[x]`: user-owned GPU smoke/dispatch; no experiment was run.
 
 - Vendor the official RepQ-ViT code under `code/src/repqvit/` (it needs
   model-internal access — post-LayerNorm / post-Softmax reparameterization —

@@ -1,0 +1,47 @@
+hydra:
+  searchpath:
+    - file://${oc.env:PWD}/config
+  sweep:
+    dir: logs/config/experiments/vision/ilharco_timm_supervised/006_qat_transfer_repqvit/qv_transfer_repqvit
+    subdir: ${model_name}/seed=${target.seed}/qat=bits=${qat.bits}_gran=${qat.granularity}/repqvit=wbits=${repqvit.w_bits}_abits=${repqvit.a_bits}_cbs=${repqvit.calib_batch_size}
+
+model_name: ???
+batch_size: ???
+eval_split: ???
+limit_num_batches: null
+log_to_file: false
+skip_existing: true
+
+lr: ???
+wd: ???
+ls: ???
+wl: ???
+max_grad_norm: ???
+gpu: ???
+
+source:
+  dataset_names: ???
+  seed: ???
+  limit_num_epochs: null
+
+target:
+  dataset_names: ???
+  seed: ???
+  limit_num_epochs: null
+
+# Locates the QAT source checkpoint and records the QV's training grid.
+qat:
+  bits: ???
+  granularity: ???
+  skip_modules: ???
+
+qv:
+  alphas: ???  # list, e.g. [0.0, 1.0]; alpha=0 is evaluated on self-pairs only
+
+# Final official RepQ-ViT W/A PTQ. One receiver-training batch is frozen and
+# reused for every donor, alpha, and FP/QAT target-head variant.
+repqvit:
+  skip_modules: ???
+  w_bits: ???
+  a_bits: ???
+  calib_batch_size: ???
