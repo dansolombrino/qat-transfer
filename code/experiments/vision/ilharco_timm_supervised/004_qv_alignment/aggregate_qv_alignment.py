@@ -73,12 +73,14 @@ os.chdir(_PROJECT_ROOT)
 from src.vision.utils import sanitize_timm_model_name
 
 from qv_alignment_common import (
+    ALIGNMENT_LEAF,
     GRANULARITY_LAYER,
     GRANULARITY_MODEL,
     GRANULARITY_NEURON,
     METRIC_COSINE,
     NEURON_MODES,
     pearson,
+    resolve_agg_dir,
     spearman,
 )
 
@@ -140,6 +142,12 @@ def parse_args():
     parser.add_argument("--in-name",       default=IN_FILE,
                         help="Alignment filename to read, matching the compute "
                              "script's --out-name.")
+    parser.add_argument("--in-agg",        default=None,
+                        help="The agg= fragment of the alignment JSON to read, "
+                             "with or without the prefix. Only needed when more "
+                             "than one aggregation set was computed for this "
+                             "checkpoint configuration; the error message lists "
+                             "the candidates when it is.")
     parser.add_argument("--out-name",      default=OUT_FILE)
     parser.add_argument("--drop-incomplete", action="store_true",
                         help="Skip models whose alignment and win/loss pair sets "
@@ -173,11 +181,12 @@ def _ptq_frag(args):
     return f"ptq=bits={args.ptq_bits}_gran={args.granularity}_skip={_skip_tag(args.skip_modules)}"
 
 
-def _alignment_path(args, model_dir, optim_frag):
+def _alignment_base(args, model_dir, optim_frag):
+    """Everything above the `agg=` level, which is resolved by glob rather than
+    rebuilt: see resolve_agg_dir in qv_alignment_common.py."""
     return os.path.join(
         EVAL_ROOT_ALIGNMENT, model_dir,
         f"seed={args.seed}", optim_frag, _qat_frag(args), _ptq_frag(args),
-        "alignment", args.in_name,
     )
 
 
@@ -193,10 +202,20 @@ def _win_loss_path(args):
     )
 
 
-def _out_dir(args):
+def _out_dir(args, agg_frag):
+    """The correlations, model-free but not aggregation-free.
+
+    `agg_frag` is the fragment resolved on the *input* side and is repeated here
+    rather than rebuilt from this script's own --metrics/--granularities/
+    --operators, which are filters over what the input happens to contain.  A
+    derived file inheriting its input's provenance is the point: correlating the
+    six-metric alignment file and correlating a cosine-only one produce different
+    numbers, and they must not share a path.
+    """
     return os.path.join(
         EVAL_ROOT_ALIGNMENT,
-        f"seed={args.seed}", _qat_frag(args), _ptq_frag(args), "alignment",
+        f"seed={args.seed}", _qat_frag(args), _ptq_frag(args),
+        agg_frag, ALIGNMENT_LEAF,
     )
 
 
@@ -367,15 +386,38 @@ def main():
     points = []
     variants = None
     missing = []
+    agg_frag = None
 
     for model_name, batch_size in zip(args.model_names, args.batch_sizes):
         model_dir  = sanitize_timm_model_name(model_name)
-        path = _alignment_path(args, model_dir, _optim_frag(args, batch_size))
+        base = _alignment_base(args, model_dir, _optim_frag(args, batch_size))
 
-        if not os.path.exists(path):
-            missing.append(path)
-            print(f"[WARN] no alignment JSON for {model_name}: {path}", file=sys.stderr)
+        try:
+            model_agg, path = resolve_agg_dir(base, args.in_name, args.in_agg)
+        except FileNotFoundError as e:
+            # A model with no alignment file is a gap in the sweep, which the
+            # other models can still be correlated without.
+            missing.append(str(e))
+            print(f"[WARN] no alignment JSON for {model_name}: {e}", file=sys.stderr)
             continue
+        except ValueError as e:
+            # An ambiguous one is not a gap: proceeding would mean guessing which
+            # aggregation the reported coefficients describe.
+            sys.exit(f"{model_name}: {e}")
+
+        # Two backbones computed under different aggregation sets do not belong
+        # in one correlation: the pooled coefficients would be over a variant
+        # list silently intersected down, and the output path could name only
+        # one of the two provenances.  Ambiguous is not a state to resolve by
+        # preference.
+        if agg_frag is None:
+            agg_frag = model_agg
+        elif model_agg != agg_frag:
+            sys.exit(
+                f"{model_name} was computed under {model_agg} but a previous "
+                f"model under {agg_frag}. Re-run compute_qv_alignment.py so "
+                f"every model shares one aggregation set, or pass --in-agg."
+            )
 
         with open(path) as f:
             alignment = json.load(f)
@@ -507,6 +549,7 @@ def main():
             "model_names":   list(args.model_names),
             "outcomes":      list(OUTCOMES),
             "delta_source":  win_loss_path,
+            "agg_frag":      agg_frag,
             "same_task":     "excluded: similarity is 1 by algebra there",
         },
         "variants":  [variant_label(*v) for v in variants],
@@ -516,7 +559,7 @@ def main():
         "missing":   missing,
     }
 
-    out_dir = _out_dir(args)
+    out_dir = _out_dir(args, agg_frag)
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, args.out_name)
     with open(out_path, "w") as f:

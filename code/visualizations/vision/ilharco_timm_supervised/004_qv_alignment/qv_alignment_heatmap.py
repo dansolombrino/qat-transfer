@@ -26,9 +26,21 @@ the map.  Signed metrics get a diverging scale centred on zero, so
 bounded below by zero get a sequential scale, where a diverging one would imply
 a meaningless midpoint.
 
+One figure per directory, not per filename
+------------------------------------------
+Each figure's aggregation is a path level of its own, `agg=<metric>_<granularity>
+[_<mode>][_<operator>]`, sitting where the compute script puts the fragment
+naming its whole requested set.  The aggregations disagree -- on ViT-B/16,
+cosine/model is 0.074 where cosine/layer/mean is 0.167 -- so a figure whose path
+does not say which one it is cannot be read, and one that is merely named
+differently inside a shared directory is one `mv` away from losing the
+distinction.  `--robust` stays in the filename: it changes the colour scale, not
+the number.
+
 Writes HTML, PDF and PNG to plots/vision/ilharco_timm_supervised/004_qv_alignment/.
 """
 
+import glob
 import sys
 from pathlib import Path
 
@@ -125,6 +137,12 @@ def parse_args():
                              "strongly-aligned pairs the map exists to show.")
 
     parser.add_argument("--in-name",       default=IN_FILE)
+    parser.add_argument("--in-agg",        default=None,
+                        help="The agg= fragment of the alignment JSON to read, "
+                             "with or without the prefix. Only needed when more "
+                             "than one aggregation set was computed for this "
+                             "checkpoint configuration; the error lists the "
+                             "candidates when it is.")
     parser.add_argument("--width",         type=int, default=1000)
     parser.add_argument("--height",        type=int, default=900)
     return parser.parse_args()
@@ -153,23 +171,69 @@ def _ptq_frag(args):
 
 
 def _run_frag(args, model_dir):
-    """The tail shared by the input and output trees.
+    """The tail shared by the input and output trees, above the `agg=` level.
+
+    Below it the two trees diverge: the input carries one fragment naming the
+    whole set the compute script was asked for, the output one fragment per
+    figure.  They are not the same string and neither can be derived from the
+    other, which is why the input side is globbed rather than rebuilt.
+    """
+    return os.path.join(
+        model_dir, f"seed={args.seed}", _optim_frag(args),
+        _qat_frag(args), _ptq_frag(args),
+    )
+
+
+def _agg_frag(spec):
+    """The one aggregation this figure shows, as a path level."""
+    return "agg=" + spec_label(*spec).replace("/", "_")
+
+
+def _in_path(args, model_dir):
+    """The alignment JSON, found by globbing the `agg=` level.
+
+    Duplicated rather than imported from the 004 experiment directory's
+    qv_alignment_common.py, for the same reason cell_value() below is duplicated:
+    visualization scripts in this repo are self-contained and import only from
+    code/src.
+
+    Zero matches and several are both errors.  Silently taking the first of two
+    aggregation sets would render a figure captioned with an aggregation it was
+    not computed under -- exactly the confusion the fragment exists to prevent.
 
     `alignment` sits where the sibling figures have `split=`: a weight-space
     similarity has no evaluation split to belong to.
     """
-    return os.path.join(
-        model_dir, f"seed={args.seed}", _optim_frag(args),
-        _qat_frag(args), _ptq_frag(args), "alignment",
+    base = os.path.join(EVAL_ROOT, _run_frag(args, model_dir))
+
+    if args.in_agg is not None:
+        frag = args.in_agg if args.in_agg.startswith("agg=") else f"agg={args.in_agg}"
+        path = os.path.join(base, frag, "alignment", args.in_name)
+        assert os.path.exists(path), f"{path} not found (from --in-agg)"
+        return path
+
+    pattern = os.path.join(base, "agg=*", "alignment", args.in_name)
+    matches = sorted(glob.glob(pattern))
+
+    assert matches, (
+        f"nothing matching {pattern}. Run compute_qv_alignment.py first with "
+        f"matching --seed/--qat-bits/--ptq-bits/--granularity/--skip-modules."
     )
+    if len(matches) > 1:
+        listing = "\n  ".join(
+            os.path.basename(os.path.dirname(os.path.dirname(m))) for m in matches
+        )
+        raise SystemExit(
+            f"{len(matches)} aggregation sets under {base}; pass --in-agg with "
+            f"one of:\n  {listing}"
+        )
+    return matches[0]
 
 
-def _in_dir(args, model_dir):
-    return os.path.join(EVAL_ROOT, _run_frag(args, model_dir))
-
-
-def _out_dir(args, model_dir):
-    return os.path.join(PLOT_ROOT, _run_frag(args, model_dir))
+def _out_dir(args, model_dir, spec):
+    return os.path.join(
+        PLOT_ROOT, _run_frag(args, model_dir), _agg_frag(spec), "alignment",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -400,20 +464,19 @@ def main():
     args = parse_args()
     model_dir = sanitize_timm_model_name(args.model_name)
 
-    results_path = os.path.join(_in_dir(args, model_dir), args.in_name)
-    assert os.path.exists(results_path), (
-        f"{results_path} not found. Run compute_qv_alignment.py first with "
-        f"matching --seed/--qat-bits/--ptq-bits/--granularity/--skip-modules."
-    )
+    results_path = _in_path(args, model_dir)
     with open(results_path) as f:
         results = json.load(f)
 
-    out_dir = _out_dir(args, model_dir)
-    os.makedirs(out_dir, exist_ok=True)
-
     for spec in figure_specs(args):
         fig = build_figure(results, args, spec)
-        stem = f"heatmap_{spec_label(*spec).replace('/', '_')}"
+
+        out_dir = _out_dir(args, model_dir, spec)
+        os.makedirs(out_dir, exist_ok=True)
+
+        # The aggregation is the directory; the stem carries only what is left
+        # that changes the picture.
+        stem = f"heatmap_robust={int(args.robust)}"
 
         for ext in ("html", "pdf", "png"):
             path = os.path.join(out_dir, f"{stem}.{ext}")

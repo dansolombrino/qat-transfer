@@ -57,6 +57,12 @@ but it is consequently *not* runnable in a code-only clone.
 The output path uses an `alignment/` leaf where 001's grammar has
 `split={val,test}`.  A weight-space quantity does not depend on an evaluation
 split, and inventing one would claim a provenance these numbers do not have.
+
+Just above that leaf the path carries an `agg=` fragment naming the requested
+metrics, granularities, neuron modes and operators.  The checkpoint fragments
+say which vectors were compared; this one says how they were reduced to a
+number, and since the aggregations demonstrably disagree with each other, a file
+that does not record its own is not interpretable.
 """
 
 import argparse
@@ -209,12 +215,12 @@ def parse_args():
                         help="Also emit per-layer values. Multiplies output size by "
                              "the layer count for every pair and metric.")
     parser.add_argument("--out-name",       default=OUT_FILE,
-                        help="Output filename inside the alignment/ leaf. The path "
-                             "encodes the checkpoint configuration but not --metrics, "
-                             "so two runs differing only in which metrics they asked "
-                             "for would otherwise overwrite each other. `cka` in "
-                             "particular is usually run separately, since it is the "
-                             "one metric restricted to layer granularity.")
+                        help="Output filename inside the alignment/ leaf. Rarely "
+                             "needed: the path now carries an agg= fragment naming "
+                             "the requested metrics, granularities, neuron modes and "
+                             "operators, so two runs differing in what they asked for "
+                             "already land in different directories. Reach for this "
+                             "only to keep two otherwise-identical runs apart.")
     parser.add_argument("--cache-dtype",    default="float32", choices=list(CACHE_DTYPES),
                         help="Storage dtype for the in-memory QV cache. Inner products "
                              "are accumulated in float32 regardless. float16 halves "
@@ -266,6 +272,36 @@ def _ptq_frag(args):
     return f"ptq=bits={args.ptq_bits}_gran={args.granularity}_skip={_skip_tag(args.skip_modules)}"
 
 
+def _agg_frag(args):
+    """The aggregation request set, as a path fragment.
+
+    The checkpoint fragments above identify *which vectors* were compared; this
+    one identifies *how they were reduced to a number*, and the two are
+    independent.  Without it a run asking for one metric at one granularity
+    lands on top of a run asking for all six at all three, and the surviving
+    file's name says nothing about which one it is.  That is not hypothetical:
+    `cka` is usually run separately, since it is the one metric restricted to
+    layer granularity.
+
+    One file holds every variant it was asked for, so the fragment describes the
+    whole requested *set* rather than a single (metric, granularity, mode,
+    operator) cell -- the per-figure form of that lives in the visualization
+    scripts.  Each component is sorted so the fragment is a function of the set
+    and not of CLI argument order.
+
+    `modes=` is omitted entirely when `neuron` was not requested, because
+    --neuron-modes is then meaningless rather than empty.
+    """
+    parts = [
+        f"metrics={'-'.join(sorted(args.metrics))}",
+        f"grans={'-'.join(sorted(args.granularities))}",
+    ]
+    if GRANULARITY_NEURON in args.granularities:
+        parts.append(f"modes={'-'.join(sorted(args.neuron_modes))}")
+    parts.append(f"ops={'-'.join(sorted(args.operators))}")
+    return "agg=" + "_".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # Checkpoint paths
 # ---------------------------------------------------------------------------
@@ -306,6 +342,9 @@ def _out_dir(args, model_dir, optim_frag):
 
     The doubled modality segment in EVAL_ROOT_OUT is redundant but load-bearing
     for every existing path in the project, so it is emitted here too.
+
+    The `agg=` level sits between the quantization fragments and the `alignment`
+    leaf, so the leaf keeps the slot the sibling phases give to `split=`.
     """
     return os.path.join(
         EVAL_ROOT_OUT, model_dir,
@@ -313,6 +352,7 @@ def _out_dir(args, model_dir, optim_frag):
         optim_frag,
         _qat_frag(args),
         _ptq_frag(args),
+        _agg_frag(args),
         "alignment",
     )
 

@@ -139,7 +139,9 @@ such.  Provenance is established instead by the resolved checkpoint paths and th
 per-QV norms written into the output, which are comparable against 004's.
 """
 
+import glob
 import math
+import os
 
 import torch
 
@@ -246,6 +248,61 @@ DIAGONAL_TOL = {
 }
 
 EPS = 1e-12
+
+# The leaf every alignment path ends in, where 001's grammar has split={val,test}.
+ALIGNMENT_LEAF = "alignment"
+
+
+# ---------------------------------------------------------------------------
+# Aggregation-fragment resolution
+# ---------------------------------------------------------------------------
+def resolve_agg_dir(base_dir, in_name, in_agg=None, what="alignment JSON"):
+    """Locate the single `agg=` directory under `base_dir` holding `in_name`.
+
+    compute_qv_alignment.py encodes its aggregation request set in the path, but
+    a *reader* does not know that set: the aggregate script's --metrics and the
+    plot scripts' --granularities are filters over what is present, not a
+    restatement of what was asked for.  Requiring every reader to repeat four
+    long list arguments purely to rebuild a directory name would be an error
+    surface with no upside, so readers glob instead.
+
+    Exactly one match is the expected case and is used silently.  Zero and
+    several are both errors rather than a guess: picking the lexicographically
+    first of two aggregation sets would quietly answer a different question than
+    the one asked, and that is precisely the failure the fragment was introduced
+    to end.  `in_agg` (with or without the `agg=` prefix) resolves the ambiguity
+    explicitly.
+
+    Returns `(agg_frag, path)`, the fragment being what a caller writes into its
+    own output path so a derived file inherits the provenance of its input.
+    """
+    if in_agg is not None:
+        frag = in_agg if in_agg.startswith("agg=") else f"agg={in_agg}"
+        path = os.path.join(base_dir, frag, ALIGNMENT_LEAF, in_name)
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"no {what} at {path} (from --in-agg)")
+        return frag, path
+
+    pattern = os.path.join(base_dir, "agg=*", ALIGNMENT_LEAF, in_name)
+    matches = sorted(glob.glob(pattern))
+
+    if not matches:
+        raise FileNotFoundError(
+            f"no {what} matching {pattern}. Run compute_qv_alignment.py first "
+            f"with matching --seed/--qat-bits/--ptq-bits/--granularity/"
+            f"--skip-modules."
+        )
+
+    frags = [os.path.basename(os.path.dirname(os.path.dirname(m))) for m in matches]
+
+    if len(matches) > 1:
+        listing = "\n  ".join(frags)
+        raise ValueError(
+            f"{len(matches)} aggregation sets under {base_dir}; which one is "
+            f"meant is not inferable, so pass --in-agg with one of:\n  {listing}"
+        )
+
+    return frags[0], matches[0]
 
 
 # ---------------------------------------------------------------------------

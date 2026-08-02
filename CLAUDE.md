@@ -389,6 +389,13 @@ evaluations/998_rebuttal/{sub_phase}/seed={seed}/qat=.../ptq=.../split={split}/<
 ```
 with `002_cost_amortization` writing flat files directly under its sub-phase directory.
 
+`004_qv_alignment` puts an `agg=` fragment where the transfer grammar has `qv=alpha=...`, and an `alignment` leaf where it has `split=`:
+```
+.../qv_alignment/{sanitized_model}/seed=.../optim=.../qat=.../ptq=.../agg=metrics=..._grans=...[_modes=...]_ops=.../alignment/qv_alignment.json
+```
+
+The lists are sorted and dash-joined, so the fragment is a function of the requested set and not of CLI argument order; `modes=` is omitted when `neuron` was not requested. The fragment exists because the aggregations disagree — on ViT-B/16 the same donor-receiver pair reads `cosine/model = 0.074` and `cosine/layer/mean = 0.167` — so a file that does not record how it was aggregated is not interpretable. Readers never rebuild the fragment: they glob `agg=*` and fail loudly on zero or several matches, with `--in-agg` to disambiguate (`resolve_agg_dir` in `qv_alignment_common.py`).
+
 ### Plot paths
 
 Visualization output mirrors the evaluation grammar:
@@ -397,6 +404,8 @@ plots/{vision,text,mixed_modalities}/{family}/{phase}/{plot_name}/{model_tag}/se
 ```
 
 The fragments are built by module-level helpers (`_ptq_frag`, `_split_frag`, ...) shared by shape across the visualization scripts. **The `ptq_frag` segment is mandatory** — it was added so that runs sharing a QAT configuration but differing in evaluation-time PTQ no longer overwrite each other. When adding a plot script, include it.
+
+The `004_qv_alignment` plots carry an `agg=` fragment too, but a *per-figure* one — `agg={metric}_{granularity}[_{mode}][_{operator}]` — not the whole requested set the evaluations path names. A figure showing one aggregation gets its own directory; anything else that changes the picture without changing the aggregation stays in the filename (`heatmap_robust={0,1}.pdf`). The exception is `qv_alignment_distribution.py`, which spans several aggregations by construction and therefore has no single fragment to name a directory with — its variants go in the stem instead.
 
 ### Path construction pattern
 
@@ -569,7 +578,7 @@ Analysis scripts under `998_rebuttal` follow the same rule for their aggregates:
 - Transfer scripts: `qv_transfer.py`
 - Alpha selection: `pick_best_alpha.py`
 - Analysis scripts: `compute_*.py`, `aggregate_*.py`, `collect_*.py`, `measure_*.py`
-- Visualization: `qv_transfer_heatmap.py`, `qv_transfer_heatmap_best_sf.py`, `radar_plot.py`, `donor_receiver_table_*.py`, `baseline_bar*.py`, `scatterplot*.py`, `stacked_bar.py`, `win_loss_table.py`, `*_curve.py`
+- Visualization: `qv_transfer_heatmap.py`, `qv_transfer_heatmap_best_sf.py`, `radar_plot.py`, `donor_receiver_table_*.py`, `baseline_bar*.py`, `scatterplot*.py`, `stacked_bar.py`, `win_loss_table.py`, `*_curve.py`, `*_distribution.py`
 - Model wrappers: `modeling.py`
 - Classification heads: `heads.py`
 

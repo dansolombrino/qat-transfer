@@ -56,6 +56,7 @@ import os
 os.chdir(_PROJECT_ROOT)
 
 import argparse
+import glob
 import json
 
 import plotly.graph_objects as go
@@ -133,6 +134,11 @@ def parse_args():
                              "that model's coefficient rather than the pooled one.")
 
     parser.add_argument("--in-name",      default=IN_FILE)
+    parser.add_argument("--in-agg",       default=None,
+                        help="The agg= fragment of the aggregate JSON to read, "
+                             "with or without the prefix. Only needed when more "
+                             "than one aggregation set was computed for this "
+                             "checkpoint configuration.")
     parser.add_argument("--width",        type=int, default=920)
     parser.add_argument("--height",       type=int, default=620)
     return parser.parse_args()
@@ -154,22 +160,55 @@ def _ptq_frag(args):
 
 
 def _run_frag(args):
-    """The `seed=/qat=/ptq=/alignment` tail shared by the input and output trees.
+    """The `seed=/qat=/ptq=` tail shared by the input and output trees.
 
-    `alignment` sits where the sibling figures have `split=`, because a
-    weight-space similarity has no evaluation split to belong to.
+    Below it sits the `agg=` level naming the aggregation set the correlations
+    were computed over, then `alignment` -- which sits where the sibling figures
+    have `split=`, because a weight-space similarity has no evaluation split to
+    belong to.
     """
-    return os.path.join(
-        f"seed={args.seed}", _qat_frag(args), _ptq_frag(args), "alignment",
+    return os.path.join(f"seed={args.seed}", _qat_frag(args), _ptq_frag(args))
+
+
+def _in_path(args):
+    """The aggregate JSON, found by globbing the `agg=` level.
+
+    A reader does not know which aggregation set the compute script was asked
+    for, and rebuilding the fragment would mean repeating four list arguments
+    that this script has no other use for.  Several matches is an error rather
+    than a choice: the coefficients differ between aggregation sets, and a
+    scatter captioned with the wrong rho is not detectable by looking at it.
+
+    Duplicated rather than imported from the 004 experiment directory, per the
+    repo convention that visualization scripts import only from code/src.
+    """
+    base = os.path.join(EVAL_ROOT, _run_frag(args))
+
+    if args.in_agg is not None:
+        frag = args.in_agg if args.in_agg.startswith("agg=") else f"agg={args.in_agg}"
+        path = os.path.join(base, frag, "alignment", args.in_name)
+        assert os.path.exists(path), f"{path} not found (from --in-agg)"
+        return frag, path
+
+    pattern = os.path.join(base, "agg=*", "alignment", args.in_name)
+    matches = sorted(glob.glob(pattern))
+
+    assert matches, (
+        f"nothing matching {pattern}. Run aggregate_qv_alignment.py first with "
+        f"matching --seed/--qat-bits/--ptq-bits/--granularity/--skip-modules."
     )
+    frags = [os.path.basename(os.path.dirname(os.path.dirname(m))) for m in matches]
+    if len(matches) > 1:
+        listing = "\n  ".join(frags)
+        raise SystemExit(
+            f"{len(matches)} aggregation sets under {base}; pass --in-agg with "
+            f"one of:\n  {listing}"
+        )
+    return frags[0], matches[0]
 
 
-def _in_dir(args):
-    return os.path.join(EVAL_ROOT, _run_frag(args))
-
-
-def _out_dir(args):
-    return os.path.join(PLOT_ROOT, _run_frag(args))
+def _out_dir(args, agg_frag):
+    return os.path.join(PLOT_ROOT, _run_frag(args), agg_frag, "alignment")
 
 
 # ---------------------------------------------------------------------------
@@ -365,11 +404,7 @@ def _headline(results, args, single_model, n_drawn):
 def main():
     args = parse_args()
 
-    results_path = os.path.join(_in_dir(args), args.in_name)
-    assert os.path.exists(results_path), (
-        f"{results_path} not found. Run aggregate_qv_alignment.py first with "
-        f"matching --seed/--qat-bits/--ptq-bits/--granularity/--skip-modules."
-    )
+    agg_frag, results_path = _in_path(args)
     with open(results_path) as f:
         results = json.load(f)
 
@@ -380,7 +415,7 @@ def main():
 
     fig = build_figure(results, args)
 
-    out_dir = _out_dir(args)
+    out_dir = _out_dir(args, agg_frag)
     os.makedirs(out_dir, exist_ok=True)
 
     stem = f"scatter_{args.variant.replace('/', '_')}_{args.outcome}"
