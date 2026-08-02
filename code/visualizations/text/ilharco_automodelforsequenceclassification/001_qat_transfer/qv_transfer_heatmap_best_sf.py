@@ -107,16 +107,6 @@ DATASET_LABEL_RENAMES = {
     "MassiveScenario": "Scenario",
 }
 
-# Allowed QV scaling factors for the restricted sweep. Any qv=alpha=* directory
-# on disk whose alpha is not in this set is silently ignored.
-ALLOWED_ALPHAS = (0.15, 0.30, 0.45, 0.60, 0.75, 0.90, 1.00, 1.05, 1.20, 1.35, 1.50)
-_ALPHA_TOL = 1e-9
-
-
-def _is_allowed_alpha(alpha: float) -> bool:
-    return any(abs(alpha - a) < _ALPHA_TOL for a in ALLOWED_ALPHAS)
-
-
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -148,6 +138,18 @@ def parse_args():
     parser.add_argument("--qv-alpha",       required=True, type=float,
                         help="Fixed reference alpha. Cells whose best alpha differs "
                              "from this value are annotated with a trailing '*'.")
+
+    # Defaulted, unlike every other path-affecting argument, because the defaults
+    # reproduce the selection protocol every existing result was produced under.
+    # The lower bound matters: negative lambdas now exist on disk for bert-base
+    # (998_rebuttal/003 sweeps the left arm of the sensitivity curve), and they
+    # must not enter lambda* selection unless asked for explicitly.  Mirrors
+    # pick_best_alpha.py, which selects the lambda* this figure must agree with.
+    parser.add_argument("--min-alpha",      default=0.0, type=float,
+                        help="lowest lambda considered for selection (default 0.0: "
+                             "excludes the negative-lambda sensitivity sweep)")
+    parser.add_argument("--max-alpha",      default=float("inf"), type=float,
+                        help="highest lambda considered for selection (default: no bound)")
 
     return parser.parse_args()
 
@@ -302,7 +304,11 @@ def load_data(args):
                 except ValueError:
                     continue
 
-                if not _is_allowed_alpha(alpha_val):
+                # Explicit grid restriction.  The default lower bound of 0.0 is
+                # what keeps the negative-lambda sweep out of lambda* selection:
+                # those runs exist to measure the left arm of the sensitivity
+                # curve, not to widen the protocol the paper reports.
+                if not (args.min_alpha <= alpha_val <= args.max_alpha):
                     continue
 
                 for metric_tag, val_key in VAL_METRIC_KEYS.items():
