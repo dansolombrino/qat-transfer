@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Mapping
 
 from _common import (
     PROJECT_ROOT,
@@ -12,6 +13,7 @@ from _common import (
     _safe_run_path,
     default_plot_root,
     matrix_from_records,
+    matrix_in_001_disposition,
     save_figure,
 )
 
@@ -65,11 +67,41 @@ def output_directory(data: Dict[str, Any], script_stem: str, root: Path) -> Path
     )
 
 
+def require_best_alpha_payload(data: Dict[str, Any]) -> Mapping[str, Any]:
+    comparisons = data.get("statistics", {}).get("comparisons")
+    if not isinstance(comparisons, Mapping):
+        raise ValueError("statistics artifact has no comparison mapping")
+    required_comparisons = (
+        "signed_cosine_vs_delta_best",
+        "cosine_sq_vs_recovery_best",
+    )
+    missing = [name for name in required_comparisons if name not in comparisons]
+    if missing:
+        raise ValueError(
+            f"statistics artifact lacks row-wise best-alpha comparisons: {missing}"
+        )
+    for index, point in enumerate(data["points"]):
+        for field in ("best_alpha", "delta_best", "recovery_best"):
+            value = point.get(field)
+            if (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not math.isfinite(float(value))
+            ):
+                raise ValueError(
+                    f"point {index} has invalid row-wise best-alpha field "
+                    f"{field}: {value!r}"
+                )
+    return comparisons
+
+
 __all__ = [
     "PROJECT_ROOT",
     "default_plot_root",
     "load_statistics",
     "matrix_from_records",
+    "matrix_in_001_disposition",
     "output_directory",
+    "require_best_alpha_payload",
     "save_figure",
 ]

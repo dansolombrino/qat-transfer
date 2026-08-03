@@ -451,6 +451,9 @@ def _synthetic_statistics():
             "primary_comparison": "signed_cosine_vs_delta",
             "comparisons": {
                 "signed_cosine_vs_delta": comparison("primary"),
+                "signed_cosine_vs_delta_best": comparison(
+                    "descriptive_diagnostic"
+                ),
                 "cosine_sq_vs_recovery_best": comparison(
                     "theory_adjacent_secondary"
                 ),
@@ -458,6 +461,21 @@ def _synthetic_statistics():
         },
         "missing": [],
     }
+
+
+def _synthetic_rowwise_statistics():
+    data = _synthetic_statistics()
+    data["schema_version"] = "rowwise_statistics_v1"
+    data["analysis_spec"] = "reviewer_3hfp_rowwise_v1"
+    data["alignment_aggregation"] = "row_cosine_mean_v1"
+    data["provenance"]["producer_stage"] = "rowwise_alignment"
+    data["provenance"]["producer_run_id_path"] += (
+        "/aggregation_spec=row_cosine_mean_v1"
+    )
+    data["provenance"]["analyzer_run_id_path"] = (
+        "analysis_spec=reviewer_3hfp_rowwise_v1"
+    )
+    return data
 
 
 def test_alignment_heatmap_matches_001_dataset_disposition():
@@ -537,16 +555,87 @@ def test_all_visualizations_render_pdf_and_png_from_statistics_only():
         assert all(path.stat().st_size > 0 for path in outputs)
 
 
-def test_all_rowwise_visualizations_are_exact_parallel_pdf_png_outputs():
-    data = _synthetic_statistics()
-    data["schema_version"] = "rowwise_statistics_v1"
-    data["analysis_spec"] = "reviewer_3hfp_rowwise_v1"
-    data["alignment_aggregation"] = "row_cosine_mean_v1"
-    data["provenance"]["producer_stage"] = "rowwise_alignment"
-    data["provenance"]["producer_run_id_path"] += "/aggregation_spec=row_cosine_mean_v1"
-    data["provenance"]["analyzer_run_id_path"] = (
-        "analysis_spec=reviewer_3hfp_rowwise_v1"
+def test_best_alpha_visualizations_render_from_existing_statistics_only():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp = Path(tmp_dir)
+        statistics = tmp / "euclidean_statistics.json"
+        statistics.write_text(json.dumps(_synthetic_statistics()))
+        plot_root = tmp / "plots"
+        env = os.environ.copy()
+        env["MPLCONFIGDIR"] = str(tmp / "matplotlib")
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        scripts = (
+            "plot_best_alpha_heatmap.py",
+            "plot_best_alpha_associations.py",
+            "plot_best_alpha_influence.py",
+        )
+        for script in scripts:
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(VIS_DIR / script),
+                    "--statistics",
+                    str(statistics),
+                    "--plot-root",
+                    str(plot_root),
+                ],
+                cwd=ROOT,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        outputs = sorted(plot_root.rglob("*.pdf")) + sorted(plot_root.rglob("*.png"))
+        assert len(outputs) == 6
+        assert all(path.stat().st_size > 0 for path in outputs)
+
+
+def test_best_alpha_visualizations_reject_incomplete_artifacts():
+    scripts = (
+        "plot_best_alpha_heatmap.py",
+        "plot_best_alpha_associations.py",
+        "plot_best_alpha_influence.py",
     )
+    invalid_variants = []
+    missing_field = _synthetic_statistics()
+    del missing_field["points"][0]["delta_best"]
+    invalid_variants.append((missing_field, "delta_best"))
+    missing_comparison = _synthetic_statistics()
+    del missing_comparison["statistics"]["comparisons"][
+        "signed_cosine_vs_delta_best"
+    ]
+    invalid_variants.append((missing_comparison, "signed_cosine_vs_delta_best"))
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp = Path(tmp_dir)
+        env = os.environ.copy()
+        env["MPLCONFIGDIR"] = str(tmp / "matplotlib")
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        for variant_index, (data, expected_error) in enumerate(invalid_variants):
+            statistics = tmp / f"invalid_{variant_index}.json"
+            statistics.write_text(json.dumps(data))
+            for script in scripts:
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        str(VIS_DIR / script),
+                        "--statistics",
+                        str(statistics),
+                        "--plot-root",
+                        str(tmp / "plots"),
+                    ],
+                    cwd=ROOT,
+                    env=env,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                assert result.returncode != 0
+                assert expected_error in result.stderr
+
+
+def test_all_rowwise_visualizations_are_exact_parallel_pdf_png_outputs():
+    data = _synthetic_rowwise_statistics()
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp = Path(tmp_dir)
@@ -580,3 +669,134 @@ def test_all_rowwise_visualizations_are_exact_parallel_pdf_png_outputs():
         outputs = sorted(plot_root.rglob("*.pdf")) + sorted(plot_root.rglob("*.png"))
         assert len(outputs) == 6
         assert all(path.stat().st_size > 0 for path in outputs)
+
+
+def test_rowwise_best_alpha_visualizations_render_to_full_provenance_paths():
+    data = _synthetic_rowwise_statistics()
+    scripts = (
+        "plot_rowwise_best_alpha_heatmap.py",
+        "plot_rowwise_best_alpha_associations.py",
+        "plot_rowwise_best_alpha_influence.py",
+    )
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp = Path(tmp_dir)
+        statistics = tmp / "rowwise_statistics.json"
+        statistics.write_text(json.dumps(data))
+        plot_root = tmp / "plots"
+        env = os.environ.copy()
+        env["MPLCONFIGDIR"] = str(tmp / "matplotlib")
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        for script in scripts:
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(VIS_DIR / script),
+                    "--statistics",
+                    str(statistics),
+                    "--plot-root",
+                    str(plot_root),
+                ],
+                cwd=ROOT,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            script_stem = Path(script).stem
+            expected_dir = (
+                plot_root
+                / "998_rebuttal/005_qv_alignment"
+                / script_stem
+                / "rowwise_alignment"
+                / data["provenance"]["producer_run_id_path"]
+                / "analysis"
+                / data["provenance"]["analyzer_run_id_path"]
+            )
+            assert sorted(path.suffix for path in expected_dir.iterdir()) == [
+                ".pdf",
+                ".png",
+            ]
+        outputs = sorted(plot_root.rglob("*.pdf")) + sorted(plot_root.rglob("*.png"))
+        assert len(outputs) == 6
+        assert all(path.stat().st_size > 0 for path in outputs)
+
+
+@pytest.mark.parametrize("field", ("best_alpha", "delta_best", "recovery_best"))
+def test_rowwise_best_alpha_visualizations_reject_missing_outcome_fields(field):
+    data = _synthetic_rowwise_statistics()
+    del data["points"][0][field]
+    _assert_rowwise_best_alpha_scripts_reject(data, field)
+
+
+@pytest.mark.parametrize(
+    "comparison",
+    ("signed_cosine_vs_delta_best", "cosine_sq_vs_recovery_best"),
+)
+def test_rowwise_best_alpha_visualizations_reject_missing_comparisons(comparison):
+    data = _synthetic_rowwise_statistics()
+    del data["statistics"]["comparisons"][comparison]
+    _assert_rowwise_best_alpha_scripts_reject(data, comparison)
+
+
+def test_rowwise_best_alpha_visualizations_reject_global_schema():
+    _assert_rowwise_best_alpha_scripts_reject(
+        _synthetic_statistics(),
+        "rowwise_statistics_v1",
+    )
+
+
+def test_rowwise_best_alpha_influence_requires_all_22_task_records():
+    data = _synthetic_rowwise_statistics()
+    comparison = data["statistics"]["comparisons"]["signed_cosine_vs_delta_best"]
+    comparison["influence"]["leave_one_receiver_out"].pop()
+    _assert_visualization_rejects(
+        data,
+        "plot_rowwise_best_alpha_influence.py",
+        "must contain 22 records",
+    )
+
+
+def test_rowwise_best_alpha_output_rejects_unsafe_provenance_path():
+    data = _synthetic_rowwise_statistics()
+    data["provenance"]["producer_run_id_path"] = "../escape"
+    _assert_visualization_rejects(
+        data,
+        "plot_rowwise_best_alpha_heatmap.py",
+        "unsafe run-id path",
+    )
+
+
+def _assert_rowwise_best_alpha_scripts_reject(data, expected_error):
+    for script in (
+        "plot_rowwise_best_alpha_heatmap.py",
+        "plot_rowwise_best_alpha_associations.py",
+        "plot_rowwise_best_alpha_influence.py",
+    ):
+        _assert_visualization_rejects(data, script, expected_error)
+
+
+def _assert_visualization_rejects(data, script, expected_error):
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp = Path(tmp_dir)
+        statistics = tmp / "invalid.json"
+        statistics.write_text(json.dumps(data))
+        env = os.environ.copy()
+        env["MPLCONFIGDIR"] = str(tmp / "matplotlib")
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(VIS_DIR / script),
+                "--statistics",
+                str(statistics),
+                "--plot-root",
+                str(tmp / "plots"),
+            ],
+            cwd=ROOT,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert expected_error in result.stderr

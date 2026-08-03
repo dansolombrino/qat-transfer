@@ -1853,3 +1853,80 @@ The geometry stage is `rowwise_alignment`, with golden artifact
 run identity remains the original ordered eight parameters, with only the
 analysis-spec value changed for provenance. Both stages remain deterministic,
 CPU-only, non-resumable, and W&B-free.
+
+## 15. Validation-selected best-alpha presentation
+
+The best-alpha presentation is an additive rendering of quantities already
+produced by `reviewer_3hfp_v1`; it is not a new model experiment. It holds the
+ViT-B/16 checkpoints, 22-task population, 48 selected `nn.Linear.weight`
+tensors, 84,934,656-coordinate global cosine, and 462-cell off-diagonal
+analysis population fixed.
+
+For every ordered donor--receiver pair, `alpha_best` was selected by the
+pre-existing `val_accuracy_fp_head_ptq` result. `delta_best` is the test-set
+gain measured at that validation-selected alpha relative to the same FP+PTQ
+receiver baseline. Neither the alpha selection nor any test inference was
+repeated for this extension, and alpha was never selected on test.
+
+The completed `euclidean_statistics.json` already contains the required
+comparison. Signed global cosine versus validation-selected test gain has
+Spearman rho `0.2516408968` and Pearson `r = 0.1227361819` across the 462
+cross-task cells. Squared global cosine versus validation-selected test
+recovery has Spearman rho `0.1584121246` and Pearson `r = 0.0091900528`.
+The signed-cosine/best-gain Spearman coefficient remains positive in every
+leave-one-task-role-out check: `0.15968--0.28781` when omitting receivers and
+`0.16257--0.28316` when omitting donors.
+
+Three render-only scripts consume the existing statistics artifact:
+
+- `plot_best_alpha_heatmap.py` reproduces the complete global-cosine heatmap
+  as a dedicated member of the best-alpha result suite. Its numerical matrix
+  is necessarily identical to the original heatmap because cosine is
+  independent of alpha.
+- `plot_best_alpha_associations.py` reproduces the original two-panel
+  association layout, substituting `delta_best` for the unit-scale `delta` in
+  the signed-cosine panel while retaining the already best-scale
+  `recovery_best` panel.
+- `plot_best_alpha_influence.py` reproduces the leave-one-receiver-out and
+  leave-one-donor-out layout for `signed_cosine_vs_delta_best`.
+
+The new figure annotations report only Spearman and Pearson coefficients;
+they intentionally omit QAP p-values to match the selected reviewer-response
+presentation. The underlying statistics artifact is not altered.
+
+All three scripts were rendered plainly on rig-4090 from the real completed
+JSON. They produced six nonempty artifacts beneath
+`plots/998_rebuttal/005_qv_alignment/<script_stem>/<mirrored_run_id_path>/`:
+PDF plus 300-DPI PNG for each script. The heatmap PNG is 3302x2970, the
+association PNG is 3634x1504, and the influence PNG is 3274x2254. Visual
+inspection confirmed legible axes, task labels, coefficient annotations, and
+all-cell reference lines. The full `code/test/qv_alignment_rebuttal.py` suite
+passes (`20 passed`), including synthetic rendering and rejection of missing
+best-alpha fields or comparison statistics.
+
+### Matching-row best-alpha counterpart
+
+The row-wise best-alpha presentation is likewise render-only. It reads the
+completed `rowwise_statistics.json`, whose outcomes and validation-selected
+alphas are exactly the same as the global-cosine artifact, and changes only
+the plotted alignment geometry to the uniform mean of all 82,944 matching-row
+cosines.
+
+Signed mean-row cosine versus validation-selected test gain has Spearman rho
+`0.2933233035` (QAP `p = 0.00239976`) and Pearson `r = 0.1977755079` (QAP
+`p = 0.00969903`) over the same 462 cross-task cells. Squared mean-row cosine
+versus validation-selected recovery has Spearman rho `0.2285356756` (QAP
+`p = 0.00159984`) and Pearson `r = 0.0751923611` (QAP `p = 0.11518848`).
+The signed-cosine/best-gain Spearman coefficient remains positive in every
+leave-one-task-role-out check: `0.20649--0.32622` when omitting receivers and
+`0.20947--0.31742` when omitting donors.
+
+Three additive scripts—`plot_rowwise_best_alpha_heatmap.py`,
+`plot_rowwise_best_alpha_associations.py`, and
+`plot_rowwise_best_alpha_influence.py`—write into distinct full-provenance
+paths beneath their respective script stems. All six real PDF/PNG outputs are
+valid and nonempty; the PDFs are one page, and the PNG dimensions are
+3324x2970, 3634x1504, and 3274x2254. Visual inspection confirmed complete
+labels, unclipped annotations, and all 44 influence points. The full 005 test
+suite passes (`29 passed`), including strict row-wise schema, missing-field,
+missing-comparison, influence-cardinality, and unsafe-path rejection tests.

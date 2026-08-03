@@ -779,3 +779,20 @@ computation because the shared tree contained concurrent best-alpha work and
 the isolated checkout initially lacked `.env`; both guard failures were
 preserved in logs, then the exact tagged source ran successfully from a clean
 isolated checkout.
+
+---
+
+## 2026-08-03, 14:00 — rendered row-wise best-alpha presentation for 005
+
+Completed the validation-selected best-alpha presentation for the strict
+matching-row geometry without reloading checkpoints, rerunning transfer
+evaluation, or creating a new analyzer artifact. The existing row-wise
+statistics already contained all 462 `alpha_best`, `delta_best`, and
+`recovery_best` records. Signed mean-row cosine versus best-scale gain has
+Spearman rho 0.2933 and Pearson r 0.1978; squared mean-row cosine versus
+best-scale recovery has Spearman rho 0.2285 and Pearson r 0.0752.
+
+Three dedicated row-wise scripts produced six full-provenance PDF/PNG files.
+All were structurally validated and visually inspected. The global and
+row-wise best-alpha suites now form an explicit paired presentation while
+remaining render-only consumers of their immutable statistics artifacts.

@@ -220,12 +220,15 @@ Implementation and targeted verification are complete. In the first real wave,
 the geometry producer succeeded, while the analyzer failed at startup because
 Hydra parsed an unescaped `=` in an override path. The analyzer-only retry wave
 succeeded, and all three real figures were generated as PDF+PNG.
+Three additive best-alpha figures were later rendered from the same completed
+statistics artifact; they did not require a new experiment run.
 
 | stage | model | dependency | wave | rig | gpu | status | started | progress | eta | ended | elapsed | notes |
 |---|---|---|---|---|---:|---|---|---|---|---|---|---|
 | `compute_euclidean_alignment` | `vit_base_patch16_224.orig_in21k` | canonical final FP/QAT checkpoints for fixed 22-task set | 20260802-162236 | rig-4090 | 0 | done | 08-02 16:28 | vectors 22/22; artifact written |  | 08-02 16:29 | 1m08s | global `H=I` cosine over quantized `nn.Linear.weight` subspace; no partial resume; W&B off |
 | `analyze_euclidean_alignment` | `vit_base_patch16_224.orig_in21k` | validated `euclidean_alignment.json` plus existing 22x22 full-QV test outcome JSON | 20260802-190820 | rig-4090 | 0 | done | 08-02 19:10 | comparisons 4/4; artifact written |  | 08-02 19:10 | 2.5s | `reviewer_3hfp_v1`; inference on 462 cross-task cells; 10,000 QAP permutations |
 | Euclidean visualization suite | `vit_base_patch16_224.orig_in21k` | validated `euclidean_statistics.json` | 20260802-190820 | rig-4090 | 0 | done | 08-02 19:10 | 3/3 figures; 6/6 files verified |  | 08-02 19:15 |  | real heatmap, association, and influence figures rendered as PDF+PNG |
+| Best-alpha visualization extension | `vit_base_patch16_224.orig_in21k` | same validated `euclidean_statistics.json`; no recomputation | — | rig-4090 | 0 | done | 08-03 12:35 | 3/3 figures; 6/6 files verified |  | 08-03 12:42 | 7m | dedicated cosine heatmap plus association and influence figures for validation-selected alpha outcomes; PDF+PNG; visually verified; QAP omitted from annotations |
 
 ### Wave 20260802-162236
 
@@ -278,12 +281,16 @@ Golden artifacts:
 
 Both runs are CPU-only on the approved rig-4090 gpu0 lane, restart from the
 beginning after interruption, create no checkpoints, and do not use W&B.
+The validation-selected best-alpha extension below is render-only: it consumes
+the completed row-wise statistics artifact and performs no new model or
+analysis run.
 
 | stage | run identity | wave | rig | gpu | status | started | progress | eta | ended | elapsed | notes |
 |---|---|---|---|---:|---|---|---|---|---|---|---|
 | `compute_rowwise_alignment` | `producer_run_id_sha256=8ca847e02a7acfc937aa9e0fb5b5bd593254c92e0ae95e764a3c4d61299332b2` | 20260803-120627 | rig-4090 | 0 | done | 08-03 12:45 | rows 82944/82944; artifact written |  | 08-03 12:46 | 1m05.4s | golden `rowwise_alignment.json` valid (65,690 bytes); isolated clean checkout used after two pre-compute environment guard failures |
 | `analyze_rowwise_alignment` | `ptq_bits=3,ptq_granularity=channel,outcome_protocol=full_qv,outcome_split=test,unit_alpha=1.0,analysis_spec=reviewer_3hfp_rowwise_v1,n_permutations=10000,permutation_seed=2038` | 20260803-120627 | rig-4090 | 0 | done | 08-03 12:46 | comparisons 4/4; artifact written |  | 08-03 12:46 | 2.4s | golden `rowwise_statistics.json` valid (3,217,407 bytes); 462 cross-task cells; 10,000 QAP permutations |
 | Row-wise visualization suite | — | 20260803-120627 | rig-4090 | 0 | done | 08-03 12:47 | 3/3 figures; 6/6 files verified |  | 08-03 12:48 |  | heatmap, association, and influence figures rendered as nonempty PDF+PNG |
+| Row-wise best-alpha visualization extension | — | — | rig-4090 | 0 | done | 08-03 13:59 | 3/3 figures; 6/6 files verified |  | 08-03 14:00 | 4.3s | same validated `rowwise_statistics.json`; validation-selected outcomes reused; no recomputation; PDF+PNG visually verified |
 
 ## 998_rebuttal/006_alignment_alpha_response — Level A alpha response
 
