@@ -272,7 +272,8 @@ def _apply_qv(receiver_dir: Path, qv_path: Path, alpha: float, output: Path) -> 
             if storage_pointer in covered_storage:
                 seen.add(key)
                 continue
-            tensor.copy_((tensor.float() + alpha * delta).to(tensor.dtype))
+            compute_dtype = torch.float64 if delta.dtype == torch.float64 else torch.float32
+            tensor.copy_((tensor.to(compute_dtype) + alpha * delta).to(tensor.dtype))
             seen.add(key)
             covered_storage.add(storage_pointer)
     missing = [key for key, value in state.items() if value.is_floating_point() and value.untyped_storage().data_ptr() not in covered_storage]

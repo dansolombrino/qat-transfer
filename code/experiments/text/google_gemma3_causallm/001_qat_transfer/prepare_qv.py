@@ -72,6 +72,7 @@ def prepare(config: dict[str, Any]) -> Path:
             raise RuntimeError(f"checkpoint key mismatch: missing_fp={sorted(set(qat_map)-set(fp_map))[:5]} missing_qat={sorted(set(fp_map)-set(qat_map))[:5]}")
         qv: dict[str, torch.Tensor] = {}
         floating = nonfloating = numel = 0
+        float64_fallbacks: list[str] = []
         for index, key in enumerate(sorted(fp_map)):
             fp, qat = _read(fp_map, key), _read(qat_map, key)
             if fp.shape != qat.shape or fp.is_floating_point() != qat.is_floating_point():
@@ -81,7 +82,10 @@ def prepare(config: dict[str, Any]) -> Path:
                 qat_bf16 = qat.to(torch.bfloat16)
                 delta = qat_bf16.float() - fp_bf16.float()
                 if not torch.equal((fp_bf16.float() + delta).to(torch.bfloat16), qat_bf16):
-                    raise RuntimeError(f"BF16 reconstruction failed for {key}")
+                    delta = qat_bf16.double() - fp_bf16.double()
+                    if not torch.equal((fp_bf16.double() + delta).to(torch.bfloat16), qat_bf16):
+                        raise RuntimeError(f"BF16 reconstruction failed for {key}")
+                    float64_fallbacks.append(key)
                 qv[key] = delta.contiguous()
                 floating += 1
                 numel += delta.numel()
@@ -94,7 +98,7 @@ def prepare(config: dict[str, Any]) -> Path:
         temporary = qv_path.with_suffix(".safetensors.tmp")
         save_file(qv, temporary, metadata={"format": "pt", "alpha_reference": "1.0"})
         temporary.replace(qv_path)
-        manifest = {"format_version": 1, "definition": "QAT_it[bfloat16] - FP_it[bfloat16], stored in float32", "fp_model_id": config["fp_model_id"], "fp_revision": config["fp_revision"], "fp_snapshot": str(fp_snapshot), "qat_model_id": config["qat_model_id"], "qat_revision": config["qat_revision"], "qat_snapshot": str(qat_snapshot), "floating_tensors": floating, "nonfloating_tensors": nonfloating, "floating_numel": numel, "bf16_reconstruction_exact": True, "qv_sha256": _sha256(qv_path)}
+        manifest = {"format_version": 2, "definition": "QAT_it[bfloat16] - FP_it[bfloat16]; float32 unless exact reconstruction requires float64", "fp_model_id": config["fp_model_id"], "fp_revision": config["fp_revision"], "fp_snapshot": str(fp_snapshot), "qat_model_id": config["qat_model_id"], "qat_revision": config["qat_revision"], "qat_snapshot": str(qat_snapshot), "floating_tensors": floating, "float32_tensors": floating - len(float64_fallbacks), "float64_fallback_tensors": float64_fallbacks, "nonfloating_tensors": nonfloating, "floating_numel": numel, "bf16_reconstruction_exact": True, "qv_sha256": _sha256(qv_path)}
         temporary_manifest = manifest_path.with_suffix(".json.tmp")
         temporary_manifest.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
         temporary_manifest.replace(manifest_path)

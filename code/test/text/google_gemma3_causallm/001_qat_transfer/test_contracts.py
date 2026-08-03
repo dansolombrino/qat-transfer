@@ -76,3 +76,12 @@ def test_bf16_qv_exactly_reconstructs_donor() -> None:
     delta = qat.to(torch.bfloat16).float() - fp.to(torch.bfloat16).float()
     reconstructed = (fp.to(torch.bfloat16).float() + delta).to(torch.bfloat16)
     assert torch.equal(reconstructed, qat.to(torch.bfloat16))
+
+    # Catastrophic cancellation can make an FP32 delta insufficient. The
+    # materializer detects this and stores only the affected tensor in FP64.
+    fp_tiny = torch.tensor([0.0002574920654296875], dtype=torch.bfloat16)
+    qat_tiny = torch.tensor([-1.8553691916167736e-09], dtype=torch.bfloat16)
+    delta32 = qat_tiny.float() - fp_tiny.float()
+    assert not torch.equal((fp_tiny.float() + delta32).to(torch.bfloat16), qat_tiny)
+    delta64 = qat_tiny.double() - fp_tiny.double()
+    assert torch.equal((fp_tiny.double() + delta64).to(torch.bfloat16), qat_tiny)

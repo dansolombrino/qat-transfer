@@ -784,3 +784,12 @@ This definition exactly reconstructs the donor BF16 tensors and is the delta
 that is actually added to BF16 fine-tuned receivers. Five local contract tests
 pass, including an explicit exact-reconstruction test. Replacement wave
 `20260803-213921` inherits the same task/GPU placement and remains smoke-gated.
+
+The replacement preflight then localized the remaining impossibility: 12
+embedding entries cancel values near `1e-4` down to `1e-9`, a difference whose
+required precision cannot be represented by any FP32 delta. The exact format
+is therefore adaptive per tensor: FP32 by default, with FP64 used only for a
+tensor that fails exhaustive BF16 reconstruction. The manifest records every
+fallback tensor, and patch arithmetic follows the stored dtype. Wave
+`20260803-213921` also launched no run and remains immutable; final replacement
+wave `20260803-215248` carries this exact representation.
