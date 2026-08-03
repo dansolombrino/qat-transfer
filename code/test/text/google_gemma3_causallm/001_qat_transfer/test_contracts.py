@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import torch
+import pytest
 from omegaconf import OmegaConf
 
 
@@ -99,3 +100,10 @@ def test_serialized_tokenizer_does_not_reapply_regex_fix(tmp_path: Path) -> None
     tokenizer_contract.mark_regex_fix_consumed(tmp_path)
     config = json.loads(config_path.read_text())
     assert config == {"fix_mistral_regex": False, "model_max_length": 32768}
+
+
+def test_converter_vocab_excludes_only_unembeddable_image_token() -> None:
+    vocab = {"hello": 0, "world": 1, "<image_soft_token>": 2}
+    assert tokenizer_contract.converter_vocab(vocab, 2) == {"hello": 0, "world": 1}
+    with pytest.raises(RuntimeError, match="unexpected tokenizer IDs"):
+        tokenizer_contract.converter_vocab({"hello": 0, "surprise": 2}, 2)

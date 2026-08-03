@@ -827,3 +827,13 @@ loads the receiver with plain `AutoTokenizer`, which honored the persisted
 false after saving; the corrected tokenizer graph itself is unchanged. Six
 local contract tests pass, including this serialization invariant. Replacement
 wave `20260803-223300` remains gated on the same end-to-end smoke.
+
+That smoke confirmed the regex handoff, then reached b9637's next vocabulary
+guard. Gemma 3 1B exposes multimodal-only `<image_soft_token>` at ID 262144,
+while its text model has exactly 262144 embedding rows (valid IDs 0--262143).
+The converter already iterates only over the model's embeddable range, but its
+older pre-loop assertion rejects the extra tokenizer token first. A tracked
+wrapper now presents b9637 with that bounded vocabulary view and refuses any
+overflow other than the one exact image token, leaving the training/evaluation
+tokenizer and pinned llama.cpp checkout unchanged. Seven local contract tests
+pass. Replacement wave `20260803-224359` is smoke-gated.

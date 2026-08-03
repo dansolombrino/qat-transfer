@@ -309,6 +309,7 @@ def _run_checked(command: list[str], log_path: Path, env: dict[str, str] | None 
 def _convert_and_quantize(cfg: dict[str, Any], run_checkpoint: Path, eval_dir: Path) -> dict[str, Path]:
     llama_dir = Path(cfg["paths"]["llama_cpp_dir"]).resolve()
     converter, quantizer = llama_dir / "convert_hf_to_gguf.py", llama_dir / "build/bin/llama-quantize"
+    converter_compat = HERE / "convert_hf_to_gguf_compat.py"
     if not converter.exists() or not quantizer.exists():
         raise FileNotFoundError(f"llama.cpp b9637 is not prepared at {llama_dir}")
     receiver, patched = run_checkpoint / "model_final", run_checkpoint / "receiver_plus_qv_hf.tmp"
@@ -318,7 +319,7 @@ def _convert_and_quantize(cfg: dict[str, Any], run_checkpoint: Path, eval_dir: P
     converter_env["PYTHONPATH"] = str(llama_dir) + os.pathsep + converter_env.get("PYTHONPATH", "")
     for source, target, name in ((receiver, outputs["receiver_bf16"], "receiver"), (patched, outputs["patched_bf16"], "patched")):
         if not target.exists():
-            _run_checked([sys.executable, str(converter), str(source), "--outfile", str(target), "--outtype", "bf16"], eval_dir / f"convert_{name}.log", env=converter_env)
+            _run_checked([sys.executable, str(converter_compat), str(converter), str(source), "--outfile", str(target), "--outtype", "bf16"], eval_dir / f"convert_{name}.log", env=converter_env)
     for source, target, name in ((outputs["receiver_bf16"], outputs["receiver_q4_0"], "receiver"), (outputs["patched_bf16"], outputs["patched_q4_0"], "patched")):
         if not target.exists():
             _run_checked([str(quantizer), str(source), str(target), "Q4_0"], eval_dir / f"quantize_{name}.log")
