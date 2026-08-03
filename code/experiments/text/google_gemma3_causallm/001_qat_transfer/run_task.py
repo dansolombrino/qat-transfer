@@ -261,7 +261,7 @@ def _train(cfg: dict[str, Any], splits: dict[str, Any], run_checkpoint: Path, st
         _barrier()
 
 
-def _apply_qv(receiver_dir: Path, qv_path: Path, alpha: float, output: Path, fix_mistral_regex: bool) -> None:
+def _apply_qv(receiver_dir: Path, qv_path: Path, alpha: float, output: Path) -> None:
     model = AutoModelForCausalLM.from_pretrained(receiver_dir, torch_dtype=torch.bfloat16, device_map="cpu")
     state, seen, covered_storage = model.state_dict(), set(), set()
     with safe_open(qv_path, framework="pt", device="cpu") as handle:
@@ -285,7 +285,14 @@ def _apply_qv(receiver_dir: Path, qv_path: Path, alpha: float, output: Path, fix
     if output.exists():
         shutil.rmtree(output)
     model.save_pretrained(output, safe_serialization=True)
-    AutoTokenizer.from_pretrained(receiver_dir, fix_mistral_regex=fix_mistral_regex).save_pretrained(output)
+    for source in receiver_dir.iterdir():
+        if source.is_file() and (
+            source.name.startswith("tokenizer")
+            or source.name.startswith("special_tokens")
+            or source.name.startswith("added_tokens")
+            or source.name.startswith("chat_template")
+        ):
+            shutil.copy2(source, output / source.name)
 
 
 def _run_checked(command: list[str], log_path: Path, env: dict[str, str] | None = None) -> None:
@@ -300,7 +307,7 @@ def _convert_and_quantize(cfg: dict[str, Any], run_checkpoint: Path, eval_dir: P
     if not converter.exists() or not quantizer.exists():
         raise FileNotFoundError(f"llama.cpp b9637 is not prepared at {llama_dir}")
     receiver, patched = run_checkpoint / "model_final", run_checkpoint / "receiver_plus_qv_hf.tmp"
-    _apply_qv(receiver, Path(cfg["paths"]["qv_dir"]) / "qv.safetensors", float(cfg["alpha"]), patched, bool(cfg["tokenizer_fix_mistral_regex"]))
+    _apply_qv(receiver, Path(cfg["paths"]["qv_dir"]) / "qv.safetensors", float(cfg["alpha"]), patched)
     outputs = {"receiver_bf16": run_checkpoint / "receiver_bf16.tmp.gguf", "receiver_q4_0": run_checkpoint / "receiver_q4_0.gguf", "patched_bf16": run_checkpoint / "receiver_plus_qv_bf16.tmp.gguf", "patched_q4_0": run_checkpoint / "receiver_plus_qv_q4_0.gguf"}
     converter_env = os.environ.copy()
     converter_env["PYTHONPATH"] = str(llama_dir) + os.pathsep + converter_env.get("PYTHONPATH", "")
@@ -370,7 +377,9 @@ def _evaluate(cfg: dict[str, Any], splits: dict[str, Any], run_checkpoint: Path,
     model_paths = _convert_and_quantize(cfg, run_checkpoint, eval_dir)
     tokenizer = AutoTokenizer.from_pretrained(
         run_checkpoint / "model_final",
-        fix_mistral_regex=bool(cfg["tokenizer_fix_mistral_regex"]),
+        # The source load was already fixed before serialization; reapplying
+        # the patch to the serialized single Split pre-tokenizer is invalid.
+        fix_mistral_regex=False,
     )
     rows, conditions = splits["test"], {}
     for index, (name, model_path) in enumerate(model_paths.items(), start=1):

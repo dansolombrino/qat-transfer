@@ -812,3 +812,9 @@ Transformers also identified its serialized tokenizer regex as the known
 Mistral-pattern issue, so `fix_mistral_regex=true` is now a resolved config
 field and applied consistently. Wave `20260803-221250` uses unique static
 loopback ports 29501--29503 and a fresh smoke identity.
+
+That smoke completed training but failed while applying QV because the regex
+fix was redundantly reapplied while loading the already-fixed serialized
+tokenizer. The patched model now copies serialized tokenizer/chat-template
+files byte-for-byte; evaluation loads that serialization without a second
+patch. Wave `20260803-222037` carries this tokenizer-safe behavior.
