@@ -11,6 +11,7 @@ max_length: ???
 limit_num_batches: null
 eval_split: ???        # "val" or "test"
 log_to_file: false
+eval_mode: full       # "full" or "fp_head_ptq_only"
 
 # Shared training hyperparameters used to locate ALL THREE checkpoints
 # (fp_source, qat_source, fp_target). Assumes source and target were trained

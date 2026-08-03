@@ -1,0 +1,40 @@
+defaults:
+  - override hydra/job_logging: none
+  - _self_
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+
+model_name: ???
+batch_size: ???
+eval_split: ???
+gpu: ???
+
+lr: ???
+wd: ???
+ls: ???
+wl: ???
+max_grad_norm: ???
+
+source:
+  dataset_name: ???
+  seed: ???
+  limit_num_epochs: null
+
+target:
+  dataset_name: ???
+  seed: ???
+  limit_num_epochs: null
+
+qv:
+  alpha: 1.0
+
+awq:
+  skip_modules: ???
+  bits: ???
+  granularity: ???
+  num_calib_batches: 4
+  n_grid: 20
+  clip: true

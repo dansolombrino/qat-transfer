@@ -1,0 +1,22 @@
+version = 1
+
+[artifacts.checkpoints]
+path = "storage/checkpoints"
+depth = 12
+
+[artifacts.evaluations]
+path = "evaluations"
+depth = 12
+
+[artifacts.references]
+path = "references"
+depth = 2
+
+[machines.rig-4090]
+repo_path = "/mnt/KS_2TB/PARA/Projects/quantization/qat-transfer"
+
+[machines.rig-3090-ti]
+repo_path = "/mnt/KS_960GB/PARA/Projects/quantization/qat-transfer"
+
+[machines.behemoth]
+repo_path = "/home/dansolombrino/data/PARA/Projects/quantization/qat-transfer"

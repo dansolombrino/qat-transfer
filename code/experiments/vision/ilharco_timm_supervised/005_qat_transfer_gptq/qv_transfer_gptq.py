@@ -85,6 +85,7 @@ from src.vision.utils import (
     set_seed,
 )
 from src.gptq import apply_gptq_
+from common.status import StatusWriter
 from src.task_vectors import TaskVector
 
 import hydra
@@ -420,6 +421,48 @@ def _run_pair_alpha(
     tgt_epochs: int,
     eval_split: str,
 ):
+    """Signal and execute one independently addressable result cell."""
+    eval_dir = _eval_dir(
+        cfg, source_dataset_name, target_dataset_name, alpha, eval_split
+    )
+    with StatusWriter(eval_dir) as status:
+        status.heartbeat(progress="0/4")
+        _run_pair_alpha_impl(
+            cfg=cfg,
+            source_dataset_name=source_dataset_name,
+            target_dataset_name=target_dataset_name,
+            fp_tgt_sd=fp_tgt_sd,
+            qat_tgt_sd=qat_tgt_sd,
+            tv=tv,
+            alpha=alpha,
+            dataset=dataset,
+            calib_batches=calib_batches,
+            num_classes=num_classes,
+            device=device,
+            src_epochs=src_epochs,
+            tgt_epochs=tgt_epochs,
+            eval_split=eval_split,
+            status=status,
+        )
+
+
+def _run_pair_alpha_impl(
+    cfg: DictConfig,
+    source_dataset_name: str,
+    target_dataset_name: str,
+    fp_tgt_sd: dict,
+    qat_tgt_sd: dict,
+    tv: TaskVector,
+    alpha: float,
+    dataset,
+    calib_batches: list,
+    num_classes: int,
+    device: str,
+    src_epochs: int,
+    tgt_epochs: int,
+    eval_split: str,
+    status: StatusWriter,
+):
     """Evaluate one (source, target, alpha) cell: patch, GPTQ, evaluate."""
 
     if IS_SLURM:
@@ -492,6 +535,7 @@ def _run_pair_alpha(
         split=eval_split,
         limit_num_batches=cfg.limit_num_batches,
     )
+    status.heartbeat(progress="1/4")
 
     if IS_SLURM:
         log.info("eval %s_accuracy (patched + FP head, before GPTQ): %s", eval_split, accuracy_fp_head)
@@ -543,6 +587,7 @@ def _run_pair_alpha(
         split=eval_split,
         limit_num_batches=cfg.limit_num_batches,
     )
+    status.heartbeat(progress="2/4")
 
     if IS_SLURM:
         log.info("eval %s_accuracy (patched + FP head + GPTQ): %s", eval_split, accuracy_fp_head_gptq)
@@ -574,6 +619,7 @@ def _run_pair_alpha(
         split=eval_split,
         limit_num_batches=cfg.limit_num_batches,
     )
+    status.heartbeat(progress="3/4")
 
     if IS_SLURM:
         log.info("eval %s_accuracy (patched + QAT head, before GPTQ): %s", eval_split, accuracy_qat_head)
@@ -607,6 +653,7 @@ def _run_pair_alpha(
         split=eval_split,
         limit_num_batches=cfg.limit_num_batches,
     )
+    status.heartbeat(progress="4/4")
 
     if IS_SLURM:
         log.info("eval %s_accuracy (patched + QAT head + GPTQ): %s", eval_split, accuracy_qat_head_gptq)

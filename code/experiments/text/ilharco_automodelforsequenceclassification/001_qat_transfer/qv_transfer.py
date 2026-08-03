@@ -264,6 +264,8 @@ def _run_pair(
 ):
     """Run QV transfer for a single (source, target) pair."""
 
+    metric_only = cfg.eval_mode == "fp_head_ptq_only"
+
     def _is_head_key(k: str) -> bool:
         return k.startswith(head_prefix)
 
@@ -409,7 +411,10 @@ def _run_pair(
     ############################################################################
 
     patched_with_fp_head = {**patched_backbone, **fp_tgt_head_sd}
-    patched_with_qat_head = {**patched_backbone, **qat_tgt_head_sd}
+    patched_with_qat_head = (
+        {**patched_backbone, **qat_tgt_head_sd}
+        if qat_tgt_head_sd is not None else None
+    )
 
     del patched_backbone
 
@@ -433,19 +438,21 @@ def _run_pair(
         pprint(model_fp_head, expand_all=True)
         print(f"\n\n")
 
-    accuracy_fp_head = evaluate(
-        dataset=dataset,
-        model=model_fp_head,
-        tokenizer=tokenizer,
-        max_length=max_length,
-        device=device,
-        split=eval_split,
-        limit_num_batches=cfg.limit_num_batches,
-    )
+    accuracy_fp_head = None
+    if not metric_only:
+        accuracy_fp_head = evaluate(
+            dataset=dataset,
+            model=model_fp_head,
+            tokenizer=tokenizer,
+            max_length=max_length,
+            device=device,
+            split=eval_split,
+            limit_num_batches=cfg.limit_num_batches,
+        )
 
-    if IS_SLURM:
+    if IS_SLURM and not metric_only:
         log.info("eval %s_accuracy (patched + FP head, before PTQ): %s", eval_split, accuracy_fp_head)
-    else:
+    elif not metric_only:
         print(f"\n    eval {eval_split}_accuracy (patched + FP head, before PTQ): {accuracy_fp_head}\n")
 
     skip_modules = frozenset(cfg.ptq.skip_modules)
@@ -512,63 +519,64 @@ def _run_pair(
     # BEGIN Eval B: patched backbone + QAT target head
     ############################################################################
 
-    model_qat_head, _ = build_model_and_tokenizer(cfg.model_name, num_classes, device)
-    model_qat_head.load_state_dict(patched_with_qat_head, strict=False)
-    model_qat_head.to(device)
-    if IS_SLURM:
-        log.info("model (patched backbone + QAT head): %s", model_qat_head)
-    else:
-        print(f"\n\nmodel (patched backbone + QAT head):")
-        pprint(model_qat_head, expand_all=True)
-        print(f"\n\n")
+    accuracy_qat_head = None
+    accuracy_qat_head_ptq = None
+    if not metric_only:
+        model_qat_head, _ = build_model_and_tokenizer(cfg.model_name, num_classes, device)
+        model_qat_head.load_state_dict(patched_with_qat_head, strict=False)
+        model_qat_head.to(device)
+        if IS_SLURM:
+            log.info("model (patched backbone + QAT head): %s", model_qat_head)
+        else:
+            print(f"\n\nmodel (patched backbone + QAT head):")
+            pprint(model_qat_head, expand_all=True)
+            print(f"\n\n")
 
-    accuracy_qat_head = evaluate(
-        dataset=dataset,
-        model=model_qat_head,
-        tokenizer=tokenizer,
-        max_length=max_length,
-        device=device,
-        split=eval_split,
-        limit_num_batches=cfg.limit_num_batches,
-    )
+        accuracy_qat_head = evaluate(
+            dataset=dataset,
+            model=model_qat_head,
+            tokenizer=tokenizer,
+            max_length=max_length,
+            device=device,
+            split=eval_split,
+            limit_num_batches=cfg.limit_num_batches,
+        )
 
-    if IS_SLURM:
-        log.info("eval %s_accuracy (patched + QAT head, before PTQ): %s", eval_split, accuracy_qat_head)
-    else:
-        print(f"\n    eval {eval_split}_accuracy (patched + QAT head, before PTQ): {accuracy_qat_head}\n")
+        if IS_SLURM:
+            log.info("eval %s_accuracy (patched + QAT head, before PTQ): %s", eval_split, accuracy_qat_head)
+        else:
+            print(f"\n    eval {eval_split}_accuracy (patched + QAT head, before PTQ): {accuracy_qat_head}\n")
 
-    all_linear_names_qat = [
-        name for name, module in model_qat_head.named_modules()
-        if isinstance(module, nn.Linear)
-    ]
+        all_linear_names_qat = [
+            name for name, module in model_qat_head.named_modules()
+            if isinstance(module, nn.Linear)
+        ]
+        quantized_names_qat = apply_ptq_(
+            model=model_qat_head,
+            bits=cfg.ptq.bits,
+            granularity=cfg.ptq.granularity,
+            skip_modules=skip_modules,
+        )
+        skipped_names_qat = sorted(set(all_linear_names_qat) - set(quantized_names_qat))
 
-    quantized_names_qat = apply_ptq_(
-        model=model_qat_head,
-        bits=cfg.ptq.bits,
-        granularity=cfg.ptq.granularity,
-        skip_modules=skip_modules,
-    )
+        accuracy_qat_head_ptq = evaluate(
+            dataset=dataset,
+            model=model_qat_head,
+            tokenizer=tokenizer,
+            max_length=max_length,
+            device=device,
+            split=eval_split,
+            limit_num_batches=cfg.limit_num_batches,
+        )
 
-    skipped_names_qat = sorted(set(all_linear_names_qat) - set(quantized_names_qat))
+        if IS_SLURM:
+            log.info("eval %s_accuracy (patched + QAT head + PTQ): %s", eval_split, accuracy_qat_head_ptq)
+        else:
+            print(f"\n    eval {eval_split}_accuracy (patched + QAT head + PTQ): {accuracy_qat_head_ptq}\n")
 
-    accuracy_qat_head_ptq = evaluate(
-        dataset=dataset,
-        model=model_qat_head,
-        tokenizer=tokenizer,
-        max_length=max_length,
-        device=device,
-        split=eval_split,
-        limit_num_batches=cfg.limit_num_batches,
-    )
-
-    if IS_SLURM:
-        log.info("eval %s_accuracy (patched + QAT head + PTQ): %s", eval_split, accuracy_qat_head_ptq)
-    else:
-        print(f"\n    eval {eval_split}_accuracy (patched + QAT head + PTQ): {accuracy_qat_head_ptq}\n")
-
-    del model_qat_head
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+        del model_qat_head
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     ############################################################################
     # END Eval B
@@ -641,6 +649,7 @@ def _run_pair(
         "max_length": cfg.max_length,
         "max_grad_norm": cfg.max_grad_norm,
         "limit_num_batches": cfg.limit_num_batches,
+        "eval_mode": cfg.eval_mode,
         "device": str(device),
         "source": {
             "dataset_name": source_dataset_name,
@@ -719,6 +728,11 @@ def main(cfg: DictConfig):
 
     if cfg.model_name not in SUPPORTED_MODELS:
         raise ValueError(f"Unsupported model_name={cfg.model_name!r}. Supported: {sorted(SUPPORTED_MODELS)}")
+    if cfg.eval_mode not in ("full", "fp_head_ptq_only"):
+        raise ValueError(
+            f"Unsupported eval_mode={cfg.eval_mode!r}; expected 'full' or "
+            "'fp_head_ptq_only'"
+        )
 
     source_dataset_names = OmegaConf.to_container(cfg.source.dataset_names, resolve=True)
     target_dataset_names = OmegaConf.to_container(cfg.target.dataset_names, resolve=True)
@@ -780,7 +794,10 @@ def main(cfg: DictConfig):
             print(f"QAT target head:     {qat_tgt_head_path}\n")
 
         target_missing = False
-        for path in (fp_tgt_backbone_path, fp_tgt_head_path, qat_tgt_head_path):
+        required_target_paths = [fp_tgt_backbone_path, fp_tgt_head_path]
+        if cfg.eval_mode == "full":
+            required_target_paths.append(qat_tgt_head_path)
+        for path in required_target_paths:
             if not os.path.exists(path):
                 log.warning("Skipping target=%s: checkpoint missing: %s", target_dataset_name, path)
                 target_missing = True
@@ -791,7 +808,10 @@ def main(cfg: DictConfig):
 
         fp_tgt_backbone_sd = torch.load(fp_tgt_backbone_path, map_location="cpu")
         fp_tgt_head_sd = torch.load(fp_tgt_head_path, map_location="cpu")
-        qat_tgt_head_sd = torch.load(qat_tgt_head_path, map_location="cpu")
+        qat_tgt_head_sd = (
+            torch.load(qat_tgt_head_path, map_location="cpu")
+            if cfg.eval_mode == "full" else None
+        )
 
         ####################################################################
         # Create dataset (target)

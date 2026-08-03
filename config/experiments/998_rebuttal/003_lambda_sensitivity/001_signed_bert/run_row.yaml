@@ -1,0 +1,29 @@
+defaults:
+  - override hydra/job_logging: none
+  - _self_
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+
+model: ???
+split: ???
+alpha: ???
+receiver: ???
+donors: ???
+
+seed: 2038
+batch_size: 32
+max_length: 128
+lr: 1.0e-5
+wd: 0.1
+ls: 0.0
+max_grad_norm: 1.0
+qat_bits: 3
+ptq_bits: 3
+granularity: channel
+skip_module: classifier
+eval_mode: fp_head_ptq_only
+gpu: 0
+poll_interval_s: 60

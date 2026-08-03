@@ -1,0 +1,242 @@
+{
+  "wave": "20260802-212527",
+  "alphas": [
+    0.15,
+    0.3,
+    0.45,
+    0.6,
+    0.75,
+    0.9,
+    1.0,
+    1.05,
+    1.2,
+    1.35,
+    1.5
+  ],
+  "lanes": {
+    "behemoth_gpu0": {
+      "rig": "behemoth",
+      "gpu": 0,
+      "speed_weight": 2.0,
+      "estimated_reference_seconds": 1145.0,
+      "jobs": [
+        {
+          "method": "awq",
+          "target": "SUN397"
+        },
+        {
+          "method": "gptq",
+          "target": "GTSRB"
+        },
+        {
+          "method": "gptq",
+          "target": "FashionMNIST"
+        },
+        {
+          "method": "gptq",
+          "target": "CIFAR10"
+        },
+        {
+          "method": "awq",
+          "target": "FER2013"
+        },
+        {
+          "method": "awq",
+          "target": "EuroSAT"
+        }
+      ]
+    },
+    "behemoth_gpu2": {
+      "rig": "behemoth",
+      "gpu": 2,
+      "speed_weight": 2.0,
+      "estimated_reference_seconds": 1221.0,
+      "jobs": [
+        {
+          "method": "gptq",
+          "target": "SUN397"
+        },
+        {
+          "method": "awq",
+          "target": "Flowers102"
+        },
+        {
+          "method": "awq",
+          "target": "MNIST"
+        },
+        {
+          "method": "awq",
+          "target": "CIFAR100"
+        },
+        {
+          "method": "gptq",
+          "target": "STL10"
+        },
+        {
+          "method": "gptq",
+          "target": "OxfordIIITPet"
+        },
+        {
+          "method": "gptq",
+          "target": "RenderedSST2"
+        }
+      ]
+    },
+    "behemoth_gpu4": {
+      "rig": "behemoth",
+      "gpu": 4,
+      "speed_weight": 2.0,
+      "estimated_reference_seconds": 1195.0,
+      "jobs": [
+        {
+          "method": "awq",
+          "target": "PCAM"
+        },
+        {
+          "method": "gptq",
+          "target": "EMNIST"
+        },
+        {
+          "method": "awq",
+          "target": "FashionMNIST"
+        },
+        {
+          "method": "awq",
+          "target": "CIFAR10"
+        },
+        {
+          "method": "awq",
+          "target": "STL10"
+        },
+        {
+          "method": "awq",
+          "target": "OxfordIIITPet"
+        },
+        {
+          "method": "awq",
+          "target": "RenderedSST2"
+        }
+      ]
+    },
+    "behemoth_gpu5": {
+      "rig": "behemoth",
+      "gpu": 5,
+      "speed_weight": 2.0,
+      "estimated_reference_seconds": 1172.0,
+      "jobs": [
+        {
+          "method": "gptq",
+          "target": "PCAM"
+        },
+        {
+          "method": "awq",
+          "target": "GTSRB"
+        },
+        {
+          "method": "gptq",
+          "target": "Flowers102"
+        },
+        {
+          "method": "gptq",
+          "target": "MNIST"
+        },
+        {
+          "method": "gptq",
+          "target": "CIFAR100"
+        },
+        {
+          "method": "awq",
+          "target": "RESISC45"
+        },
+        {
+          "method": "gptq",
+          "target": "EuroSAT"
+        }
+      ]
+    },
+    "behemoth_gpu6": {
+      "rig": "behemoth",
+      "gpu": 6,
+      "speed_weight": 2.0,
+      "estimated_reference_seconds": 1206.0,
+      "jobs": [
+        {
+          "method": "awq",
+          "target": "SVHN"
+        },
+        {
+          "method": "gptq",
+          "target": "Food101"
+        },
+        {
+          "method": "gptq",
+          "target": "TinyImageNet"
+        },
+        {
+          "method": "gptq",
+          "target": "KMNIST"
+        },
+        {
+          "method": "gptq",
+          "target": "Cars"
+        },
+        {
+          "method": "gptq",
+          "target": "RESISC45"
+        },
+        {
+          "method": "gptq",
+          "target": "DTD"
+        }
+      ]
+    },
+    "behemoth_gpu7": {
+      "rig": "behemoth",
+      "gpu": 7,
+      "speed_weight": 2.0,
+      "estimated_reference_seconds": 1169.0,
+      "jobs": [
+        {
+          "method": "gptq",
+          "target": "SVHN"
+        },
+        {
+          "method": "awq",
+          "target": "EMNIST"
+        },
+        {
+          "method": "awq",
+          "target": "TinyImageNet"
+        },
+        {
+          "method": "awq",
+          "target": "KMNIST"
+        },
+        {
+          "method": "awq",
+          "target": "Cars"
+        },
+        {
+          "method": "gptq",
+          "target": "FER2013"
+        },
+        {
+          "method": "awq",
+          "target": "DTD"
+        }
+      ]
+    },
+    "rig-3090-ti_gpu0": {
+      "rig": "rig-3090-ti",
+      "gpu": 0,
+      "speed_weight": 0.5,
+      "estimated_reference_seconds": 286.0,
+      "jobs": [
+        {
+          "method": "awq",
+          "target": "Food101"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,29 @@
+defaults:
+  - override hydra/job_logging: none
+  - _self_
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+
+model_name: ???
+dataset_name: ???
+batch_size: ???
+seed: ???
+gpu: ???
+limit_num_epochs: null
+
+lr: ???
+wd: ???
+ls: ???
+wl: ???
+max_grad_norm: ???
+
+awq:
+  skip_modules: ???
+  bits: ???
+  granularity: ???
+  num_calib_batches: 4
+  n_grid: 20
+  clip: true

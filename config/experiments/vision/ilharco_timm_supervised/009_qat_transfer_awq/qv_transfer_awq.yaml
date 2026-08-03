@@ -1,4 +1,11 @@
+defaults:
+  - override hydra/job_logging: none
+  - _self_
+
 hydra:
+  run:
+    dir: .
+  output_subdir: null
   searchpath:
     - file://${oc.env:PWD}/config
   sweep:

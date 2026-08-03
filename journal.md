@@ -546,3 +546,199 @@ The transfer grid ran on behemoth alone: a cell needs FP + PV + sidecar for
 *every* donor co-located, and `qv_transfer` returns 0 while skipping donors
 whose checkpoints are absent (multi-rig-dispatch rule 3), so a host with a
 partial donor set emits quietly incomplete rows.
+
+---
+
+# 2026-08-02 — pre-data design for reviewer 3HFP's QV-alignment experiment
+
+Reviewer 3HFP asked for the central cos-squared prediction in Proposition 1 to
+be confronted with the 22-by-22 vision transfer matrix, beginning with the
+explicitly requested Euclidean (`H=I`) proxy. The experiment is registered as
+`998_rebuttal/005_qv_alignment`; its evolving normative specification is
+`code/experiments/998_rebuttal/005_qv_alignment/RESEARCH_NOTE.md`.
+
+The first pilot is deliberately restricted to
+`vit_base_patch16_224.orig_in21k`. For every one of the fixed 22 tasks, the QV
+is the matched final QAT-minus-FP checkpoint displacement projected onto only
+the `.weight` tensors of `nn.Linear` modules actually touched by `apply_ptq_`.
+Heads, Linear biases, normalization parameters, embeddings, and patch
+convolutions are excluded. This is therefore quantized-subspace alignment, not
+the cosine of the complete backbone QV transferred by the existing paper
+experiment.
+
+The reviewer-literal metric is one global Euclidean cosine: selected matrices
+are algebraically flattened and concatenated, their dot products and squared
+norms are accumulated in float64, and normalization occurs once. There is no
+layer-wise or output-channel-wise cosine averaging. Per-output-row
+quantization determines how the QVs were learned and which Linear weights are
+in scope, but it does not alter the identity-metric aggregation.
+
+Geometry and outcome analysis are separated. The producer writes
+`euclidean_alignment.json` with checkpoint paths and SHA-256 digests, selected
+parameter metadata, norms, dot products, and the 22-by-22 cosine matrix. The
+analyzer reads that artifact and the existing full-QV test outcome JSON, joins
+exactly all 484 donor-receiver cells, retains the 22 diagonal cells only for
+audit, and performs inference on exactly 462 cross-task cells. Missing,
+duplicate, or extra pairs are hard errors.
+
+The frozen analysis contract is named `reviewer_3hfp_v1`. Its sole primary
+comparison is signed cosine versus unit-scale test accuracy delta, with
+Spearman as the primary coefficient and Pearson as a secondary functional-form
+check. Dependence induced by shared donors and receivers is handled with a
+10,000-draw simultaneous-row-and-column task-label QAP permutation test, plus
+leave-one-donor-out and leave-one-receiver-out sensitivity. Squared cosine
+versus validation-selected `recovery_best` is theory-adjacent secondary
+evidence, not an exact test: the metric is Euclidean rather than Hessian, the
+outcome is Top-1 accuracy rather than loss, lambda is selected on a bounded
+positive grid, and the outcome transferred the full QV while alignment uses a
+projection.
+
+The analyzer will persist the exact 462 plot/inference records and 22 diagonal
+audit records in `euclidean_statistics.json`, including provenance, source
+hashes, all coefficients, full QAP null vectors, and influence summaries.
+Three scripts will read that JSON only and emit PDF plus 300-DPI PNG versions
+of an alignment heatmap, a two-panel association figure, and an influence
+figure.
+
+Both deterministic stages use atomic golden-artifact completion, restart from
+the beginning after interruption, create no runtime or model checkpoints, and
+disable W&B. Run IDs, schemas, artifact locations, visualization paths, and
+interpretations for positive, mixed, or null results were predeclared before
+seeing any alignment data. At this journal entry, no implementation exists and
+no experiment has been run.
+
+## 2026-08-02 — implementation and pre-run verification
+
+The approved Euclidean pilot was implemented as two Hydra artifact producers
+and three render-only visualization scripts. The geometry producer projects
+each checkpoint QV onto exactly the `nn.Linear.weight` tensors reached by
+`apply_ptq_`, stores the 22 vectors temporarily in a memory map, and performs
+one float64 global Gram accumulation. The analyzer owns the exact pair join,
+all predeclared correlations, the shared 10,000-permutation QAP nulls, and the
+influence summaries. Plotting reads its golden JSON verbatim.
+
+Targeted verification finished before any real checkpoint access. The final
+suite passed 10/10 checks: run-ID/config contracts, selector parity with
+`apply_ptq_` on a toy model, real ViT-B/16 architecture discovery with
+`pretrained=False`, exact checkpoint-path templates under a synthetic root,
+global-concatenation equivalence, tie-aware correlations, simultaneous-axis
+QAP behavior and full-null persistence, influence population sizes, validation
+of the existing 484-cell outcome summary, and temporary rendering of all six
+PDF/PNG outputs.
+
+Architecture discovery selects 48 Linear matrices and 84,934,656 scalar
+coordinates. The 22-row float32 temporary QV map will occupy 7,474,249,728
+bytes (~6.96 GiB) during the real producer run. The first verification pass
+found two numerical boundary issues: perfect correlation could round just
+above one, and the QAP test recomputed exceedances through a separately rounded
+path. Coefficients are now clipped to their mathematically valid `[-1,1]`
+range, while the test applies the declared exceedance formula to the exact
+persisted null vector and still verifies every synthetic null value against an
+independent explicit reindexing.
+
+At this point no `005` evaluation or plot artifact existed and every tracking
+row remained `todo`. The next authorized action is a real-source and disk
+preflight followed, only if clean and after placement approval, by the first
+ViT-B/16 Euclidean wave.
+
+---
+
+# 2026-08-02 — BERT-large signed-lambda wave launched for reviewer 3HFP
+
+Reviewer 3HFP asked whether the optimum lambda is positive or negative among
+the 93 cross-task BERT-large pairs that fail at unit scale. Wave
+`20260802-152022` measures the missing signed evidence without using test data
+to choose lambda. Its validation arm evaluates all 121 donor-receiver cells at
+lambda 0 and at the frozen negative grid `[-0.05, -0.10, -0.15, -0.20, -0.25,
+-0.30, -0.35, -0.40, -0.45, -0.50, -0.75, -1.00, -1.25, -1.50, -1.75,
+-2.00]`. Its initial test arm evaluates all 121 cells at lambda -1. Selected
+negative validation winners and sign ties will be frozen before any additional
+test confirmations are generated.
+
+The initial wave contains 198 resumable receiver-row runs (2,178 raw cells),
+split evenly into six 33-run lanes on behemoth GPUs 0, 2, 4, 5, 6, and 7. The
+user explicitly authorized GPUs 2, 4, 5, 6, and 7 for this wave in addition to
+GPU 0; that authorization is one-wave only. The six persistent sessions are
+`qat-transfer_20260802-152022_behemoth_gpu{0,2,4,5,6,7}` and were verified
+active at 2026-08-02 15:54:40+02:00.
+
+Before launch, source and exactly eleven BERT-large 3-bit QAT checkpoint pairs
+were staged additively with rigsync. The remote inventory contained the
+required 22 QAT files (14,748,984,305 bytes) and 22 FP files, and the evaluator
+and row-runner source hashes matched rig-4090. An isolated two-batch parity
+smoke test gave exactly 0.828125 validation accuracy for the retained
+FP-head-plus-PTQ metric in both full and metric-only evaluator modes. The full
+mode's three additional metrics were 0.9375, 0.9375, and 0.546875; metric-only
+correctly recorded all three as null. All authorized GPUs were idle at the
+immediate pre-launch check.
+
+No W&B logging or new model checkpoints are used. Atomic `complete.json`
+artifacts are the completion criterion, with `.status.json` heartbeats for
+live progress. At launch there were six active status files and zero completed
+row artifacts.
+
+## Result — scale mismatch dominates, but directional failures are substantial
+
+The initial wave completed at 2026-08-02 19:02:22+02:00 with 198/198 receiver
+rows, 2,178/2,178 raw cells, and no failures. Every row manifest parsed and
+listed exactly eleven artifacts. The signed validation curves for all 93
+cross-task BERT-large pairs that fail at lambda 1 are complete over the frozen
+16-point negative grid, lambda 0, and the existing 40-point positive grid.
+
+The validation-optimal sign classification is:
+
+    positive only   54/93 = 58.1%
+    negative only   29/93 = 31.2%
+    zero only        7/93 =  7.5%
+    sign tied        3/93 =  3.2%
+
+All 54 positive-only winners select lambda below 1 (range 0.05--0.60, median
+0.20), so excessive unit scale is the majority failure mode. It is not the
+whole story: almost one third of failures prefer the reversed direction. Two
+ties are negative-versus-zero and one is positive-versus-zero; none ties
+positive and negative.
+
+One negative curve, AmazonReviewsClassification to AmazonCounterfactual,
+reached the original -2 boundary. Four predeclared extension points at -2.25,
+-2.50, -2.75, and -3.00 all matched the same maximum already attained at
+-1.75 and -2.00. The sign is unambiguously negative, while magnitude remains
+plateau-censored; the conservative closest-to-zero tie rule froze -1.75.
+
+All 31 missing test cells for the 29 negative-only pairs and two
+negative-versus-zero ties completed at 2026-08-02 20:20:38+02:00 with no
+failures. Among the 29 negative-only pairs, the validation-selected negative
+lambda improves held-out test accuracy over lambda 0 in 26/29 cases, with mean
++3.63 percentage points and median +1.48 points. By comparison, the existing
+validation-selected positive lambda improves 53/54 positive-only pairs, with
+mean +5.57 points. Thus the negative subgroup is not merely a validation-grid
+artifact: it generalizes strongly enough to establish genuine directional
+failure for a substantial minority.
+
+The reviewer-facing conclusion must qualify the paper's original language:
+scale mismatch explains the majority of BERT-large unit-scale failures, but
+directional anti-alignment explains roughly one third, and another 7.5% prefer
+no patch. A fixed positive lambda, especially lambda 1, is therefore not safe
+for validation-free deployment on this model. The complete locked analysis is
+`evaluations/998_rebuttal/003_lambda_sensitivity/001_signed_bert/analysis/signed_bert_large.json`.
+
+The sweep itself covers all 121 pairs; 93 is only the reviewer-requested
+analysis subset. Across all 110 cross-task pairs, the classification is 70
+positive-only, 30 negative-only, 7 zero-only, and 3 sign-tied. Of the 17
+cross-task pairs that already improve at lambda 1 on test, 16 remain
+positive-only on the validation sweep and one is negative-only:
+MassiveScenario to AmazonCounterfactual. For that exception, lambda 1 improves
+test accuracy by 3.28 points, while the validation-selected lambda -1 improves
+it by 18.51 points. The 11 same-task pairs contain 10 positive-only and one
+zero-only case. The analysis JSON now stores all 121 pair records and explicit
+scope summaries, while retaining `pairs` as the backward-compatible list of 93
+reviewer failures.
+
+---
+
+## 2026-08-02, 21:01 — designed 006_alignment_alpha_response
+
+Designed `006_alignment_alpha_response`, a read-only join of the existing
+ViT-B/16 Euclidean geometry and complete validation alpha curves. The primary
+analysis reports the entire alignment-correlation profile with family-wise QAP
+control, while secondary diagnostics compare Euclidean predicted scales with
+tie-aware empirical optima. No model evaluation is required.

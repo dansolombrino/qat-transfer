@@ -1,0 +1,1 @@
+scripts/vision/ilharco_timm_supervised/009_qat_transfer_awq/qv_transfer_awq/model=vit_base_patch16_224_orig_in21k,src=ImageNet-seed2038,tgt=Food101-seed2038,optim=lr1e-05-wd0.1-ls0.0-wl500-mgn1.0-bs128,qat=b3-gchannel-shead,awq=b3-gchannel-shead-n4-grid20-clip1,qv=agrid11,split=val/wave_20260802-212527/wave_rig-3090-ti_gpu0.sh

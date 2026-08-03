@@ -105,7 +105,9 @@ from src.vision.utils import (
     sanitize_timm_model_name,
     set_seed,
 )
-from src.awq import apply_awq_, awq_path_frag
+from src.awq import apply_awq_
+from common.run_id import guard_run_config, run_id_path
+from common.status import StatusWriter
 from src.task_vectors import TaskVector
 
 import hydra
@@ -119,9 +121,41 @@ from torch import nn
 # excluded from the QV (backbone-only transfer).
 HEAD_PREFIX = "model.head."
 
+RUN_ID_PARAMS = ["model", "src", "tgt", "optim", "qat", "awq", "qv", "split"]
+
 
 def _is_head_key(k: str) -> bool:
     return k.startswith(HEAD_PREFIX)
+
+
+def _run_identity(
+    cfg: DictConfig,
+    source_dataset_name: str,
+    target_dataset_name: str,
+    alpha: float,
+    eval_split: str,
+) -> dict:
+    qat_skip = "-".join(sorted(cfg.qat.skip_modules)) or "none"
+    awq_skip = "-".join(sorted(cfg.awq.skip_modules)) or "none"
+    return {
+        "model": sanitize_timm_model_name(cfg.model_name),
+        "src": f"{source_dataset_name}-seed{cfg.source.seed}",
+        "tgt": f"{target_dataset_name}-seed{cfg.target.seed}",
+        "optim": (
+            f"lr{cfg.lr}-wd{cfg.wd}-ls{cfg.ls}-wl{cfg.wl}"
+            f"-mgn{cfg.max_grad_norm}-bs{cfg.batch_size}"
+        ),
+        "qat": (
+            f"b{cfg.qat.bits}-g{cfg.qat.granularity}-s{qat_skip}"
+        ),
+        "awq": (
+            f"b{cfg.awq.bits}-g{cfg.awq.granularity}-s{awq_skip}"
+            f"-n{cfg.awq.num_calib_batches}-grid{cfg.awq.n_grid}"
+            f"-clip{int(cfg.awq.clip)}"
+        ),
+        "qv": f"a{alpha}",
+        "split": eval_split,
+    }
 
 
 def _fp_ckpt_dir(cfg: DictConfig, dataset_name: str, seed: int) -> str:
@@ -160,18 +194,10 @@ def _eval_dir(
     alpha: float,
     eval_split: str,
 ) -> str:
-    qat_skip_tag = "-".join(sorted(cfg.qat.skip_modules)) if len(cfg.qat.skip_modules) > 0 else "none"
-
-    awq_frag = awq_path_frag(
-        bits=cfg.awq.bits,
-        granularity=cfg.awq.granularity,
-        skip_modules=cfg.awq.skip_modules,
-        num_calib_batches=cfg.awq.num_calib_batches,
-        n_grid=cfg.awq.n_grid,
-        clip=cfg.awq.clip,
+    identity = _run_identity(
+        cfg, source_dataset_name, target_dataset_name, alpha, eval_split
     )
-
-    return os.path.join(
+    return str(Path(
         os.environ['EVALUATION_BASE_PATH'],
         "vision",
         "ilharco_timm_supervised",
@@ -181,15 +207,7 @@ def _eval_dir(
         else "009_qat_transfer_awq",
         "vision",
         "qv_transfer_awq",
-        sanitize_timm_model_name(cfg.model_name),
-        f"src={source_dataset_name}_seed={cfg.source.seed}",
-        f"tgt={target_dataset_name}_seed={cfg.target.seed}",
-        f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
-        f"qat=bits={cfg.qat.bits}_gran={cfg.qat.granularity}_skip={qat_skip_tag}",
-        awq_frag,
-        f"qv=alpha={alpha}",
-        f"split={eval_split}",
-    )
+    ) / run_id_path(identity, RUN_ID_PARAMS))
 
 
 def evaluate(
@@ -445,6 +463,56 @@ def _run_pair_alpha(
     tgt_epochs: int,
     eval_split: str,
 ):
+    """Guard, signal, and execute one independently addressable cell."""
+    eval_dir = _eval_dir(
+        cfg, source_dataset_name, target_dataset_name, alpha, eval_split
+    )
+    identity = _run_identity(
+        cfg, source_dataset_name, target_dataset_name, alpha, eval_split
+    )
+    resolved = {
+        **identity,
+        "config": OmegaConf.to_container(cfg, resolve=True),
+    }
+    guard_run_config(resolved, RUN_ID_PARAMS, eval_dir)
+    with StatusWriter(eval_dir) as status:
+        status.heartbeat(progress="0/4")
+        _run_pair_alpha_impl(
+            cfg=cfg,
+            source_dataset_name=source_dataset_name,
+            target_dataset_name=target_dataset_name,
+            fp_tgt_sd=fp_tgt_sd,
+            qat_tgt_sd=qat_tgt_sd,
+            tv=tv,
+            alpha=alpha,
+            dataset=dataset,
+            calib_batches=calib_batches,
+            num_classes=num_classes,
+            device=device,
+            src_epochs=src_epochs,
+            tgt_epochs=tgt_epochs,
+            eval_split=eval_split,
+            status=status,
+        )
+
+
+def _run_pair_alpha_impl(
+    cfg: DictConfig,
+    source_dataset_name: str,
+    target_dataset_name: str,
+    fp_tgt_sd: dict,
+    qat_tgt_sd: dict,
+    tv: TaskVector,
+    alpha: float,
+    dataset,
+    calib_batches: list,
+    num_classes: int,
+    device: str,
+    src_epochs: int,
+    tgt_epochs: int,
+    eval_split: str,
+    status: StatusWriter,
+):
     """Evaluate one (source, target, alpha) cell: patch, AWQ, evaluate."""
 
     if IS_SLURM:
@@ -517,6 +585,7 @@ def _run_pair_alpha(
         split=eval_split,
         limit_num_batches=cfg.limit_num_batches,
     )
+    status.heartbeat(progress="1/4")
 
     if IS_SLURM:
         log.info("eval %s_accuracy (patched + FP head, before AWQ): %s", eval_split, accuracy_fp_head)
@@ -567,6 +636,7 @@ def _run_pair_alpha(
         split=eval_split,
         limit_num_batches=cfg.limit_num_batches,
     )
+    status.heartbeat(progress="2/4")
 
     if IS_SLURM:
         log.info("eval %s_accuracy (patched + FP head + AWQ): %s", eval_split, accuracy_fp_head_awq)
@@ -598,6 +668,7 @@ def _run_pair_alpha(
         split=eval_split,
         limit_num_batches=cfg.limit_num_batches,
     )
+    status.heartbeat(progress="3/4")
 
     if IS_SLURM:
         log.info("eval %s_accuracy (patched + QAT head, before AWQ): %s", eval_split, accuracy_qat_head)
@@ -630,6 +701,7 @@ def _run_pair_alpha(
         split=eval_split,
         limit_num_batches=cfg.limit_num_batches,
     )
+    status.heartbeat(progress="4/4")
 
     if IS_SLURM:
         log.info("eval %s_accuracy (patched + QAT head + AWQ): %s", eval_split, accuracy_qat_head_awq)
