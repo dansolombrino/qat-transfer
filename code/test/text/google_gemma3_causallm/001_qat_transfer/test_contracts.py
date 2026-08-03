@@ -4,6 +4,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import torch
 from omegaconf import OmegaConf
 
 
@@ -67,3 +68,11 @@ def test_config_identity_and_collision_guard(tmp_path: Path) -> None:
         assert "model_revision" in str(error)
     else:
         raise AssertionError("full-config collision was not rejected")
+
+
+def test_bf16_qv_exactly_reconstructs_donor() -> None:
+    fp = torch.tensor([1.0001234, -0.1250678], dtype=torch.float32)
+    qat = torch.tensor([1.0004321, -0.1249321], dtype=torch.float32)
+    delta = qat.to(torch.bfloat16).float() - fp.to(torch.bfloat16).float()
+    reconstructed = (fp.to(torch.bfloat16).float() + delta).to(torch.bfloat16)
+    assert torch.equal(reconstructed, qat.to(torch.bfloat16))

@@ -77,8 +77,10 @@ def prepare(config: dict[str, Any]) -> Path:
             if fp.shape != qat.shape or fp.is_floating_point() != qat.is_floating_point():
                 raise RuntimeError(f"source tensor incompatibility for {key}")
             if fp.is_floating_point():
-                delta = qat.float() - fp.float()
-                if not torch.equal((fp.float() + delta).to(torch.bfloat16), qat.to(torch.bfloat16)):
+                fp_bf16 = fp.to(torch.bfloat16)
+                qat_bf16 = qat.to(torch.bfloat16)
+                delta = qat_bf16.float() - fp_bf16.float()
+                if not torch.equal((fp_bf16.float() + delta).to(torch.bfloat16), qat_bf16):
                     raise RuntimeError(f"BF16 reconstruction failed for {key}")
                 qv[key] = delta.contiguous()
                 floating += 1
@@ -92,7 +94,7 @@ def prepare(config: dict[str, Any]) -> Path:
         temporary = qv_path.with_suffix(".safetensors.tmp")
         save_file(qv, temporary, metadata={"format": "pt", "alpha_reference": "1.0"})
         temporary.replace(qv_path)
-        manifest = {"format_version": 1, "definition": "QAT_it - FP_it in float32", "fp_model_id": config["fp_model_id"], "fp_revision": config["fp_revision"], "fp_snapshot": str(fp_snapshot), "qat_model_id": config["qat_model_id"], "qat_revision": config["qat_revision"], "qat_snapshot": str(qat_snapshot), "floating_tensors": floating, "nonfloating_tensors": nonfloating, "floating_numel": numel, "bf16_reconstruction_exact": True, "qv_sha256": _sha256(qv_path)}
+        manifest = {"format_version": 1, "definition": "QAT_it[bfloat16] - FP_it[bfloat16], stored in float32", "fp_model_id": config["fp_model_id"], "fp_revision": config["fp_revision"], "fp_snapshot": str(fp_snapshot), "qat_model_id": config["qat_model_id"], "qat_revision": config["qat_revision"], "qat_snapshot": str(qat_snapshot), "floating_tensors": floating, "nonfloating_tensors": nonfloating, "floating_numel": numel, "bf16_reconstruction_exact": True, "qv_sha256": _sha256(qv_path)}
         temporary_manifest = manifest_path.with_suffix(".json.tmp")
         temporary_manifest.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
         temporary_manifest.replace(manifest_path)

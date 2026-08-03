@@ -769,3 +769,18 @@ E2E NLG to 6+7. The user explicitly authorized GPUs 0, 2, 4, 5, 6, and 7 for
 this wave only. Production launch is conditional on an end-to-end smoke run
 covering training, resume artifacts, QV application, GGUF conversion, Q4_0
 quantization, llama-server generation, and metric persistence.
+
+### Preflight correction and replacement wave
+
+The first preflight stopped before training because raw FP32 checkpoint
+subtraction did not exactly reconstruct `model.embed_tokens.weight` after BF16
+rounding: the FP checkpoint retains higher-precision values than the QAT donor.
+No tracked run or production GPU process was launched. The immutable
+`wave--20260803-125849` tag is retained as the failed preflight source.
+
+The QV is now defined on the actual receiver lattice as
+`QAT_it[bfloat16].float() - FP_it[bfloat16].float()`, still stored in FP32.
+This definition exactly reconstructs the donor BF16 tensors and is the delta
+that is actually added to BF16 fine-tuned receivers. Five local contract tests
+pass, including an explicit exact-reconstruction test. Replacement wave
+`20260803-213921` inherits the same task/GPU placement and remains smoke-gated.
