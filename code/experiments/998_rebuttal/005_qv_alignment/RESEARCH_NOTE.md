@@ -1791,3 +1791,48 @@ any code is written or run:
 The decisions needed for the Euclidean ViT-B/16 pilot were resolved in the
 approved Step 2 contract above. Projected-QV transfer, curvature, and broader
 architecture coverage remain later, separately gated decisions.
+
+## 14. Strict matching-row replication
+
+The approved row-wise extension is an additive one-variable replication of the
+completed ViT-B/16 Euclidean pilot. The global artifacts and their normative
+interpretation remain untouched. Every model, checkpoint, task, QV coordinate,
+selected module, outcome cell, statistical routine, random permutation, and
+figure design is held fixed.
+
+The sole numerical substitution is the alignment matrix. For each selected
+Linear-weight matrix `ell` and matching output-row index `i`, define
+
+\[
+c_{\ell,i}(D,R)=
+\frac{\langle\rho_{D,\ell}[i,:],\rho_{R,\ell}[i,:]\rangle}
+{\|\rho_{D,\ell}[i,:]\|_2\|\rho_{R,\ell}[i,:]\|_2}.
+\]
+
+The replicated similarity is
+
+\[
+c_{\mathrm{row}}(D,R)=\frac{1}{82944}\sum_{\ell,i}c_{\ell,i}(D,R).
+\]
+
+All 82,944 rows receive equal weight. There is no per-layer averaging, scalar
+coordinate weighting, QV-energy weighting, or quantization-step
+normalization. The 73,728 width-768 rows and 9,216 width-3072 rows each receive
+one vote. A zero-norm row is an error rather than an omitted or imputed value;
+the preimplementation audit found zero such rows across all 22 QVs.
+
+Downstream analysis is unchanged. In particular, the theory-adjacent field is
+`cosine_sq = c_row(D,R) ** 2`; it is not the mean of squared row cosines. The
+same four `reviewer_3hfp_v1` comparisons, 462-cell population, tie handling,
+10,000 simultaneous-axis QAP permutations with seed 2038, influence analyses,
+and plotting layouts are reused verbatim. The distinct token
+`reviewer_3hfp_rowwise_v1` records only which alignment matrix entered that
+unchanged analysis.
+
+The geometry stage is `rowwise_alignment`, with golden artifact
+`rowwise_alignment.json`; its analysis artifact is
+`rowwise_statistics.json`. The producer run identity is the original ordered
+19 parameters followed by `aggregation_spec=row_cosine_mean_v1`. The analyzer
+run identity remains the original ordered eight parameters, with only the
+analysis-spec value changed for provenance. Both stages remain deterministic,
+CPU-only, non-resumable, and W&B-free.

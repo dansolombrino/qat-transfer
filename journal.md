@@ -742,3 +742,17 @@ ViT-B/16 Euclidean geometry and complete validation alpha curves. The primary
 analysis reports the entire alignment-correlation profile with family-wise QAP
 control, while secondary diagnostics compare Euclidean predicted scales with
 tie-aware empirical optima. No model evaluation is required.
+
+---
+
+## 2026-08-03, 12:09 — launched matching-row replication for 005 (wave 20260803-120627)
+
+Designed and dispatched a strict one-variable replication of reviewer 3HFP's
+ViT-B/16 QV-alignment analysis. The original run normalized one concatenated
+84,934,656-coordinate vector; this variant instead cosines every matching
+output row and takes the unweighted mean over all 82,944 rows. Checkpoints,
+QVs, selected Linear weights, tasks, outcomes, four comparisons, 10,000 QAP
+permutations, influence diagnostics, and figure layouts are held fixed. The
+producer and analyzer run sequentially on rig-4090's CPU-only gpu0 lane. Both
+restart from the beginning after interruption, create no checkpoints, and use
+no W&B. Results will be recorded separately after the artifacts validate.

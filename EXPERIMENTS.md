@@ -250,6 +250,40 @@ was reused without recomputation.
 |---|---|---|---|---:|---|---|---|---|---|---|---|
 | `analyze_euclidean_alignment` | `ptq_bits=3,ptq_granularity=channel,outcome_protocol=full_qv,outcome_split=test,unit_alpha=1.0,analysis_spec=reviewer_3hfp_v1,n_permutations=10000,permutation_seed=2038` | 20260802-190820 | rig-4090 | 0 | done | 08-02 19:10 | comparisons 4/4; artifact written |  | 08-02 19:10 | 2.5s | golden `euclidean_statistics.json` valid (3,220,749 bytes); all 6 real figure files present and nonempty |
 
+### Strict matching-row replication — wave 20260803-120627
+
+The sole scientific change is `aggregation_spec=row_cosine_mean_v1`: cosine
+each of all 82,944 matching output rows, then take their unweighted arithmetic
+mean. Every checkpoint, selected parameter, outcome cell, analyzer option,
+comparison, QAP permutation, and visualization design remains fixed.
+
+Producer run-id params, in order: `family`, `model_name`, `seed`, `optim`,
+`lr`, `wd`, `ls`, `wl`, `max_grad_norm`, `batch_size`, `qat_bits`,
+`qat_granularity`, `qat_skip_modules`, `ptq_skip_modules`, `checkpoint_kind`,
+`epoch_policy`, `vector_scope`, `module_selector`, `accumulation_dtype`,
+`aggregation_spec`. Analyzer run-id params remain `ptq_bits`,
+`ptq_granularity`, `outcome_protocol`, `outcome_split`, `unit_alpha`,
+`analysis_spec`, `n_permutations`, `permutation_seed`.
+
+Smoke command: `.venv/bin/python code/experiments/998_rebuttal/005_qv_alignment/compute_rowwise_alignment.py smoke=true`
+
+Smoke pass: exit 0 and stdout confirms a finite, symmetric, unit-diagonal 3x3
+matrix over three matching rows; no evaluation or plot path is written.
+
+Golden artifacts:
+
+- geometry: `evaluations/998_rebuttal/005_qv_alignment/rowwise_alignment/<producer_run_id_path>/rowwise_alignment.json`
+- analysis: `evaluations/998_rebuttal/005_qv_alignment/rowwise_alignment/<producer_run_id_path>/analysis/<analyzer_run_id_path>/rowwise_statistics.json`
+- figures: `plots/998_rebuttal/005_qv_alignment/<rowwise_script_stem>/rowwise_alignment/<mirrored_run_id_path>/`
+
+Both runs are CPU-only on the approved rig-4090 gpu0 lane, restart from the
+beginning after interruption, create no checkpoints, and do not use W&B.
+
+| stage | run identity | wave | rig | gpu | status | started | progress | eta | ended | elapsed | notes |
+|---|---|---|---|---:|---|---|---|---|---|---|---|
+| `compute_rowwise_alignment` | `producer_run_id_sha256=8ca847e02a7acfc937aa9e0fb5b5bd593254c92e0ae95e764a3c4d61299332b2` | 20260803-120627 | rig-4090 | 0 | todo |  |  |  |  |  | canonical flat identity is 451 bytes; alias is SHA-256; expected golden `rowwise_alignment.json` |
+| `analyze_rowwise_alignment` | `ptq_bits=3,ptq_granularity=channel,outcome_protocol=full_qv,outcome_split=test,unit_alpha=1.0,analysis_spec=reviewer_3hfp_rowwise_v1,n_permutations=10000,permutation_seed=2038` | 20260803-120627 | rig-4090 | 0 | todo |  |  |  |  |  | exact original analysis over row-wise matrix; expected golden `rowwise_statistics.json` |
+
 ## 998_rebuttal/006_alignment_alpha_response — Level A alpha response
 
 Normative design: Step 7 of

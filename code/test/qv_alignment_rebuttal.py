@@ -16,6 +16,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
 from omegaconf import OmegaConf
 from torch import nn
@@ -43,6 +44,12 @@ PRODUCER = _load_module(
 ANALYZER = _load_module(
     "qv_alignment_analyzer", EXPERIMENT_DIR / "analyze_euclidean_alignment.py"
 )
+ROW_PRODUCER = _load_module(
+    "qv_alignment_row_producer", EXPERIMENT_DIR / "compute_rowwise_alignment.py"
+)
+ROW_ANALYZER = _load_module(
+    "qv_alignment_row_analyzer", EXPERIMENT_DIR / "analyze_rowwise_alignment.py"
+)
 CONFIG_DIR = ROOT / "config/experiments/998_rebuttal/005_qv_alignment"
 VIS_DIR = ROOT / "visualizations/998_rebuttal/005_qv_alignment"
 VIS_COMMON = _load_module("qv_alignment_visualization_common", VIS_DIR / "_common.py")
@@ -69,6 +76,38 @@ def test_configs_satisfy_frozen_contracts_and_run_id_order():
         "n_permutations",
         "permutation_seed",
     ]
+
+
+def test_rowwise_configs_differ_only_by_aggregation_and_provenance_tokens():
+    producer_cfg = OmegaConf.load(CONFIG_DIR / "compute_euclidean_alignment.yaml")
+    row_producer_cfg = OmegaConf.load(CONFIG_DIR / "compute_rowwise_alignment.yaml")
+    analyzer_cfg = OmegaConf.load(CONFIG_DIR / "analyze_euclidean_alignment.yaml")
+    row_analyzer_cfg = OmegaConf.load(CONFIG_DIR / "analyze_rowwise_alignment.yaml")
+
+    ROW_PRODUCER._validate_contract(row_producer_cfg)
+    ROW_ANALYZER._validate_contract(row_analyzer_cfg)
+
+    producer_plain = OmegaConf.to_container(producer_cfg, resolve=True)
+    row_producer_plain = OmegaConf.to_container(row_producer_cfg, resolve=True)
+    assert isinstance(producer_plain, dict) and isinstance(row_producer_plain, dict)
+    assert row_producer_plain.pop("aggregation_spec") == "row_cosine_mean_v1"
+    assert row_producer_plain.pop("smoke") is False
+    assert row_producer_plain == producer_plain
+
+    analyzer_plain = OmegaConf.to_container(analyzer_cfg, resolve=True)
+    row_analyzer_plain = OmegaConf.to_container(row_analyzer_cfg, resolve=True)
+    assert isinstance(analyzer_plain, dict) and isinstance(row_analyzer_plain, dict)
+    assert row_analyzer_plain.pop("aggregation_spec") == "row_cosine_mean_v1"
+    assert row_analyzer_plain["analysis_spec"] == "reviewer_3hfp_rowwise_v1"
+    row_analyzer_plain["analysis_spec"] = "reviewer_3hfp_v1"
+    assert row_analyzer_plain == analyzer_plain
+
+    assert ROW_PRODUCER.RUN_ID_PARAMS == [
+        *PRODUCER.RUN_ID_PARAMS,
+        "aggregation_spec",
+    ]
+    assert ROW_ANALYZER.RUN_ID_PARAMS == ANALYZER.RUN_ID_PARAMS
+    assert ROW_ANALYZER.COMPARISONS is ROW_ANALYZER.global_analysis.COMPARISONS
 
 
 def test_selector_matches_apply_ptq_recursion_on_toy_model():
@@ -134,6 +173,118 @@ def test_float64_gram_matches_one_globally_concatenated_vector():
         observed = PRODUCER._gram_float64(vectors, concatenated.shape[1])
     expected = concatenated.astype(np.float64) @ concatenated.astype(np.float64).T
     np.testing.assert_allclose(observed, expected, rtol=0.0, atol=1e-12)
+
+
+def test_rowwise_cosine_is_explicit_unweighted_mean_over_all_matching_rows():
+    layer_a = np.asarray(
+        [
+            [[1.0, 2.0], [3.0, 1.0]],
+            [[2.0, 1.0], [1.0, 4.0]],
+            [[-1.0, 2.0], [2.0, 3.0]],
+        ],
+        dtype=np.float32,
+    )
+    layer_b = np.asarray(
+        [
+            [[1.0, 0.0, 2.0]],
+            [[2.0, 1.0, 1.0]],
+            [[1.0, 3.0, 2.0]],
+        ],
+        dtype=np.float32,
+    )
+    vectors = np.concatenate(
+        [layer_a.reshape(3, -1), layer_b.reshape(3, -1)], axis=1
+    )
+    parameters = [
+        {"key": "a.weight", "shape": [2, 2], "offset_start": 0, "offset_stop": 4},
+        {"key": "b.weight", "shape": [1, 3], "offset_start": 4, "offset_stop": 7},
+    ]
+    observed, diagnostics = ROW_PRODUCER._mean_matching_row_cosines_float64(
+        vectors, parameters, ("a", "b", "c"), coordinate_block_size=2
+    )
+
+    explicit = np.zeros((3, 3), dtype=np.float64)
+    all_rows = [layer_a[:, row, :] for row in range(2)] + [layer_b[:, 0, :]]
+    for row in all_rows:
+        row64 = row.astype(np.float64)
+        normalized = row64 / np.linalg.norm(row64, axis=1)[:, None]
+        explicit += normalized @ normalized.T
+    explicit /= len(all_rows)
+    np.testing.assert_allclose(observed, explicit, rtol=0.0, atol=1e-12)
+    assert diagnostics["n_rows"] == 3
+
+    global_cosine = vectors.astype(np.float64) @ vectors.astype(np.float64).T
+    global_norms = np.sqrt(np.diag(global_cosine))
+    global_cosine /= np.outer(global_norms, global_norms)
+    assert not np.allclose(observed, global_cosine)
+
+    layer_means = []
+    for layer in (layer_a, layer_b):
+        subtotal = np.zeros((3, 3), dtype=np.float64)
+        for row_index in range(layer.shape[1]):
+            row = layer[:, row_index, :].astype(np.float64)
+            normalized = row / np.linalg.norm(row, axis=1)[:, None]
+            subtotal += normalized @ normalized.T
+        layer_means.append(subtotal / layer.shape[1])
+    assert not np.allclose(observed, np.mean(layer_means, axis=0))
+
+
+def test_rowwise_cosine_rejects_any_zero_norm_row():
+    vectors = np.asarray([[1.0, 2.0], [0.0, 0.0]], dtype=np.float32)
+    parameters = [
+        {"key": "toy.weight", "shape": [1, 2], "offset_start": 0, "offset_stop": 2}
+    ]
+    with pytest.raises(ValueError, match="zero-norm QV rows"):
+        ROW_PRODUCER._mean_matching_row_cosines_float64(
+            vectors, parameters, ("valid", "zero")
+        )
+
+
+def test_vit_rowwise_population_is_exactly_all_82944_selected_rows():
+    cfg = OmegaConf.load(CONFIG_DIR / "compute_rowwise_alignment.yaml")
+    parameters = ROW_PRODUCER.global_alignment._selected_parameters(cfg)
+    assert len(parameters) == 48
+    assert sum(int(parameter["shape"][0]) for parameter in parameters) == 82_944
+
+
+def test_rowwise_real_entrypoint_smoke_is_read_only_and_meaningful():
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(EXPERIMENT_DIR / "compute_rowwise_alignment.py"),
+            "smoke=true",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert (
+        "[smoke] row_cosine_mean_v1 passed: finite symmetric unit-diagonal "
+        "3x3 matrix over 3 matching rows"
+    ) in result.stdout
+
+
+def test_rowwise_analyzer_squares_only_the_aggregated_similarity():
+    pair = {
+        "delta": 0.1,
+        "delta_best": 0.2,
+        "recovery": 0.3,
+        "recovery_best": 0.4,
+        "alpha_best": 0.5,
+        "baseline_acc": 0.6,
+        "ceiling_delta": 0.7,
+    }
+    record = ROW_ANALYZER._joined_record("D", "R", -0.25, pair, 1.0)
+    assert record["cosine"] == -0.25
+    assert record["cosine_sq"] == 0.0625
+    assert record["delta"] == pair["delta"]
+    assert record["delta_best"] == pair["delta_best"]
+    assert record["recovery"] == pair["recovery"]
+    assert record["recovery_best"] == pair["recovery_best"]
+    assert record["best_alpha"] == pair["alpha_best"]
+    assert record["baseline_acc"] == pair["baseline_acc"]
+    assert record["ceiling_delta"] == pair["ceiling_delta"]
 
 
 def test_tie_aware_ranks_and_correlations():
@@ -364,6 +515,51 @@ def test_all_visualizations_render_pdf_and_png_from_statistics_only():
             "plot_alignment_heatmap.py",
             "plot_alignment_associations.py",
             "plot_alignment_influence.py",
+        )
+        for script in scripts:
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(VIS_DIR / script),
+                    "--statistics",
+                    str(statistics),
+                    "--plot-root",
+                    str(plot_root),
+                ],
+                cwd=ROOT,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        outputs = sorted(plot_root.rglob("*.pdf")) + sorted(plot_root.rglob("*.png"))
+        assert len(outputs) == 6
+        assert all(path.stat().st_size > 0 for path in outputs)
+
+
+def test_all_rowwise_visualizations_are_exact_parallel_pdf_png_outputs():
+    data = _synthetic_statistics()
+    data["schema_version"] = "rowwise_statistics_v1"
+    data["analysis_spec"] = "reviewer_3hfp_rowwise_v1"
+    data["alignment_aggregation"] = "row_cosine_mean_v1"
+    data["provenance"]["producer_stage"] = "rowwise_alignment"
+    data["provenance"]["producer_run_id_path"] += "/aggregation_spec=row_cosine_mean_v1"
+    data["provenance"]["analyzer_run_id_path"] = (
+        "analysis_spec=reviewer_3hfp_rowwise_v1"
+    )
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp = Path(tmp_dir)
+        statistics = tmp / "rowwise_statistics.json"
+        statistics.write_text(json.dumps(data))
+        plot_root = tmp / "plots"
+        env = os.environ.copy()
+        env["MPLCONFIGDIR"] = str(tmp / "matplotlib")
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        scripts = (
+            "plot_rowwise_alignment_heatmap.py",
+            "plot_rowwise_alignment_associations.py",
+            "plot_rowwise_alignment_influence.py",
         )
         for script in scripts:
             subprocess.run(
