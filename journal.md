@@ -756,3 +756,26 @@ permutations, influence diagnostics, and figure layouts are held fixed. The
 producer and analyzer run sequentially on rig-4090's CPU-only gpu0 lane. Both
 restart from the beginning after interruption, create no checkpoints, and use
 no W&B. Results will be recorded separately after the artifacts validate.
+
+---
+
+## 2026-08-03, 12:48 — completed matching-row replication for 005
+
+Wave `20260803-120627` completed on rig-4090 from source tag
+`wave--20260803-120627`. The producer used every one of the 82,944 matching
+rows with uniform weight and found zero zero-norm rows; the analyzer completed
+all four locked reviewer-3HFP comparisons over the same 462 off-diagonal
+cells. The primary signed-cosine comparison yielded Spearman rho `0.0725815`
+(QAP `p = 0.401560`) and Pearson `r = 0.0731162` (QAP `p = 0.315268`). The
+theory-adjacent squared-cosine comparison yielded Spearman rho `0.228536`
+(QAP `p = 0.00159984`) and Pearson `r = 0.0751924` (QAP `p = 0.115188`).
+
+Artifact-level parity checks proved that checkpoint identities, tensor and
+task order, outcome data, all non-similarity cell fields, comparison contracts,
+and the 10,000-permutation QAP digest match the global-flatten run. Every
+`cosine_sq` equals the square of the aggregated row-wise cosine. Six row-wise
+PDF/PNG figures were rendered and validated. Two launch attempts failed before
+computation because the shared tree contained concurrent best-alpha work and
+the isolated checkout initially lacked `.env`; both guard failures were
+preserved in logs, then the exact tagged source ran successfully from a clean
+isolated checkout.

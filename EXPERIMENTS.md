@@ -281,8 +281,9 @@ beginning after interruption, create no checkpoints, and do not use W&B.
 
 | stage | run identity | wave | rig | gpu | status | started | progress | eta | ended | elapsed | notes |
 |---|---|---|---|---:|---|---|---|---|---|---|---|
-| `compute_rowwise_alignment` | `producer_run_id_sha256=8ca847e02a7acfc937aa9e0fb5b5bd593254c92e0ae95e764a3c4d61299332b2` | 20260803-120627 | rig-4090 | 0 | todo |  |  |  |  |  | canonical flat identity is 451 bytes; alias is SHA-256; expected golden `rowwise_alignment.json` |
-| `analyze_rowwise_alignment` | `ptq_bits=3,ptq_granularity=channel,outcome_protocol=full_qv,outcome_split=test,unit_alpha=1.0,analysis_spec=reviewer_3hfp_rowwise_v1,n_permutations=10000,permutation_seed=2038` | 20260803-120627 | rig-4090 | 0 | todo |  |  |  |  |  | exact original analysis over row-wise matrix; expected golden `rowwise_statistics.json` |
+| `compute_rowwise_alignment` | `producer_run_id_sha256=8ca847e02a7acfc937aa9e0fb5b5bd593254c92e0ae95e764a3c4d61299332b2` | 20260803-120627 | rig-4090 | 0 | done | 08-03 12:45 | rows 82944/82944; artifact written |  | 08-03 12:46 | 1m05.4s | golden `rowwise_alignment.json` valid (65,690 bytes); isolated clean checkout used after two pre-compute environment guard failures |
+| `analyze_rowwise_alignment` | `ptq_bits=3,ptq_granularity=channel,outcome_protocol=full_qv,outcome_split=test,unit_alpha=1.0,analysis_spec=reviewer_3hfp_rowwise_v1,n_permutations=10000,permutation_seed=2038` | 20260803-120627 | rig-4090 | 0 | done | 08-03 12:46 | comparisons 4/4; artifact written |  | 08-03 12:46 | 2.4s | golden `rowwise_statistics.json` valid (3,217,407 bytes); 462 cross-task cells; 10,000 QAP permutations |
+| Row-wise visualization suite | — | 20260803-120627 | rig-4090 | 0 | done | 08-03 12:47 | 3/3 figures; 6/6 files verified |  | 08-03 12:48 |  | heatmap, association, and influence figures rendered as nonempty PDF+PNG |
 
 ## 998_rebuttal/006_alignment_alpha_response — Level A alpha response
 
