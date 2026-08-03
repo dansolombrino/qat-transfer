@@ -779,3 +779,16 @@ computation because the shared tree contained concurrent best-alpha work and
 the isolated checkout initially lacked `.env`; both guard failures were
 preserved in logs, then the exact tagged source ran successfully from a clean
 isolated checkout.
+
+---
+
+## 2026-08-03, 14:03 — prepared full 009 AWQ grid for 001_009 (wave 20260803-140339)
+
+Prepared the 462 missing unit-alpha test cells needed to complete the 22×22
+`009_qat_transfer_awq` donor-receiver grid and support the matched `001_009`
+PTQ-versus-AWQ comparison. The approved source-striped assignment puts 308
+cells on rig-4090 gpu0 and 154 on rig-3090-ti gpu0, with about 8.1 hours
+estimated per lane from the existing 009 runtimes. The bundle was CPU-tested,
+GPU-smoke-tested, committed, tagged, pushed, and deployed to clean isolated
+execution clones. In accordance with the project no-GPU-run guidance, Codex
+did not launch either production tmux lane; launch remains a manual action.
