@@ -845,3 +845,21 @@ its resolved directory before importing the sibling contract. A subprocess
 test executes it with Python `-P` from an unrelated working directory; all
 eight contract tests pass. Wave `20260803-225019` replaces the unlaunched full
 wave and remains end-to-end smoke-gated.
+
+The final GSM8K smoke (`mode=smoke_v6`) passed the complete contract in 3m30s:
+checkpoint/resume, exact QV application, receiver and patched BF16 conversion,
+both Q4_0 quantizations, four llama-server inference passes, predictions, and
+persisted metrics. Its eight examples are explicitly a plumbing gate and not a
+research result. Full wave `20260803-225019` launched at 23:01--23:02 CEST on
+the user-authorized pairs 0+2, 4+5, and 6+7; every running marker resolves to
+source `50ddf34ef2ae91008a3262eab3d255ee58bbde81` and the approved tag.
+
+SAMSum failed before its first optimizer step because a 16-example batch at
+the 1,280-token cap occupied about 87/95 GiB per GPU and backward requested a
+further 11.23 GiB. This is task-length memory pressure, not a rig fault; GSM8K
+and E2E NLG continue on their original immutable source. The replacement uses
+a per-device microbatch of 4 with four-way gradient accumulation, retaining
+the planned effective global batch of 32 and optimizer-step schedule. It has a
+distinct `emnlp2025_fullft_mb4ga4_v1` identity to avoid colliding with the
+failed resolved config. Wave `20260803-230618` contains only SAMSum on GPUs
+4+5 and will deploy after the two active lanes finish.

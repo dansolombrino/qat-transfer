@@ -1,0 +1,19 @@
+{
+  "one_wave_gpu_authorization": [
+    4,
+    5
+  ],
+  "runs": [
+    {
+      "gpus": "4,5",
+      "log": "logs/text/google_gemma3_causallm/001_qat_transfer/model=gemma-3-1b-it/task=samsum/mode=full/seed=2038/data_spec=equal6449_v1/train_spec=emnlp2025_fullft_mb4ga4_v1/qv_source=gemma-3-1b-it-qat-q4_0/alpha=1.0/quantizer=llamacpp-b9637-q4_0/eval_spec=gemma_gen_v1/wave_20260803-230618/behemoth_gpu4_5.log",
+      "run_id": "model=gemma-3-1b-it,task=samsum,mode=full,seed=2038,data_spec=equal6449_v1,train_spec=emnlp2025_fullft_mb4ga4_v1,qv_source=gemma-3-1b-it-qat-q4_0,alpha=1.0,quantizer=llamacpp-b9637-q4_0,eval_spec=gemma_gen_v1",
+      "run_path": "model=gemma-3-1b-it/task=samsum/mode=full/seed=2038/data_spec=equal6449_v1/train_spec=emnlp2025_fullft_mb4ga4_v1/qv_source=gemma-3-1b-it-qat-q4_0/alpha=1.0/quantizer=llamacpp-b9637-q4_0/eval_spec=gemma_gen_v1",
+      "script": "scripts/text/google_gemma3_causallm/001_qat_transfer/model=gemma-3-1b-it,task=samsum,mode=full,seed=2038,data_spec=equal6449_v1,train_spec=emnlp2025_fullft_mb4ga4_v1,qv_source=gemma-3-1b-it-qat-q4_0,alpha=1.0,quantizer=llamacpp-b9637-q4_0,eval_spec=gemma_gen_v1/wave_20260803-230618/wave_behemoth_gpu4_5.sh",
+      "task": "samsum"
+    }
+  ],
+  "source_revision": "resolved-and-verified-from-tag-at-launch",
+  "source_tag": "wave--20260803-230618",
+  "wave_id": "20260803-230618"
+}

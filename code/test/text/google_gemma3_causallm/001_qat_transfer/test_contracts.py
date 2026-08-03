@@ -22,6 +22,11 @@ TOKENIZER_SPEC = importlib.util.spec_from_file_location("gemma_tokenizer_contrac
 tokenizer_contract = importlib.util.module_from_spec(TOKENIZER_SPEC)
 assert TOKENIZER_SPEC.loader is not None
 TOKENIZER_SPEC.loader.exec_module(tokenizer_contract)
+TRAINING_CONTRACT_PATH = ROOT / "code/experiments/text/google_gemma3_causallm/001_qat_transfer/training_contract.py"
+TRAINING_SPEC = importlib.util.spec_from_file_location("gemma_training_contract", TRAINING_CONTRACT_PATH)
+training_contract = importlib.util.module_from_spec(TRAINING_SPEC)
+assert TRAINING_SPEC.loader is not None
+TRAINING_SPEC.loader.exec_module(training_contract)
 sys.path.insert(0, str(ROOT / "code"))
 from common.run_id import guard_run_config, run_id_path
 
@@ -122,3 +127,8 @@ def test_converter_wrapper_imports_its_sibling_contract(tmp_path: Path) -> None:
         cwd=tmp_path,
     )
     assert completed.stdout.strip() == "dummy converter reached"
+
+
+def test_accumulation_schedule_preserves_final_partial_window() -> None:
+    assert [training_contract.optimizer_step_due(i, 807, 4) for i in range(803, 807)] == [True, False, False, True]
+    assert [training_contract.accumulation_divisor(i, 807, 4) for i in range(803, 807)] == [4, 3, 3, 3]

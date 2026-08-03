@@ -37,6 +37,7 @@ from common.run_id import guard_run_config, run_id_path  # noqa: E402
 from common.status import StatusWriter  # noqa: E402
 from data import SYSTEMS, load_task_data, messages, score_predictions, user_prompt  # noqa: E402
 from tokenizer_contract import mark_regex_fix_consumed  # noqa: E402
+from training_contract import accumulation_divisor, optimizer_step_due  # noqa: E402
 
 RUN_ID_PARAMS = ("model", "task", "mode", "seed", "data_spec", "train_spec", "qv_source", "alpha", "quantizer", "eval_spec")
 
@@ -216,10 +217,13 @@ def _train(cfg: dict[str, Any], splits: dict[str, Any], run_checkpoint: Path, st
     model.config.use_cache = False
     dataset = TokenDataset(encoded)
     sampler = DistributedSampler(dataset, num_replicas=_world(), rank=_rank(), shuffle=True, seed=cfg["seed"]) if _distributed() else None
-    loader = DataLoader(dataset, batch_size=int(cfg["train"]["per_device_batch"]), sampler=sampler, shuffle=sampler is None, collate_fn=_collator(tokenizer.pad_token_id), num_workers=2, pin_memory=True)
+    microbatch = int(task_cfg.get("per_device_batch", cfg["train"]["per_device_batch"]))
+    accumulation_steps = int(task_cfg.get("gradient_accumulation_steps", cfg["train"]["gradient_accumulation_steps"]))
+    loader = DataLoader(dataset, batch_size=microbatch, sampler=sampler, shuffle=sampler is None, collate_fn=_collator(tokenizer.pad_token_id), num_workers=2, pin_memory=True)
     epochs = 1 if cfg["mode"].startswith("smoke") else int(cfg["train"]["epochs"])
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(cfg["train"]["learning_rate"]), betas=(float(cfg["train"]["beta1"]), float(cfg["train"]["beta2"])), eps=float(cfg["train"]["eps"]), weight_decay=float(cfg["train"]["weight_decay"]), fused=bool(cfg["train"]["fused_adamw"]))
-    scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=int(cfg["train"]["warmup_steps"]), num_training_steps=epochs * len(loader))
+    optimizer_steps_per_epoch = math.ceil(len(loader) / accumulation_steps)
+    scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=int(cfg["train"]["warmup_steps"]), num_training_steps=epochs * optimizer_steps_per_epoch)
     latest = run_checkpoint / "checkpoint_latest"
     state = _load_checkpoint(model, optimizer, scheduler, latest, device)
     start_epoch = 0 if state is None else int(state["completed_epochs"])
@@ -233,15 +237,20 @@ def _train(cfg: dict[str, Any], splits: dict[str, Any], run_checkpoint: Path, st
         wrapped.train()
         model.config.use_cache = False
         running = 0.0
-        for batch in loader:
+        optimizer.zero_grad(set_to_none=True)
+        for batch_index, batch in enumerate(loader):
             batch = {key: value.to(device, non_blocking=True) for key, value in batch.items()}
-            optimizer.zero_grad(set_to_none=True)
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                loss = wrapped(**batch).loss
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(wrapped.parameters(), float(cfg["train"]["clip_grad_norm"]))
-            optimizer.step()
-            scheduler.step()
+            step_due = optimizer_step_due(batch_index, len(loader), accumulation_steps)
+            sync_context = nullcontext() if step_due or not isinstance(wrapped, DistributedDataParallel) else wrapped.no_sync()
+            with sync_context:
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                    loss = wrapped(**batch).loss
+                (loss / accumulation_divisor(batch_index, len(loader), accumulation_steps)).backward()
+            if step_due:
+                torch.nn.utils.clip_grad_norm_(wrapped.parameters(), float(cfg["train"]["clip_grad_norm"]))
+                optimizer.step()
+                scheduler.step()
+                optimizer.zero_grad(set_to_none=True)
             running += float(loss.detach())
         bare = wrapped.module if isinstance(wrapped, DistributedDataParallel) else wrapped
         model.config.use_cache = True

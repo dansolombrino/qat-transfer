@@ -25,12 +25,17 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--wave-id", required=True)
     parser.add_argument("--source-tag", required=True)
+    parser.add_argument("--tasks", nargs="+", choices=tuple(PLACEMENT), default=list(PLACEMENT))
+    parser.add_argument("--train-spec")
     args = parser.parse_args()
     base = OmegaConf.to_container(OmegaConf.load(ROOT / "config/experiments/text/google_gemma3_causallm/001_qat_transfer/run_task.yaml"), resolve=True)
     wave_records = []
-    for task, gpus in PLACEMENT.items():
+    for task in args.tasks:
+        gpus = PLACEMENT[task]
         cfg = dict(base)
         cfg.update(task=task, mode="full")
+        if args.train_spec:
+            cfg["train_spec"] = args.train_spec
         flat = run_id_flat(cfg, RUN_ID_PARAMS)
         relative_run = run_id_path(cfg, RUN_ID_PARAMS)
         directory = ROOT / "scripts/text/google_gemma3_causallm/001_qat_transfer" / flat / f"wave_{args.wave_id}"
@@ -50,7 +55,7 @@ export CUDA_VISIBLE_DEVICES={gpus}
 mkdir -p \"$(dirname \"{log.relative_to(ROOT)}\")\"
 exec ./.venv/bin/torchrun --master-addr=127.0.0.1 --master-port={PORTS[task]} --nproc_per_node=2 \\
   code/experiments/text/google_gemma3_causallm/001_qat_transfer/run_task.py \\
-  {hydra_override_arg('task', task)} {hydra_override_arg('mode', 'full')} \\
+  {hydra_override_arg('task', task)} {hydra_override_arg('mode', 'full')} {hydra_override_arg('train_spec', cfg['train_spec'])} \\
   > \"{log.relative_to(ROOT)}\" 2>&1
 """
         script.write_text(content)
@@ -65,7 +70,8 @@ exec ./.venv/bin/torchrun --master-addr=127.0.0.1 --master-port={PORTS[task]} --
         wave_records.append({"task": task, "gpus": gpus, "run_id": flat, "run_path": str(relative_run), "script": str(script.relative_to(ROOT)), "log": str(log.relative_to(ROOT))})
     manifest_dir = ROOT / "scripts/text/google_gemma3_causallm/001_qat_transfer" / f"wave_{args.wave_id}"
     manifest_dir.mkdir(parents=True, exist_ok=True)
-    (manifest_dir / "manifest.json").write_text(json.dumps({"wave_id": args.wave_id, "source_revision": "resolved-and-verified-from-tag-at-launch", "source_tag": args.source_tag, "one_wave_gpu_authorization": [0, 2, 4, 5, 6, 7], "runs": wave_records}, indent=2, sort_keys=True) + "\n")
+    authorized_gpus = sorted({int(gpu) for task in args.tasks for gpu in PLACEMENT[task].split(",")})
+    (manifest_dir / "manifest.json").write_text(json.dumps({"wave_id": args.wave_id, "source_revision": "resolved-and-verified-from-tag-at-launch", "source_tag": args.source_tag, "one_wave_gpu_authorization": authorized_gpus, "runs": wave_records}, indent=2, sort_keys=True) + "\n")
     print(json.dumps(wave_records, indent=2))
 
 
