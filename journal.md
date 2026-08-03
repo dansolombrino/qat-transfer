@@ -837,3 +837,11 @@ wrapper now presents b9637 with that bounded vocabulary view and refuses any
 overflow other than the one exact image token, leaving the training/evaluation
 tokenizer and pinned llama.cpp checkout unchanged. Seven local contract tests
 pass. Replacement wave `20260803-224359` is smoke-gated.
+
+The wrapper itself then failed before invoking llama.cpp because behemoth's
+safe-path interpreter omitted the wrapper directory while `PYTHONPATH` was
+intentionally headed by the pinned llama.cpp checkout. The wrapper now inserts
+its resolved directory before importing the sibling contract. A subprocess
+test executes it with Python `-P` from an unrelated working directory; all
+eight contract tests pass. Wave `20260803-225019` replaces the unlaunched full
+wave and remains end-to-end smoke-gated.

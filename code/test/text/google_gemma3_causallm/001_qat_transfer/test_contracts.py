@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -107,3 +108,17 @@ def test_converter_vocab_excludes_only_unembeddable_image_token() -> None:
     assert tokenizer_contract.converter_vocab(vocab, 2) == {"hello": 0, "world": 1}
     with pytest.raises(RuntimeError, match="unexpected tokenizer IDs"):
         tokenizer_contract.converter_vocab({"hello": 0, "surprise": 2}, 2)
+
+
+def test_converter_wrapper_imports_its_sibling_contract(tmp_path: Path) -> None:
+    dummy_converter = tmp_path / "dummy_converter.py"
+    dummy_converter.write_text("print('dummy converter reached')\n")
+    wrapper = ROOT / "code/experiments/text/google_gemma3_causallm/001_qat_transfer/convert_hf_to_gguf_compat.py"
+    completed = subprocess.run(
+        [sys.executable, "-P", str(wrapper), str(dummy_converter), str(tmp_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+    )
+    assert completed.stdout.strip() == "dummy converter reached"

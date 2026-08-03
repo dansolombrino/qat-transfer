@@ -1,0 +1,39 @@
+{
+  "one_wave_gpu_authorization": [
+    0,
+    2,
+    4,
+    5,
+    6,
+    7
+  ],
+  "runs": [
+    {
+      "gpus": "0,2",
+      "log": "logs/text/google_gemma3_causallm/001_qat_transfer/model=gemma-3-1b-it/task=gsm8k/mode=full/seed=2038/data_spec=equal6449_v1/train_spec=emnlp2025_fullft_v1/qv_source=gemma-3-1b-it-qat-q4_0/alpha=1.0/quantizer=llamacpp-b9637-q4_0/eval_spec=gemma_gen_v1/wave_20260803-225019/behemoth_gpu0_2.log",
+      "run_id": "model=gemma-3-1b-it,task=gsm8k,mode=full,seed=2038,data_spec=equal6449_v1,train_spec=emnlp2025_fullft_v1,qv_source=gemma-3-1b-it-qat-q4_0,alpha=1.0,quantizer=llamacpp-b9637-q4_0,eval_spec=gemma_gen_v1",
+      "run_path": "model=gemma-3-1b-it/task=gsm8k/mode=full/seed=2038/data_spec=equal6449_v1/train_spec=emnlp2025_fullft_v1/qv_source=gemma-3-1b-it-qat-q4_0/alpha=1.0/quantizer=llamacpp-b9637-q4_0/eval_spec=gemma_gen_v1",
+      "script": "scripts/text/google_gemma3_causallm/001_qat_transfer/model=gemma-3-1b-it,task=gsm8k,mode=full,seed=2038,data_spec=equal6449_v1,train_spec=emnlp2025_fullft_v1,qv_source=gemma-3-1b-it-qat-q4_0,alpha=1.0,quantizer=llamacpp-b9637-q4_0,eval_spec=gemma_gen_v1/wave_20260803-225019/wave_behemoth_gpu0_2.sh",
+      "task": "gsm8k"
+    },
+    {
+      "gpus": "4,5",
+      "log": "logs/text/google_gemma3_causallm/001_qat_transfer/model=gemma-3-1b-it/task=samsum/mode=full/seed=2038/data_spec=equal6449_v1/train_spec=emnlp2025_fullft_v1/qv_source=gemma-3-1b-it-qat-q4_0/alpha=1.0/quantizer=llamacpp-b9637-q4_0/eval_spec=gemma_gen_v1/wave_20260803-225019/behemoth_gpu4_5.log",
+      "run_id": "model=gemma-3-1b-it,task=samsum,mode=full,seed=2038,data_spec=equal6449_v1,train_spec=emnlp2025_fullft_v1,qv_source=gemma-3-1b-it-qat-q4_0,alpha=1.0,quantizer=llamacpp-b9637-q4_0,eval_spec=gemma_gen_v1",
+      "run_path": "model=gemma-3-1b-it/task=samsum/mode=full/seed=2038/data_spec=equal6449_v1/train_spec=emnlp2025_fullft_v1/qv_source=gemma-3-1b-it-qat-q4_0/alpha=1.0/quantizer=llamacpp-b9637-q4_0/eval_spec=gemma_gen_v1",
+      "script": "scripts/text/google_gemma3_causallm/001_qat_transfer/model=gemma-3-1b-it,task=samsum,mode=full,seed=2038,data_spec=equal6449_v1,train_spec=emnlp2025_fullft_v1,qv_source=gemma-3-1b-it-qat-q4_0,alpha=1.0,quantizer=llamacpp-b9637-q4_0,eval_spec=gemma_gen_v1/wave_20260803-225019/wave_behemoth_gpu4_5.sh",
+      "task": "samsum"
+    },
+    {
+      "gpus": "6,7",
+      "log": "logs/text/google_gemma3_causallm/001_qat_transfer/model=gemma-3-1b-it/task=e2e_nlg/mode=full/seed=2038/data_spec=equal6449_v1/train_spec=emnlp2025_fullft_v1/qv_source=gemma-3-1b-it-qat-q4_0/alpha=1.0/quantizer=llamacpp-b9637-q4_0/eval_spec=gemma_gen_v1/wave_20260803-225019/behemoth_gpu6_7.log",
+      "run_id": "model=gemma-3-1b-it,task=e2e_nlg,mode=full,seed=2038,data_spec=equal6449_v1,train_spec=emnlp2025_fullft_v1,qv_source=gemma-3-1b-it-qat-q4_0,alpha=1.0,quantizer=llamacpp-b9637-q4_0,eval_spec=gemma_gen_v1",
+      "run_path": "model=gemma-3-1b-it/task=e2e_nlg/mode=full/seed=2038/data_spec=equal6449_v1/train_spec=emnlp2025_fullft_v1/qv_source=gemma-3-1b-it-qat-q4_0/alpha=1.0/quantizer=llamacpp-b9637-q4_0/eval_spec=gemma_gen_v1",
+      "script": "scripts/text/google_gemma3_causallm/001_qat_transfer/model=gemma-3-1b-it,task=e2e_nlg,mode=full,seed=2038,data_spec=equal6449_v1,train_spec=emnlp2025_fullft_v1,qv_source=gemma-3-1b-it-qat-q4_0,alpha=1.0,quantizer=llamacpp-b9637-q4_0,eval_spec=gemma_gen_v1/wave_20260803-225019/wave_behemoth_gpu6_7.sh",
+      "task": "e2e_nlg"
+    }
+  ],
+  "source_revision": "resolved-and-verified-from-tag-at-launch",
+  "source_tag": "wave--20260803-225019",
+  "wave_id": "20260803-225019"
+}
