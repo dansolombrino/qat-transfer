@@ -1,0 +1,9 @@
+fp_model_id: google/gemma-3-1b-it
+fp_revision: dcc83ea841ab6100d6b47a070329e1ba4cf78752
+qat_model_id: google/gemma-3-1b-it-qat-q4_0-unquantized
+qat_revision: a6692c1945954f4aa39a17b8dfba4a7e62db3d4f
+output_dir: storage/checkpoints/text/google_gemma3_causallm/shared_qv/gemma-3-1b-it-qat-q4_0
+hydra:
+  run:
+    dir: .
+  output_subdir: null

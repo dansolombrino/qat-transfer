@@ -1,0 +1,67 @@
+model: gemma-3-1b-it
+model_id: google/gemma-3-1b-it
+model_revision: dcc83ea841ab6100d6b47a070329e1ba4cf78752
+task: gsm8k
+mode: full
+seed: 2038
+data_spec: equal6449_v1
+train_spec: emnlp2025_fullft_v1
+qv_source: gemma-3-1b-it-qat-q4_0
+qv_model_id: google/gemma-3-1b-it-qat-q4_0-unquantized
+qv_model_revision: a6692c1945954f4aa39a17b8dfba4a7e62db3d4f
+alpha: 1.0
+quantizer: llamacpp-b9637-q4_0
+eval_spec: gemma_gen_v1
+datasets:
+  gsm8k:
+    id: openai/gsm8k
+    config: main
+    revision: 740312add88f781978c0658806c59bc2815b9866
+    context_cap: 640
+    max_new_tokens: 512
+    selection_metric: gsm8k_em
+  samsum:
+    id: knkarthick/samsum
+    config: null
+    revision: 6b929ff10edec703164e3ddb2e94aae058c9ab5f
+    context_cap: 1280
+    max_new_tokens: 128
+    selection_metric: rougeL
+  e2e_nlg:
+    id: GEM/e2e_nlg
+    config: null
+    revision: 0e089c2ba61c3a0d183815c87c2c95e98fb446a6
+    context_cap: 192
+    max_new_tokens: 128
+    selection_metric: bleu
+train:
+  examples: 6449
+  epochs: 3
+  per_device_batch: 16
+  learning_rate: 1.0e-5
+  weight_decay: 0.0
+  beta1: 0.9
+  beta2: 0.999
+  eps: 1.0e-8
+  clip_grad_norm: 1.0
+  warmup_steps: 0
+  fused_adamw: true
+  attention: sdpa
+  gradient_checkpointing: false
+evaluation:
+  temperature: 0.0
+  parallel_requests: 4
+  llama_context: 4096
+  llama_cpp_tag: b9637
+  llama_cpp_revision: aedb2a5e9ca3d4064148bbb919e0ddc0c1b70ab3
+  gem_metrics_revision: 8162210e73728c68f886cad6c09160694e3be9d9
+  server_start_timeout_s: 180
+paths:
+  checkpoint_root: storage/checkpoints/text/google_gemma3_causallm/001_qat_transfer
+  evaluation_root: evaluations/text/google_gemma3_causallm/001_qat_transfer
+  qv_dir: storage/checkpoints/text/google_gemma3_causallm/shared_qv/gemma-3-1b-it-qat-q4_0
+  llama_cpp_dir: references/llama.cpp-b9637
+hydra:
+  run:
+    dir: .
+  output_subdir: null

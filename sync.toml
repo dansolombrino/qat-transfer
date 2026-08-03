@@ -19,4 +19,8 @@ repo_path = "/mnt/KS_2TB/PARA/Projects/quantization/qat-transfer"
 repo_path = "/mnt/KS_960GB/PARA/Projects/quantization/qat-transfer"
 
 [machines.behemoth]
-repo_path = "/home/dansolombrino/data/PARA/Projects/quantization/qat-transfer"
+repo_path = "/home/dansolombrino/data/PARA/Projects/quantization/qat-transfer-gemma3"
+
+[git]
+remote = "origin"
+branch = "exp/gemma3-qv-transfer"

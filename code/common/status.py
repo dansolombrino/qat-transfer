@@ -36,6 +36,8 @@ class StatusWriter:
             "progress": None,
             "wave_id": os.environ.get("WAVE_ID"),
             "gpu": os.environ.get("CUDA_VISIBLE_DEVICES"),
+            "source_revision": os.environ.get("SOURCE_REVISION"),
+            "source_tag": os.environ.get("SOURCE_TAG"),
         }
         self._write()
         print(

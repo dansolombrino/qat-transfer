@@ -742,3 +742,30 @@ ViT-B/16 Euclidean geometry and complete validation alpha curves. The primary
 analysis reports the entire alignment-correlation profile with family-wise QAP
 control, while secondary diagnostics compare Euclidean predicted scales with
 tie-aware empirical optima. No model evaluation is required.
+
+---
+
+## 2026-08-03, 12:58 — designed Gemma 3 generative QV-transfer pilot
+
+Designed `text/google_gemma3_causallm/001_qat_transfer` to test whether the
+instruction-tuning QAT delta from Google's pinned Gemma 3 1B checkpoints
+transfers after independent downstream fine-tuning. This avoids the degenerate
+comparison with the official QAT checkpoint: the receiver is instead
+`FT_t(FP_it)`, and the patch is `FT_t(FP_it) + (QAT_it - FP_it)`.
+
+The tasks are native next-token generation rather than classification: GSM8K,
+SAMSum, and E2E NLG. Each full run uses exactly 6,449 unique training examples,
+assistant-only loss, three full-parameter BF16-autocast epochs, and seed 2038.
+Pinned source revisions, prompts, context caps, validation metrics, and
+zero-truncation checks are stored with each resolved config and data manifest.
+
+Evaluation compares receiver and patched checkpoints before and after pinned
+llama.cpp b9637 `Q4_0` PTQ. Full optimizer, scheduler, and RNG state is replaced
+atomically in `checkpoint_latest` after every epoch; the best native-validation
+model is kept in `model_final`.
+
+Wave `20260803-125849` assigns GSM8K to behemoth GPUs 0+2, SAMSum to 4+5, and
+E2E NLG to 6+7. The user explicitly authorized GPUs 0, 2, 4, 5, 6, and 7 for
+this wave only. Production launch is conditional on an end-to-end smoke run
+covering training, resume artifacts, QV application, GGUF conversion, Q4_0
+quantization, llama-server generation, and metric persistence.

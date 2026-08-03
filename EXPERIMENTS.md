@@ -1,5 +1,17 @@
 # Experiments
 
+## text/google_gemma3_causallm/001_qat_transfer
+
+run_id params: model, task, mode, seed, data_spec, train_spec, qv_source, alpha, quantizer, eval_spec (mirrors `RUN_ID_PARAMS` in `run_task.py`)
+
+expected final artifact: `evaluations/text/google_gemma3_causallm/001_qat_transfer/<run_id path>/eval_results.json`
+
+| model | task | mode | seed | data spec | train spec | QV source | alpha | quantizer | eval spec | wave | rig | gpu | status | started | progress | eta | ended | elapsed | notes |
+|---|---|---|---:|---|---|---|---:|---|---|---|---|---|---|---|---|---|---|---|---|
+| gemma-3-1b-it | gsm8k | full | 2038 | equal6449_v1 | emnlp2025_fullft_v1 | gemma-3-1b-it-qat-q4_0 | 1.0 | llamacpp-b9637-q4_0 | gemma_gen_v1 | 20260803-125849 | behemoth | 0,2 | todo |  |  |  |  |  | smoke-gated; one-wave GPU authorization |
+| gemma-3-1b-it | samsum | full | 2038 | equal6449_v1 | emnlp2025_fullft_v1 | gemma-3-1b-it-qat-q4_0 | 1.0 | llamacpp-b9637-q4_0 | gemma_gen_v1 | 20260803-125849 | behemoth | 4,5 | todo |  |  |  |  |  | smoke-gated; one-wave GPU authorization |
+| gemma-3-1b-it | e2e_nlg | full | 2038 | equal6449_v1 | emnlp2025_fullft_v1 | gemma-3-1b-it-qat-q4_0 | 1.0 | llamacpp-b9637-q4_0 | gemma_gen_v1 | 20260803-125849 | behemoth | 6,7 | todo |  |  |  |  |  | smoke-gated; one-wave GPU authorization |
+
 ## 998_rebuttal/003_lambda_sensitivity/001_signed_bert
 run_id params: model, split, alpha, receiver, donors (mirrors RUN_ID_PARAMS in run_row.py)
 expected final artifact: evaluations/.../<run_id path>/complete.json
