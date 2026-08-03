@@ -793,3 +793,12 @@ tensor that fails exhaustive BF16 reconstruction. The manifest records every
 fallback tensor, and patch arithmetic follows the stored dtype. Wave
 `20260803-213921` also launched no run and remains immutable; final replacement
 wave `20260803-215248` carries this exact representation.
+
+The adaptive QV then passed all 340 source-tensor checks. Its checksum is
+`cc8584529c83921c977845498466590e90e8dbc79f2ef41fdaa76da4c933498f`;
+291 tensors remain FP32 and 49 use the exact FP64 fallback. Before model or
+dataset loading, the first distributed smoke stalled because `torchrun
+--standalone` selected behemoth's public hostname, whose IPv6 lookup is not
+resolvable locally. The process was stopped and verified absent, with no run
+status or checkpoint created. Wave `20260803-220134` changes only rendezvous to
+explicit localhost c10d (`127.0.0.1:0`).

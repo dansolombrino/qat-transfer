@@ -47,7 +47,7 @@ export SOURCE_REVISION=\"$(git rev-list -n 1 \"$SOURCE_TAG\")\"
 test \"$(git rev-parse HEAD)\" = \"$SOURCE_REVISION\"
 export CUDA_VISIBLE_DEVICES={gpus}
 mkdir -p \"$(dirname \"{log.relative_to(ROOT)}\")\"
-exec ./.venv/bin/torchrun --standalone --nproc_per_node=2 \\
+exec ./.venv/bin/torchrun --rdzv-backend=c10d --rdzv-endpoint=127.0.0.1:0 --nproc_per_node=2 \\
   code/experiments/text/google_gemma3_causallm/001_qat_transfer/run_task.py \\
   {hydra_override_arg('task', task)} {hydra_override_arg('mode', 'full')} \\
   > \"{log.relative_to(ROOT)}\" 2>&1
