@@ -1,6 +1,7 @@
 model: gemma-3-1b-it
 model_id: google/gemma-3-1b-it
 model_revision: dcc83ea841ab6100d6b47a070329e1ba4cf78752
+tokenizer_fix_mistral_regex: true
 task: gsm8k
 mode: full
 seed: 2038

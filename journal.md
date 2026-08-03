@@ -802,3 +802,13 @@ dataset loading, the first distributed smoke stalled because `torchrun
 resolvable locally. The process was stopped and verified absent, with no run
 status or checkpoint created. Wave `20260803-220134` changes only rendezvous to
 explicit localhost c10d (`127.0.0.1:0`).
+
+Static loopback rendezvous succeeded and the GSM8K smoke completed training,
+validation generation, full optimizer/scheduler/RNG checkpoint persistence,
+and checkpoint resume. Conversion then failed because the Torch-elastic child
+environment omitted llama.cpp's repository root from Python module search.
+The converter now receives an explicit pinned-repository `PYTHONPATH`.
+Transformers also identified its serialized tokenizer regex as the known
+Mistral-pattern issue, so `fix_mistral_regex=true` is now a resolved config
+field and applied consistently. Wave `20260803-221250` uses unique static
+loopback ports 29501--29503 and a fresh smoke identity.

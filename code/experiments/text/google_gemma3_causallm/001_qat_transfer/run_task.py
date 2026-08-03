@@ -196,7 +196,10 @@ def _load_checkpoint(model: Any, optimizer: Any, scheduler: Any, output: Path, d
 def _train(cfg: dict[str, Any], splits: dict[str, Any], run_checkpoint: Path, status: StatusWriter | None) -> None:
     device = torch.device("cuda", _local_rank())
     torch.cuda.set_device(device)
-    tokenizer = AutoTokenizer.from_pretrained(cfg["model_id"], revision=cfg["model_revision"])
+    tokenizer = AutoTokenizer.from_pretrained(
+        cfg["model_id"], revision=cfg["model_revision"],
+        fix_mistral_regex=bool(cfg["tokenizer_fix_mistral_regex"]),
+    )
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
     tokenizer.padding_side = "right"
@@ -209,7 +212,7 @@ def _train(cfg: dict[str, Any], splits: dict[str, Any], run_checkpoint: Path, st
     dataset = TokenDataset(encoded)
     sampler = DistributedSampler(dataset, num_replicas=_world(), rank=_rank(), shuffle=True, seed=cfg["seed"]) if _distributed() else None
     loader = DataLoader(dataset, batch_size=int(cfg["train"]["per_device_batch"]), sampler=sampler, shuffle=sampler is None, collate_fn=_collator(tokenizer.pad_token_id), num_workers=2, pin_memory=True)
-    epochs = 1 if cfg["mode"] == "smoke" else int(cfg["train"]["epochs"])
+    epochs = 1 if cfg["mode"].startswith("smoke") else int(cfg["train"]["epochs"])
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(cfg["train"]["learning_rate"]), betas=(float(cfg["train"]["beta1"]), float(cfg["train"]["beta2"])), eps=float(cfg["train"]["eps"]), weight_decay=float(cfg["train"]["weight_decay"]), fused=bool(cfg["train"]["fused_adamw"]))
     scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=int(cfg["train"]["warmup_steps"]), num_training_steps=epochs * len(loader))
     latest = run_checkpoint / "checkpoint_latest"
@@ -258,7 +261,7 @@ def _train(cfg: dict[str, Any], splits: dict[str, Any], run_checkpoint: Path, st
         _barrier()
 
 
-def _apply_qv(receiver_dir: Path, qv_path: Path, alpha: float, output: Path) -> None:
+def _apply_qv(receiver_dir: Path, qv_path: Path, alpha: float, output: Path, fix_mistral_regex: bool) -> None:
     model = AutoModelForCausalLM.from_pretrained(receiver_dir, torch_dtype=torch.bfloat16, device_map="cpu")
     state, seen, covered_storage = model.state_dict(), set(), set()
     with safe_open(qv_path, framework="pt", device="cpu") as handle:
@@ -282,13 +285,13 @@ def _apply_qv(receiver_dir: Path, qv_path: Path, alpha: float, output: Path) -> 
     if output.exists():
         shutil.rmtree(output)
     model.save_pretrained(output, safe_serialization=True)
-    AutoTokenizer.from_pretrained(receiver_dir).save_pretrained(output)
+    AutoTokenizer.from_pretrained(receiver_dir, fix_mistral_regex=fix_mistral_regex).save_pretrained(output)
 
 
-def _run_checked(command: list[str], log_path: Path) -> None:
+def _run_checked(command: list[str], log_path: Path, env: dict[str, str] | None = None) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("w") as stream:
-        subprocess.run(command, check=True, stdout=stream, stderr=subprocess.STDOUT)
+        subprocess.run(command, check=True, stdout=stream, stderr=subprocess.STDOUT, env=env)
 
 
 def _convert_and_quantize(cfg: dict[str, Any], run_checkpoint: Path, eval_dir: Path) -> dict[str, Path]:
@@ -297,11 +300,13 @@ def _convert_and_quantize(cfg: dict[str, Any], run_checkpoint: Path, eval_dir: P
     if not converter.exists() or not quantizer.exists():
         raise FileNotFoundError(f"llama.cpp b9637 is not prepared at {llama_dir}")
     receiver, patched = run_checkpoint / "model_final", run_checkpoint / "receiver_plus_qv_hf.tmp"
-    _apply_qv(receiver, Path(cfg["paths"]["qv_dir"]) / "qv.safetensors", float(cfg["alpha"]), patched)
+    _apply_qv(receiver, Path(cfg["paths"]["qv_dir"]) / "qv.safetensors", float(cfg["alpha"]), patched, bool(cfg["tokenizer_fix_mistral_regex"]))
     outputs = {"receiver_bf16": run_checkpoint / "receiver_bf16.tmp.gguf", "receiver_q4_0": run_checkpoint / "receiver_q4_0.gguf", "patched_bf16": run_checkpoint / "receiver_plus_qv_bf16.tmp.gguf", "patched_q4_0": run_checkpoint / "receiver_plus_qv_q4_0.gguf"}
+    converter_env = os.environ.copy()
+    converter_env["PYTHONPATH"] = str(llama_dir) + os.pathsep + converter_env.get("PYTHONPATH", "")
     for source, target, name in ((receiver, outputs["receiver_bf16"], "receiver"), (patched, outputs["patched_bf16"], "patched")):
         if not target.exists():
-            _run_checked([sys.executable, str(converter), str(source), "--outfile", str(target), "--outtype", "bf16"], eval_dir / f"convert_{name}.log")
+            _run_checked([sys.executable, str(converter), str(source), "--outfile", str(target), "--outtype", "bf16"], eval_dir / f"convert_{name}.log", env=converter_env)
     for source, target, name in ((outputs["receiver_bf16"], outputs["receiver_q4_0"], "receiver"), (outputs["patched_bf16"], outputs["patched_q4_0"], "patched")):
         if not target.exists():
             _run_checked([str(quantizer), str(source), str(target), "Q4_0"], eval_dir / f"quantize_{name}.log")
@@ -363,7 +368,11 @@ def _evaluate(cfg: dict[str, Any], splits: dict[str, Any], run_checkpoint: Path,
         status.heartbeat("golden evaluation already present")
         return
     model_paths = _convert_and_quantize(cfg, run_checkpoint, eval_dir)
-    tokenizer, rows, conditions = AutoTokenizer.from_pretrained(run_checkpoint / "model_final"), splits["test"], {}
+    tokenizer = AutoTokenizer.from_pretrained(
+        run_checkpoint / "model_final",
+        fix_mistral_regex=bool(cfg["tokenizer_fix_mistral_regex"]),
+    )
+    rows, conditions = splits["test"], {}
     for index, (name, model_path) in enumerate(model_paths.items(), start=1):
         prediction_path = eval_dir / f"{name}.predictions.jsonl"
         if prediction_path.exists():

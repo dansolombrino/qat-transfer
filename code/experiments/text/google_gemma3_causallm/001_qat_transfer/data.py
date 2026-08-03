@@ -94,7 +94,7 @@ def load_task_data(task: str, dataset_spec: dict[str, Any], seed: int, mode: str
     dataset = load_dataset(**kwargs)
     builders = {"gsm8k": _gsm8k, "samsum": _samsum, "e2e_nlg": _e2e}
     splits = builders[task](dataset, seed)
-    if mode == "smoke":
+    if mode.startswith("smoke"):
         splits = {name: rows[: 16 if name == "train" else 8] for name, rows in splits.items()}
     manifest = {"task": task, "dataset_id": dataset_spec["id"], "dataset_revision": dataset_spec["revision"], "seed": seed, "mode": mode, "splits": {name: {"count": len(rows), "ids": [row["id"] for row in rows], "fingerprint": _fingerprint(rows)} for name, rows in splits.items()}}
     if manifest_path is not None:
