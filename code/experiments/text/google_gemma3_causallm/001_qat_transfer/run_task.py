@@ -36,6 +36,7 @@ sys.path.insert(0, str(HERE))
 from common.run_id import guard_run_config, run_id_path  # noqa: E402
 from common.status import StatusWriter  # noqa: E402
 from data import SYSTEMS, load_task_data, messages, score_predictions, user_prompt  # noqa: E402
+from tokenizer_contract import mark_regex_fix_consumed  # noqa: E402
 
 RUN_ID_PARAMS = ("model", "task", "mode", "seed", "data_spec", "train_spec", "qv_source", "alpha", "quantizer", "eval_spec")
 
@@ -153,6 +154,10 @@ def _save_final(model: Any, tokenizer: Any, output: Path) -> None:
     state = {key: value.detach().to("cpu", torch.bfloat16).contiguous() for key, value in model.state_dict().items()}
     model.save_pretrained(temporary, state_dict=state, safe_serialization=True)
     tokenizer.save_pretrained(temporary)
+    # tokenizer.json already contains the corrected regex. Persisting the
+    # original True flag makes downstream AutoTokenizer users (including the
+    # pinned llama.cpp converter) try to patch that serialization a second time.
+    mark_regex_fix_consumed(temporary)
     if output.exists():
         shutil.rmtree(output)
     temporary.replace(output)

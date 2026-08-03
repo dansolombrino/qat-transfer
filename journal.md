@@ -818,3 +818,12 @@ fix was redundantly reapplied while loading the already-fixed serialized
 tokenizer. The patched model now copies serialized tokenizer/chat-template
 files byte-for-byte; evaluation loads that serialization without a second
 patch. Wave `20260803-222037` carries this tokenizer-safe behavior.
+
+The next smoke passed QV application and converted every model tensor, then
+localized a second consumer of the same metadata: llama.cpp's pinned converter
+loads the receiver with plain `AutoTokenizer`, which honored the persisted
+`fix_mistral_regex=true` and attempted to patch the already-corrected
+`tokenizer.json`. Checkpoint serialization now flips only that metadata flag to
+false after saving; the corrected tokenizer graph itself is unchanged. Six
+local contract tests pass, including this serialization invariant. Replacement
+wave `20260803-223300` remains gated on the same end-to-end smoke.

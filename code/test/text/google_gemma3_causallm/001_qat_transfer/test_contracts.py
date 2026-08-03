@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -14,6 +15,11 @@ SPEC = importlib.util.spec_from_file_location("gemma_qv_data", DATA_PATH)
 data = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(data)
+TOKENIZER_CONTRACT_PATH = ROOT / "code/experiments/text/google_gemma3_causallm/001_qat_transfer/tokenizer_contract.py"
+TOKENIZER_SPEC = importlib.util.spec_from_file_location("gemma_tokenizer_contract", TOKENIZER_CONTRACT_PATH)
+tokenizer_contract = importlib.util.module_from_spec(TOKENIZER_SPEC)
+assert TOKENIZER_SPEC.loader is not None
+TOKENIZER_SPEC.loader.exec_module(tokenizer_contract)
 sys.path.insert(0, str(ROOT / "code"))
 from common.run_id import guard_run_config, run_id_path
 
@@ -85,3 +91,11 @@ def test_bf16_qv_exactly_reconstructs_donor() -> None:
     assert not torch.equal((fp_tiny.float() + delta32).to(torch.bfloat16), qat_tiny)
     delta64 = qat_tiny.double() - fp_tiny.double()
     assert torch.equal((fp_tiny.double() + delta64).to(torch.bfloat16), qat_tiny)
+
+
+def test_serialized_tokenizer_does_not_reapply_regex_fix(tmp_path: Path) -> None:
+    config_path = tmp_path / "tokenizer_config.json"
+    config_path.write_text(json.dumps({"fix_mistral_regex": True, "model_max_length": 32768}))
+    tokenizer_contract.mark_regex_fix_consumed(tmp_path)
+    config = json.loads(config_path.read_text())
+    assert config == {"fix_mistral_regex": False, "model_max_length": 32768}
