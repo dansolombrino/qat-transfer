@@ -1829,6 +1829,23 @@ and plotting layouts are reused verbatim. The distinct token
 `reviewer_3hfp_rowwise_v1` records only which alignment matrix entered that
 unchanged analysis.
 
+### Matching-row result
+
+Wave `20260803-120627` completed from source revision
+`943f1bec835baf0be8ca0bcae4c4942790415bd1` and included all 82,944 rows
+from the same 48 tensors and 44 FP/QAT checkpoints, with zero zero-norm rows.
+The primary signed row-cosine versus unit-scale gain comparison has Spearman
+rho `0.0725815` (QAP `p = 0.401560`) and Pearson `r = 0.0731162` (QAP
+`p = 0.315268`). The theory-adjacent squared row-cosine versus
+validation-selected recovery comparison has Spearman rho `0.228536` (QAP
+`p = 0.00159984`) and Pearson `r = 0.0751924` (QAP `p = 0.115188`).
+
+The artifact audit confirmed exact checkpoint identities, task/tensor/cell
+order, outcome source, non-similarity fields, comparison definitions, and the
+original QAP permutation digest. Every `cosine_sq` is exactly the square of
+the aggregated row-wise cosine. All six row-wise PDF/PNG files rendered and
+validated, so the alignment aggregation is the sole scientific change.
+
 The geometry stage is `rowwise_alignment`, with golden artifact
 `rowwise_alignment.json`; its analysis artifact is
 `rowwise_statistics.json`. The producer run identity is the original ordered
