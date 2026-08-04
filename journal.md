@@ -796,3 +796,55 @@ Three dedicated row-wise scripts produced six full-provenance PDF/PNG files.
 All were structurally validated and visually inspected. The global and
 row-wise best-alpha suites now form an explicit paired presentation while
 remaining render-only consumers of their immutable statistics artifacts.
+
+---
+
+## 2026-08-04, 14:00 — the AWQ donor axis was never short; the gather was
+
+The rebuttal's Response 3HFP reported AWQ over 15 donors x 22 receivers while
+the GPTQ arm beside it spanned the full 22 x 22, forcing the text to carry an
+explicit "restricted to the same 15 donors" caveat to stay honest. Diagnosing
+this from the local tree gave the wrong root cause. Phase 009 held 330 of 484
+unit-alpha test cells, wave `20260803-140339` had been split into a 308-cell
+rig-4090 lane and a 154-cell rig-3090-ti lane, and the 154 were absent — so I
+concluded the second lane never ran, and dispatched it again on behemoth.
+
+It had run. All 154 cells sat on rig-3090-ti under
+`/mnt/KS_960GB/...`, every one `state: done`, every one stamped
+`wave_id 20260803-140339` with the matching `source_tag`, written 2026-08-03
+from 21:45 onward. The rig-4090 lane's results had been gathered back at the
+time and the rig-3090-ti lane's had not. Nothing was missing but the rsync.
+
+Two lessons, both cheap to state and expensive to relearn. Absence of an
+artifact in the aggregation tree is evidence about the gather, not about the
+run — the executing rig is the only place that answers "did this run". And the
+tracking record was right when I judged it wrong: `shitpads/001_009-wave`
+recorded all 462 rows as done, I called that a false record on the strength of
+the local tree alone, and its row for CIFAR100 -> DTD in fact matched that
+cell's `.status.json` to the second. Those 462 rows are now merged into the
+main `EXPERIMENTS.md`, which had been tracking only the 22 ImageNet cells.
+
+The redundant behemoth wave was not wasted. It recomputed 36 of the 154 cells
+independently — different host, different dataloader configuration — and
+comparing 72 accuracies against the rig-3090-ti originals gives a median
+absolute difference of 0.23 pp, p90 1.47 pp, max 2.37 pp, with only 5 of 72
+bit-identical. That is genuine run-to-run nondeterminism in AWQ, whose scale
+search calibrates on receiver train batches whose composition depends on the
+host's worker configuration. It is worth knowing that a single 009 cell carries
+roughly a 1 pp uncertainty, and equally worth keeping in proportion: the effect
+these cells are used to measure is +40 pp. The reported grid uses the
+rig-3090-ti originals throughout, so all 462 cross-task cells come from one
+wave under one source tag rather than being mixed across hosts.
+
+Completing the donor axis moves the swap-quantizer figure from +38.66 pp over
+315 cross-task pairs to **+40.26 pp over 462**, positive on 460 of 462, worst
+pair -0.879 pp. The 15-donor sub-block of the new matrix reproduces +38.657 pp
+and 99.68% exactly, so nothing was recomputed underneath the old number; the
+seven added donors simply transfer better (+43.70 pp mean). GPTQ's +44.30 pp
+over the same 462 pairs is now directly comparable and the like-for-like caveat
+can be dropped.
+
+Both comparison scripts gained a `cross_task_only` aggregate block. The
++38.66 and +44.30 figures had been derived by hand from the `delta_pp` matrices
+and appeared in no file; they are now emitted artifacts, and both reproduced
+their hand-derived values before the new data landed.
