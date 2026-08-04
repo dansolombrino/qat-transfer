@@ -1,10 +1,12 @@
 # QV alignment validation for reviewer 3HFP
 
-Status: v1.6. The ViT-B/16 Euclidean pilot and the Level-A alpha-response
-extension are complete and interpreted. A result-grounded reviewer-response
-draft incorporating both experiments is persisted below. Receiver-specific
-curvature remains a possible later experiment, not a requirement for reporting
-the present H=I result honestly.
+Status: v1.8. The ViT-B/16 Euclidean pilot, matching-row replication,
+best-alpha presentation, and Level-A alpha-response extension are complete and
+interpreted. A result-grounded reviewer-response draft incorporating the
+alignment heatmaps, an ideal high-dimensional reference null, and all four
+analyses is persisted below. Receiver-specific curvature remains a possible
+later experiment, not a requirement for reporting the present H=I result
+honestly. Section 17 holds the submission-ready draft v4.
 
 This is the canonical, evolving scientific record for rebuttal experiment
 `005_qv_alignment`. It should be updated as the methodology is refined and as
@@ -14,6 +16,23 @@ draft that would be too large for a journal entry.
 
 ## Revision history
 
+- **v1.8 — 2026-08-03:** Adds Section 17, reviewer-response draft v4. This is a
+  presentation-only revision of draft v3: it introduces no new experiment, no
+  new artifact, and no number that is not already recorded above. It reorders
+  the response to lead with the negative unit-scale result as Section 8.7
+  requires, folds in the Level-A alpha profile and the two failed calibration
+  diagnostics, and answers the reviewer's second clause ("how should the
+  theoretical account be interpreted?") explicitly. Every quoted coefficient in
+  Section 17 was re-read from `euclidean_statistics.json`,
+  `rowwise_statistics.json`, and `alpha_response_statistics.json` at drafting
+  time rather than copied from prose.
+- **v1.7 — 2026-08-03:** Adds an analytical high-dimensional reference null
+  for interpreting the absolute cosine magnitudes, audits the exact global and
+  matching-row heatmap maxima, and integrates these results with the unit-scale,
+  validation-selected best-alpha, and Level-A association analyses in
+  reviewer-response draft v3. The random-direction calculation is explicitly
+  limited to an ideal isotropic sanity reference rather than presented as a
+  formal empirical significance test for structured QVs.
 - **v1.6 — 2026-08-03:** Interprets the complete Level-A alpha response and
   adds reviewer-response draft v2. The sweep reveals a family-wise-significant
   scale-dependent alignment profile, but the Euclidean predicted optimum is
@@ -1930,3 +1949,359 @@ valid and nonempty; the PDFs are one page, and the PNG dimensions are
 labels, unclipped annotations, and all 44 influence points. The full 005 test
 suite passes (`29 passed`), including strict row-wise schema, missing-field,
 missing-comparison, influence-cardinality, and unsafe-path rejection tests.
+
+## 16. High-dimensional reference null and integrated response
+
+### 16.1 What the reference null answers
+
+The association analyses above answer whether variation in alignment predicts
+variation in transfer. They do not, by themselves, answer a separate question:
+whether the absolute cosine magnitudes in the heatmaps contain meaningful
+shared directional structure or are merely the incidental nonzero cosines
+expected between unrelated high-dimensional vectors.
+
+For that second question, consider the standard ideal reference in which two
+unit vectors $u,v\in\mathbb{R}^d$ are independent and isotropically random.
+Their cosine $C=u^\top v$ satisfies
+
+\[
+\mathbb{E}[C]=0,
+\qquad
+\operatorname{Var}(C)=\frac{1}{d},
+\qquad
+\operatorname{SD}(C)=\frac{1}{\sqrt d}.
+\]
+
+The global QV cosine uses
+
+\[
+d=84{,}934{,}656=9216^2
+\]
+
+scalar coordinates, and therefore the ideal random-direction scale is
+
+\[
+\operatorname{SD}(C)=\frac{1}{9216}=1.0850694\times10^{-4},
+\]
+
+with an approximate 95% interval of
+
+\[
+[-2.1267\times10^{-4},\;2.1267\times10^{-4}].
+\]
+
+The largest cross-task global cosine is `0.2327181082` for
+CIFAR-10--STL-10. It is approximately 2,145 times the ideal-null standard
+deviation. More generally, global cosines of 0.20 and 0.15 would be 1,843 and
+1,382 ideal-null standard deviations, respectively. Thus values on the order
+of $10^{-1}$ are more than three orders of magnitude above the incidental
+cosine scale $10^{-4}$ predicted for independent isotropic directions in the
+nominal global dimension. This conclusion is unaffected qualitatively by the
+231 unique cross-task comparisons: multiplicity can change an extreme by a
+small multiple of the null standard deviation, not from the $10^{-4}$ scale
+to the $10^{-1}$ scale.
+
+The matching-row statistic is a different aggregation and must not inherit the
+global $1/\sqrt d$ calculation verbatim. Its strongest cells nevertheless
+corroborate the same structured task relationships under a geometry matched to
+per-channel quantization: CIFAR-10--STL-10 is `0.1932523352`, and
+CIFAR-10--CIFAR-100 is `0.1456212251`. Under the additional idealization that
+the 82,944 row pairs are independent and isotropic within their respective
+widths, its reference-null standard deviation is
+
+\[
+\frac{\sqrt{73{,}728/768+9{,}216/3072}}{82{,}944}
+=1.1995894\times10^{-4}.
+\]
+
+This row-wise calculation is an optional sanity reference, not a formal null
+for the real data, because rows within a Transformer are correlated.
+
+Both calculations must be interpreted conservatively. The actual QVs are not
+independent isotropic draws: they share an architecture, a parameter coordinate
+system, a pretrained initialization, and related QAT procedures, and they may
+occupy a much lower-dimensional structured subspace. Consequently, the values
+above are not empirical p-values and do not establish that the QVs are close to
+parallel. They establish the narrower but important point that cosines around
+0.15--0.23 are not numerically negligible in high dimension and are consistent
+with substantial shared structure relative to an unstructured
+random-direction reference.
+
+This distinction separates three empirical questions:
+
+1. **Does nontrivial shared alignment exist?** Yes. The heatmap contains
+   positive alignments orders of magnitude above the ideal random-direction
+   scale, with semantically plausible task pairs among the strongest cells.
+2. **Does greater alignment associate with greater transfer?** At arbitrary
+   unit scale, essentially not for the global statistic and only weakly for the
+   matching-row statistic. At validation-selected scale, both associations are
+   modestly positive, and the Level-A sweep shows that their strength depends
+   systematically on alpha.
+3. **Does Euclidean cosine-squared calibrate the amount of recovery?** No. The
+   best-recovery correlations remain weak, especially in Pearson terms, and
+   the Euclidean formula does not correctly calibrate the empirical optimum.
+
+### 16.2 Reviewer-response draft v3
+
+> We thank the reviewer for suggesting this direct validation. For the
+> ViT-B/16 22-by-22 vision matrix, we computed the Euclidean alignment between
+> every matched donor and receiver QV over the 48 `nn.Linear.weight` tensors
+> affected by our 3-bit per-channel quantizer. Our primary measurement is one
+> global cosine over all 84,934,656 selected coordinates. Because per-channel
+> quantization operates row-wise—each output row of a linear weight matrix
+> constitutes one quantization unit—we additionally performed a
+> mechanism-aligned robustness analysis. We computed the cosine between every
+> matching donor--receiver row and averaged uniformly across all 82,944 rows.
+> Whereas the global cosine aggregates scalar coordinates and is influenced by
+> row dimensionality and magnitude, the row-wise statistic gives every
+> quantized output channel equal weight. We retain the 22 same-task cells as an
+> audit but exclude them from cross-task associations, leaving 462 directed
+> transfer cells.
+>
+> The absolute cosine values provide evidence that the QVs contain nontrivial
+> shared directional structure. For two independent isotropic unit vectors in
+> the 84,934,656-dimensional global space, the cosine has mean zero and
+> standard deviation $1/\sqrt d=1.09\times10^{-4}$. The strongest observed
+> global cross-task alignment is CIFAR-10--STL-10 at 0.233, more than three
+> orders of magnitude above this ideal random-direction scale. The
+> mechanism-aligned row-wise analysis yields similarly substantial values:
+> CIFAR-10--STL-10 reaches 0.193 and CIFAR-10--CIFAR-100 reaches 0.146. Under
+> the analogous idealization of independent isotropic rows, the standard
+> deviation of the averaged row-wise cosine is approximately
+> $1.20\times10^{-4}$. We emphasize that these calculations are geometric
+> sanity references, not formal empirical significance tests: the QVs share
+> architecture, initialization, parameter coordinates, and training structure.
+> Nevertheless, they demonstrate that cosines of 0.15--0.23 represent
+> meaningful shared structure relative to an unstructured random-direction
+> reference and should not be considered negligible merely because they are
+> far from one.
+>
+> We then tested whether variation in this alignment predicts variation in
+> transfer gain. At the arbitrary unit scale used in the original matrix,
+> signed global cosine has Spearman rho = 0.015 and Pearson r = -0.020 with
+> test-accuracy gain; the matching-row values are rho = 0.073 and r = 0.073.
+> Thus alignment alone is not a useful predictor when every donor is forced to
+> the same unit scale.
+>
+> The picture changes when scale is handled consistently with our transfer
+> protocol. At the standard validation-selected $\alpha$, the association becomes
+> modestly positive: global cosine gives rho = 0.252 and r = 0.123, while
+> matching-row cosine gives rho = 0.293 and r = 0.198. The complete pre-existing
+> validation sweep further shows that this association is strongly
+> scale-dependent: for the global cosine, rho = 0.389 at $\alpha = 0.15$,
+> approximately zero at $\alpha = 1$ (rho = -0.023), and negative at $\alpha = 1.5$
+> (rho = -0.244). This explains why the fixed unit-scale slice can obscure a
+> systematic interaction between alignment and transfer scale.
+>
+> These results support a meaningful alignment signal and its qualitative
+> interaction with scale, but they do not validate Euclidean cosine-squared as
+> a calibrated quantitative predictor of recovered performance. For
+> validation-selected recovery, squared global cosine gives rho = 0.158 and
+> r = 0.009; the matching-row values are rho = 0.229 and r = 0.075. We have
+> therefore sharpened the interpretation of Proposition 1. The proposition is
+> an exact local statement for a smooth quadratic receiver loss in the
+> receiver-specific $H_R$ geometry and at its optimal unconstrained scale.
+> Our experiment instead uses $H=I$, finite QAT displacements, hard
+> quantization and Top-1 accuracy, a bounded positive scale grid, and a
+> restricted quantized-Linear subspace; moreover, Euclidean cosine is symmetric
+> whereas transfer is directional. The empirical results show that donor and
+> receiver QVs do share structured directions and that alignment becomes more
+> informative when scale is treated appropriately, while the stronger
+> receiver-specific curvature prediction remains an important target for
+> future validation.
+
+## 17. Reviewer-response draft v4 (submission-ready, core-first)
+
+This draft supersedes v1 (§6.8), v2 (§8.6), and v3 (§16.2) as the text to be
+submitted. It is a presentation-only revision: no new experiment, no new
+artifact, and no number that is not already recorded in this note. Three
+changes relative to v3:
+
+1. **It leads with the negative unit-scale result**, as §8.7 item 1 requires.
+   v3 opened with methodology and reached the null in its third paragraph,
+   which reads as burying it.
+2. **It answers the reviewer's second clause explicitly.** 3HFP asked two
+   things — does it correlate, and *"if not, how should the theoretical account
+   be interpreted?"* — and the second is the one that decides the review. §4 of
+   the draft is that answer.
+3. **It folds in the Level-A diagnostics that argue against us** (the
+   anticorrelated predicted optimum and the 21 recovery ratios above 1) rather
+   than leaving them in supplementary material. Volunteering the failed
+   calibration is what makes the narrowed claim credible.
+
+Every coefficient below was re-read from the artifacts at drafting time:
+`euclidean_statistics.json` (`statistics.comparisons.*.observed` and `.qap`),
+`rowwise_statistics.json`, and `alpha_response_statistics.json`
+(`statistics.primary.qap_profile`, `statistics.scale_calibration`,
+`statistics.curve_diagnostics`, `statistics.cosine_quartile_curves`). A
+paste-ready copy lives at `references/rebuttal/response_3hfp_alignment.md`;
+that tree is gitignored, so this section is the durable record.
+
+Full text of the draft:
+
+> **We computed it, and the honest answer has two halves. At the fixed unit
+> scale lambda=1 used in the paper's matrix, the Euclidean cosine does *not*
+> predict Delta(D,R): Spearman rho = 0.015, Pearson r = -0.020 over the 462
+> cross-task cells. But that null is a slice through a systematically
+> scale-dependent relationship. Across our validation lambda-sweep the
+> association runs rho = 0.389 at lambda = 0.15, decays monotonically, crosses
+> zero almost exactly at lambda = 1, and reverses to rho = -0.244 at
+> lambda = 1.5 (family-wise max-|rho| permutation p = 0.0002). At the
+> validation-selected lambda the paper actually reports, the association is
+> positive: rho = 0.252 globally and rho = 0.293 under a per-channel-matched
+> cosine. So alignment does carry real ordinal information about transfer — but
+> Euclidean cos^2 is *not* a calibrated quantitative law: it mispredicts the
+> optimal scale and does not track recovered gain. We have narrowed how
+> Proposition 1 is presented accordingly, and we detail that below.**
+>
+> **What we measured.** For the ViT-B/16 22x22 vision matrix we formed
+> `rho_D = theta_{D,QAT} - theta_D` for all 22 matched FP/QAT checkpoint pairs
+> and took the Euclidean (H = I) cosine between every ordered donor-receiver
+> pair. Geometry is restricted to the 48 `nn.Linear.weight` tensors our 3-bit
+> per-channel quantizer actually acts on — 84,934,656 scalar coordinates per QV
+> — and the statistic is one global cosine over that direct sum, not an average
+> of per-layer or per-channel cosines. Because per-channel quantization is
+> row-wise (each output row is one quantization unit), we also report a
+> mechanism-matched variant: the cosine between every matching donor-receiver
+> output row, averaged with uniform weight over all 82,944 rows. The 22 diagonal
+> cells are algebraically the receiver's own QAT checkpoint, so we keep them as
+> an audit but exclude them from every inferential statistic, leaving 462
+> directed cross-task cells. Because matrix cells share donors and receivers, we
+> report no IID p-values; all significance is by a QAP task-label permutation
+> test (10,000 permutations, both alignment axes relabelled jointly, seed 2038).
+>
+> **1. Is there any shared alignment to detect? Yes.** Off-diagonal global
+> cosines are small in absolute terms — mean 0.022, median 0.018, 34/462 (7.4%)
+> negative, maximum 0.233 — but they are far from numerically negligible. For
+> two independent isotropic unit vectors in d = 84,934,656 dimensions the cosine
+> has mean 0 and SD 1/sqrt(d) = 1.09e-4. The largest cross-task alignment,
+> CIFAR-10--STL-10 at 0.233, is about 2,145 such SDs: three orders of magnitude
+> above the incidental scale. The strongest cells are also semantically
+> plausible — CIFAR-10--STL-10 (0.233), KMNIST--MNIST (0.093),
+> FashionMNIST--KMNIST (0.077), CIFAR-10--CIFAR-100 (0.074) — and the row-wise
+> statistic reproduces the same ranking with larger values (CIFAR-10--STL-10
+> 0.193, CIFAR-10--CIFAR-100 0.146, EMNIST--MNIST 0.126). We stress that this is
+> a geometric sanity reference, not an empirical significance test: real QVs
+> share an architecture, a coordinate system, an initialization and a training
+> procedure, so they are not independent isotropic draws. It establishes the
+> narrow point that cosines of this size reflect substantial shared directional
+> structure and should not be dismissed merely for being far from 1.
+>
+> **2. Does it predict Delta(D,R)? Not at unit scale; yes, modestly, once scale
+> is handled as the protocol handles it.** At lambda = 1, signed global cosine
+> vs. test-accuracy gain gives Spearman rho = 0.015 (QAP p = 0.861) and Pearson
+> r = -0.020 (p = 0.772). The row-wise statistic gives rho = 0.073 (p = 0.402)
+> and r = 0.073 (p = 0.315). This is a genuine null and we report it as such.
+>
+> Re-analysing our complete pre-existing 11-point validation sweep (462 cells x
+> 11 scales, anchored at the exact unpatched lambda = 0, Delta = 0) shows why
+> lambda = 1 is an unlucky place to look — it sits almost exactly at the zero
+> crossing of a monotone profile:
+>
+> | lambda | 0.15 | 0.30 | 0.45 | 0.60 | 0.75 | 0.90 | **1.00** | 1.05 | 1.20 | 1.35 | 1.50 |
+> |---|---|---|---|---|---|---|---|---|---|---|---|
+> | Spearman rho | +0.389 | +0.363 | +0.335 | +0.265 | +0.158 | +0.057 | **-0.023** | -0.043 | -0.129 | -0.184 | -0.244 |
+>
+> The family-wise max-|rho| QAP test over the whole scan gives p = 0.0002; the
+> associations at lambda <= 0.60 and the negative one at lambda = 1.5
+> individually survive max-statistic correction (adjusted p = 0.0002, 0.0003,
+> 0.0004, 0.0109 and 0.0204 respectively).
+>
+> The mechanism is visible descriptively: splitting cells by cosine quartile,
+> the highest-alignment quartile peaks at lambda = 0.60 with median gain 0.107,
+> while the lowest quartile peaks at lambda = 1.00 with median gain 0.041.
+> Better-aligned donors want *smaller* patches, so a fixed lambda = 1 overshoots
+> precisely the pairs alignment would have flagged as good — which is also
+> consistent with the paper's existing observation that lambda decides whether a
+> donor helps or hurts.
+>
+> At the validation-selected lambda the paper actually uses, the association is
+> positive: global cosine rho = 0.252 (r = 0.123), row-wise cosine rho = 0.293
+> (QAP p = 0.0024) and r = 0.198 (p = 0.0097). It stays positive in all 44
+> leave-one-donor-out and leave-one-receiver-out refits (global 0.160--0.288;
+> row-wise 0.206--0.326), so it is not carried by any single task.
+>
+> **3. Does Euclidean cos^2 *calibrate* recovery? No — and we do not want to
+> overstate this.** Squared cosine vs. validation-selected recovery gives
+> rho = 0.158 / r = 0.009 (global) and rho = 0.229 / r = 0.075 (row-wise);
+> against the full validation upper envelope the rank result does not replicate
+> (rho = 0.115, p = 0.126). Two sharper diagnostics fail outright.
+>
+> *Predicted scale.* Under H = I the theory predicts
+> `lambda_hat = <rho_D, rho_R> / ||rho_D||^2`. Its median is 0.019 against an
+> empirical median optimum of 0.75, and it is anticorrelated with the empirical
+> optimum (rho = -0.298, QAP p = 1e-4 after clipping to the measured range;
+> median absolute error 0.73 in lambda units). The clipped prediction lands
+> inside the exact maximizing interval for 4/462 cells and inside no cell's
+> 90%-of-maximum plateau. The anticorrelation persists in the 420
+> interior-optimum cells (rho = -0.307), so it is not a boundary-censoring
+> artifact.
+>
+> *Recovery bound.* 21/462 measured accuracy-recovery ratios exceed 1 (maximum
+> 4.06), which Proposition 1's exact loss-recovery fraction cannot do. Top-1
+> recovery is a proxy for the proposition's quantity, not an instance of it.
+>
+> For completeness, the response curves themselves are well-behaved: 413/462
+> admit a concave quadratic fit with median R^2 = 0.932. Curve *shape* is
+> consistent with a local quadratic picture; Euclidean geometry simply does not
+> calibrate that quadratic's location or height.
+>
+> **4. How should the theoretical account be interpreted?** The null does not
+> logically falsify Proposition 1, but it plainly does not validate it either,
+> and we think the narrower reading is the honest one.
+>
+> Proposition 1 is exact under five conditions, and our measurement meets none
+> of them: a receiver-specific PD `H_R`; a smooth locally quadratic receiver
+> objective; an *unconstrained* real optimal scale; gain measured in that same
+> smooth objective; and donor, receiver and outcome in one common subspace. We
+> instead used H = I, finite QAT displacements, hard 3-bit PTQ with
+> non-differentiable Top-1 accuracy, a bounded positive grid
+> lambda in [0.15, 1.5], and geometry restricted to the quantized-Linear
+> subspace. There is also a structural mismatch: H = I cosine is *symmetric*
+> whereas transfer is not. CIFAR-10 and STL-10 share our largest cosine (0.233)
+> yet give +0.243 in one direction and -0.077 in the other — an asymmetry no
+> H = I quantity can represent, and which only a receiver-specific `cos_{H_R}`
+> could.
+>
+> We therefore now present Proposition 1 as a local organizing model rather
+> than a validated predictive law. What the data support is its qualitative
+> content: that alignment and scale are coupled; that a donor can be useful even
+> when lambda = 1 fails, provided its projection coefficient differs from 1; and
+> that better-aligned donors have smaller optimal scales. Those are exactly the
+> two empirical patterns the proposition was introduced to explain, and the
+> lambda-profile above is direct evidence for the coupling. What the data do
+> *not* support is the quantitative Euclidean reading of the cos^2 law. Testing
+> the stronger claim requires an STE-surrogate / generalized Gauss-Newton
+> receiver curvature together with a smooth, subspace-matched loss endpoint; we
+> have designed that measurement, and we deliberately do not claim here that an
+> unmeasured `H_R` would succeed.
+>
+> **Manuscript changes.** (1) New appendix with this analysis: the alignment
+> heatmap (global and row-wise), the rho-vs-lambda correlation profile marking
+> lambda = 1 and the family-wise QAP result, and the cosine-quartile response
+> curves; the scale-calibration failure and the cos^2-recovery null go in the
+> same appendix, not buried. (2) A methods paragraph defining the single global
+> cosine over the 48 quantized Linear weights, the row-wise variant, the
+> exclusion of the 22 algebraic diagonal cells, and the QAP permutation test.
+> (3) Revised Section 4.2, the Figure 2 caption, the abstract and the
+> corresponding contribution bullet so that the cos^2 law is stated as a local
+> idealization with its assumptions named — never as an empirically established
+> fact. We thank the reviewer for pressing on this; the paper is stronger for
+> reporting the null.
+
+### 17.1 Compression order if the response box is tight
+
+The draft is roughly 1,100 words. Cut in this order: the reference-null
+paragraph in section 1; the *recovery bound* and concave-fit details in
+section 3; the manuscript-changes list. The lead paragraph plus sections 2 and
+4 are the irreducible answer — the lead because it is the direct reply, section
+2 because it is the new evidence, section 4 because it is the half of the
+question that decides the review.
+
+### 17.2 Figures to attach
+
+`plots/998_rebuttal/006_alignment_alpha_response/` correlation-profile figure
+is the one to attach if only one is allowed; it renders the whole of section 2
+and visibly marks the unit setting. The global and row-wise heatmaps from
+`plots/998_rebuttal/005_qv_alignment/plot_alignment_heatmap/` and
+`plot_rowwise_alignment_heatmap/` support section 1.
