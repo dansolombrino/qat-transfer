@@ -1,0 +1,74 @@
+{
+  "wave_id": "20260804-134500",
+  "phase": "vision/ilharco_timm_supervised/009_qat_transfer_awq",
+  "purpose": "complete the donor axis from 15 to 22 at alpha=1.0, split=test",
+  "model_name": "vit_base_patch16_224.orig_in21k",
+  "donors": [
+    "CIFAR100",
+    "EuroSAT",
+    "Flowers102",
+    "KMNIST",
+    "PCAM",
+    "STL10",
+    "TinyImageNet"
+  ],
+  "receivers": [
+    "Cars",
+    "CIFAR10",
+    "CIFAR100",
+    "DTD",
+    "EMNIST",
+    "EuroSAT",
+    "FashionMNIST",
+    "FER2013",
+    "Flowers102",
+    "Food101",
+    "GTSRB",
+    "ImageNet",
+    "KMNIST",
+    "MNIST",
+    "OxfordIIITPet",
+    "PCAM",
+    "RenderedSST2",
+    "RESISC45",
+    "STL10",
+    "SUN397",
+    "SVHN",
+    "TinyImageNet"
+  ],
+  "seed": 2038,
+  "alphas": [
+    1.0
+  ],
+  "eval_split": "test",
+  "lanes": [
+    "behemoth_gpu0",
+    "behemoth_gpu2",
+    "behemoth_gpu4",
+    "behemoth_gpu5",
+    "behemoth_gpu6",
+    "behemoth_gpu7",
+    "rig-3090-ti_gpu0"
+  ],
+  "total_cells": 154,
+  "excluded_done": 33,
+  "dispatched_cells": 121,
+  "lane_sizes": {
+    "behemoth_gpu0": 19,
+    "behemoth_gpu2": 19,
+    "behemoth_gpu4": 19,
+    "behemoth_gpu5": 19,
+    "behemoth_gpu6": 19,
+    "behemoth_gpu7": 18,
+    "rig-3090-ti_gpu0": 8
+  },
+  "projected_seconds": {
+    "behemoth_gpu0": 1520.0,
+    "behemoth_gpu2": 1520.0,
+    "behemoth_gpu4": 1520.0,
+    "behemoth_gpu5": 1520.0,
+    "behemoth_gpu6": 1520.0,
+    "behemoth_gpu7": 1440.0,
+    "rig-3090-ti_gpu0": 1568.0
+  }
+}

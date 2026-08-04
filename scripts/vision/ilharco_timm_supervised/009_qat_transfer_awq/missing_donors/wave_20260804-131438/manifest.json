@@ -1,0 +1,58 @@
+{
+  "wave_id": "20260804-131438",
+  "phase": "vision/ilharco_timm_supervised/009_qat_transfer_awq",
+  "purpose": "complete the donor axis from 15 to 22 at alpha=1.0, split=test",
+  "model_name": "vit_base_patch16_224.orig_in21k",
+  "donors": [
+    "CIFAR100",
+    "EuroSAT",
+    "Flowers102",
+    "KMNIST",
+    "PCAM",
+    "STL10",
+    "TinyImageNet"
+  ],
+  "receivers": [
+    "Cars",
+    "CIFAR10",
+    "CIFAR100",
+    "DTD",
+    "EMNIST",
+    "EuroSAT",
+    "FashionMNIST",
+    "FER2013",
+    "Flowers102",
+    "Food101",
+    "GTSRB",
+    "ImageNet",
+    "KMNIST",
+    "MNIST",
+    "OxfordIIITPet",
+    "PCAM",
+    "RenderedSST2",
+    "RESISC45",
+    "STL10",
+    "SUN397",
+    "SVHN",
+    "TinyImageNet"
+  ],
+  "seed": 2038,
+  "alphas": [
+    1.0
+  ],
+  "eval_split": "test",
+  "rig": "behemoth",
+  "gpus": [
+    4,
+    5,
+    6,
+    7
+  ],
+  "total_cells": 154,
+  "lane_sizes": {
+    "behemoth_gpu4": 39,
+    "behemoth_gpu5": 39,
+    "behemoth_gpu6": 38,
+    "behemoth_gpu7": 38
+  }
+}
