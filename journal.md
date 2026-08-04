@@ -862,4 +862,27 @@ a per-device microbatch of 4 with four-way gradient accumulation, retaining
 the planned effective global batch of 32 and optimizer-step schedule. It has a
 distinct `emnlp2025_fullft_mb4ga4_v1` identity to avoid colliding with the
 failed resolved config. Wave `20260803-230618` contains only SAMSum on GPUs
-4+5 and will deploy after the two active lanes finish.
+4+5.
+
+To avoid idling those GPUs, the replacement tag was staged in a separate
+detached behemoth worktree while the original two lanes continued. Its SAMSum
+smoke passed the full contract in 2m21s with ample memory headroom after the
+microbatch backward. The replacement full run started at 23:16 CEST; its
+running marker resolves to source `d32082c0da7db8a00b4901db0131b6b7bc1d2360`,
+tag `wave--20260803-230618`, and GPUs 4+5.
+
+SAMSum and E2E NLG completed all three epochs and four evaluation conditions.
+The quantized QV gain is negative on both: -0.08827 ROUGE-L for SAMSum and
+-29.3971 BLEU for E2E. These are full-test results, unlike the earlier smoke
+numbers.
+
+GSM8K completed first-epoch training but failed during variable-length native
+validation. Rank 0 reached CUDA-backed `all_gather_object` more than ten
+minutes before rank 1; NCCL's watchdog aborted the collective and the corrupted
+object-size exchange surfaced as an impossible >1 EB allocation. Because the
+old loop checkpointed only after validation, no resumable epoch artifact was
+available. The replacement exchanges Python predictions through a CPU/Gloo
+group with a four-hour timeout and writes a `pending_validation_epoch`
+checkpoint immediately after training. A resume skips retraining that epoch
+and repeats validation. Ten local contract tests pass. GSM-only wave
+`20260804-080746` targets GPUs 0+2.

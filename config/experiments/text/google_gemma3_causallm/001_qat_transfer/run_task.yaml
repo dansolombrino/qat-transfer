@@ -42,6 +42,7 @@ train:
   epochs: 3
   per_device_batch: 16
   gradient_accumulation_steps: 1
+  distributed_timeout_s: 14400
   learning_rate: 1.0e-5
   weight_decay: 0.0
   beta1: 0.9

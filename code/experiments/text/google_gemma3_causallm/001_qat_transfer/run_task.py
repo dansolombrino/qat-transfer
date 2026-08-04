@@ -13,6 +13,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import nullcontext
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -37,9 +38,10 @@ from common.run_id import guard_run_config, run_id_path  # noqa: E402
 from common.status import StatusWriter  # noqa: E402
 from data import SYSTEMS, load_task_data, messages, score_predictions, user_prompt  # noqa: E402
 from tokenizer_contract import mark_regex_fix_consumed  # noqa: E402
-from training_contract import accumulation_divisor, optimizer_step_due  # noqa: E402
+from training_contract import accumulation_divisor, epoch_requires_training, optimizer_step_due  # noqa: E402
 
 RUN_ID_PARAMS = ("model", "task", "mode", "seed", "data_spec", "train_spec", "qv_source", "alpha", "quantizer", "eval_spec")
+_CPU_GROUP: Any | None = None
 
 
 class TokenDataset(Dataset):
@@ -72,6 +74,27 @@ def _distributed() -> bool:
 def _barrier() -> None:
     if _distributed():
         dist.barrier()
+
+
+def _cpu_group() -> Any:
+    if _CPU_GROUP is None:
+        raise RuntimeError("CPU process group is not initialized")
+    return _CPU_GROUP
+
+
+def _init_distributed(timeout_s: int) -> None:
+    global _CPU_GROUP
+    timeout = timedelta(seconds=timeout_s)
+    dist.init_process_group("nccl", timeout=timeout)
+    _CPU_GROUP = dist.new_group(backend="gloo", timeout=timeout)
+
+
+def _destroy_distributed() -> None:
+    global _CPU_GROUP
+    if _CPU_GROUP is not None:
+        dist.destroy_process_group(_CPU_GROUP)
+        _CPU_GROUP = None
+    dist.destroy_process_group()
 
 
 def _seed_all(seed: int) -> None:
@@ -138,7 +161,9 @@ def _native_generate(model: Any, tokenizer: Any, rows: list[dict[str, Any]], max
         local.append((index, tokenizer.decode(output[0, input_ids.shape[1]:], skip_special_tokens=True)))
     if _distributed():
         gathered: list[Any] = [None for _ in range(_world())]
-        dist.all_gather_object(gathered, local)
+        # Validation shards can finish far apart on variable-length generation.
+        # Keep Python-object exchange off CUDA and outside NCCL's short watchdog.
+        dist.all_gather_object(gathered, local, group=_cpu_group())
         if _rank() != 0:
             return None
         merged = [item for part in gathered for item in part]
@@ -229,30 +254,42 @@ def _train(cfg: dict[str, Any], splits: dict[str, Any], run_checkpoint: Path, st
     start_epoch = 0 if state is None else int(state["completed_epochs"])
     best = -math.inf if state is None else float(state["best_metric"])
     history = [] if state is None else state["history"]
+    pending_validation_epoch = None if state is None else state.get("pending_validation_epoch")
     wrapped = DistributedDataParallel(model, device_ids=[_local_rank()]) if _distributed() else model
     selection_metric = task_cfg["selection_metric"]
     for epoch in range(start_epoch, epochs):
-        if sampler is not None:
-            sampler.set_epoch(epoch)
-        wrapped.train()
-        model.config.use_cache = False
-        running = 0.0
-        optimizer.zero_grad(set_to_none=True)
-        for batch_index, batch in enumerate(loader):
-            batch = {key: value.to(device, non_blocking=True) for key, value in batch.items()}
-            step_due = optimizer_step_due(batch_index, len(loader), accumulation_steps)
-            sync_context = nullcontext() if step_due or not isinstance(wrapped, DistributedDataParallel) else wrapped.no_sync()
-            with sync_context:
-                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                    loss = wrapped(**batch).loss
-                (loss / accumulation_divisor(batch_index, len(loader), accumulation_steps)).backward()
-            if step_due:
-                torch.nn.utils.clip_grad_norm_(wrapped.parameters(), float(cfg["train"]["clip_grad_norm"]))
-                optimizer.step()
-                scheduler.step()
-                optimizer.zero_grad(set_to_none=True)
-            running += float(loss.detach())
         bare = wrapped.module if isinstance(wrapped, DistributedDataParallel) else wrapped
+        train_loss = None
+        if epoch_requires_training(epoch, pending_validation_epoch):
+            if sampler is not None:
+                sampler.set_epoch(epoch)
+            wrapped.train()
+            model.config.use_cache = False
+            running = 0.0
+            optimizer.zero_grad(set_to_none=True)
+            for batch_index, batch in enumerate(loader):
+                batch = {key: value.to(device, non_blocking=True) for key, value in batch.items()}
+                step_due = optimizer_step_due(batch_index, len(loader), accumulation_steps)
+                sync_context = nullcontext() if step_due or not isinstance(wrapped, DistributedDataParallel) else wrapped.no_sync()
+                with sync_context:
+                    with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                        loss = wrapped(**batch).loss
+                    (loss / accumulation_divisor(batch_index, len(loader), accumulation_steps)).backward()
+                if step_due:
+                    torch.nn.utils.clip_grad_norm_(wrapped.parameters(), float(cfg["train"]["clip_grad_norm"]))
+                    optimizer.step()
+                    scheduler.step()
+                    optimizer.zero_grad(set_to_none=True)
+                running += float(loss.detach())
+            train_loss = running / len(loader)
+            if _rank() == 0:
+                _save_checkpoint(bare, optimizer, scheduler, latest, {"completed_epochs": epoch, "pending_validation_epoch": epoch + 1, "pending_train_loss": train_loss, "total_epochs": epochs, "best_metric": best, "selection_metric": selection_metric, "history": history})
+                if status is not None:
+                    status.heartbeat(f"epoch {epoch + 1}/{epochs} trained; validating")
+            pending_validation_epoch = epoch + 1
+            _barrier()
+        else:
+            train_loss = float(state["pending_train_loss"])
         model.config.use_cache = True
         predictions = _native_generate(bare, tokenizer, splits["validation"], int(task_cfg["max_new_tokens"]), device)
         metric_value, metrics = 0.0, None
@@ -264,14 +301,15 @@ def _train(cfg: dict[str, Any], splits: dict[str, Any], run_checkpoint: Path, st
             dist.broadcast(metric_tensor, src=0)
         metric_value = float(metric_tensor)
         if _rank() == 0:
-            history.append({"epoch": epoch + 1, "train_loss": running / len(loader), "validation": metrics, "selection_metric": selection_metric, "selection_value": metric_value})
+            history.append({"epoch": epoch + 1, "train_loss": train_loss, "validation": metrics, "selection_metric": selection_metric, "selection_value": metric_value})
             if metric_value > best:
                 best = metric_value
                 _save_final(bare, tokenizer, run_checkpoint / "model_final")
-            _save_checkpoint(bare, optimizer, scheduler, latest, {"completed_epochs": epoch + 1, "total_epochs": epochs, "best_metric": best, "selection_metric": selection_metric, "history": history})
+            _save_checkpoint(bare, optimizer, scheduler, latest, {"completed_epochs": epoch + 1, "pending_validation_epoch": None, "total_epochs": epochs, "best_metric": best, "selection_metric": selection_metric, "history": history})
             (run_checkpoint / "training_history.json").write_text(json.dumps(history, indent=2, sort_keys=True) + "\n")
             if status is not None:
                 status.heartbeat(f"epoch {epoch + 1}/{epochs}; {selection_metric}={metric_value:.6g}")
+        pending_validation_epoch = None
         _barrier()
 
 
@@ -425,7 +463,7 @@ def _main(cfg: dict[str, Any]) -> None:
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required")
     if _distributed():
-        dist.init_process_group("nccl")
+        _init_distributed(int(cfg["train"]["distributed_timeout_s"]))
     _seed_all(int(cfg["seed"]) + _rank())
     run_path = run_id_path(cfg, RUN_ID_PARAMS)
     run_checkpoint = Path(cfg["paths"]["checkpoint_root"]) / run_path
@@ -445,10 +483,10 @@ def _main(cfg: dict[str, Any]) -> None:
         _barrier()
         if _rank() != 0:
             if _distributed():
-                dist.destroy_process_group()
+                _destroy_distributed()
             return
         if _distributed():
-            dist.destroy_process_group()
+            _destroy_distributed()
         status.heartbeat("training complete; converting and evaluating")
         _evaluate(cfg, splits, run_checkpoint, eval_dir, status)
 

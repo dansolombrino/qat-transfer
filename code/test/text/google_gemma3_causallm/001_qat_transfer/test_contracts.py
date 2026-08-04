@@ -132,3 +132,9 @@ def test_converter_wrapper_imports_its_sibling_contract(tmp_path: Path) -> None:
 def test_accumulation_schedule_preserves_final_partial_window() -> None:
     assert [training_contract.optimizer_step_due(i, 807, 4) for i in range(803, 807)] == [True, False, False, True]
     assert [training_contract.accumulation_divisor(i, 807, 4) for i in range(803, 807)] == [4, 3, 3, 3]
+
+
+def test_pending_validation_checkpoint_skips_retraining() -> None:
+    assert training_contract.epoch_requires_training(0, None)
+    assert not training_contract.epoch_requires_training(0, 1)
+    assert training_contract.epoch_requires_training(1, 1)

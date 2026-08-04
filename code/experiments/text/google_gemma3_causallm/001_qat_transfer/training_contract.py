@@ -17,3 +17,8 @@ def optimizer_step_due(batch_index: int, num_batches: int, accumulation_steps: i
     """Return whether this microbatch closes an accumulation window."""
     accumulation_divisor(batch_index, num_batches, accumulation_steps)
     return (batch_index + 1) % accumulation_steps == 0 or batch_index + 1 == num_batches
+
+
+def epoch_requires_training(epoch: int, pending_validation_epoch: int | None) -> bool:
+    """Skip repeated training when resuming a checkpoint awaiting validation."""
+    return pending_validation_epoch != epoch + 1
