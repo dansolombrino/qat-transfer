@@ -16,6 +16,10 @@ max_grad_norm: ???
 seed: ???
 gpu: ???
 split: test
+# Training-budget multiplier, matching the finetune run being evaluated.
+# 1.0 is the schedule this repo has always run.
+epoch_mult: 1.0
+
 limit_num_epochs: null
 limit_num_batches: null
 log_to_file: false

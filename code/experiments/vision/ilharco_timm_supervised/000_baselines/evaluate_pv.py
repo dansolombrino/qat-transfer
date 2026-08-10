@@ -28,6 +28,7 @@ load_dotenv()
 
 log = logging.getLogger(__name__)
 
+from src.duration import checkpoint_epochs, mult_path_frag
 from src.pv_tuning import pv_path_frag
 from src.vision.ilharco_timm_supervised.modeling import ImageClassifier
 from src.vision.data.registry import get_dataset
@@ -113,9 +114,9 @@ def main(cfg: DictConfig):
 
     device = torch.device(f"cuda:{cfg.gpu}" if torch.cuda.is_available() else "cpu")
 
-    epochs = DATASET_NAME_TO_EPOCHS[
-        cfg.dataset_name
-    ] if cfg.limit_num_epochs is None else cfg.limit_num_epochs
+    epochs = checkpoint_epochs(
+        cfg.dataset_name, DATASET_NAME_TO_EPOCHS, cfg.limit_num_epochs
+    )
 
     ############################################################################
     # BEGIN checkpoint loading
@@ -145,6 +146,7 @@ def main(cfg: DictConfig):
         sanitize_timm_model_name(cfg.model_name),
         cfg.dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
+        mult_path_frag(cfg.epoch_mult),
         pv_frag,
         f"seed={cfg.seed}",
     ]
@@ -237,6 +239,7 @@ def main(cfg: DictConfig):
         sanitize_timm_model_name(cfg.model_name),
         cfg.dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
+        mult_path_frag(cfg.epoch_mult),
         pv_frag,
         f"seed={cfg.seed}",
     ]

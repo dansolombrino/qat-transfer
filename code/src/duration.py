@@ -233,6 +233,31 @@ def training_budget(dataset_name, epoch_mult, num_batches, accum_steps,
     return TrainingBudget(loop_epochs, max_steps, ckpt_epochs, duration)
 
 
+def checkpoint_epochs(dataset_name, epochs_table, limit_num_epochs=None):
+    """The epoch count in a checkpoint filename, derived without a dataloader.
+
+    This is the reader-side counterpart of ``training_budget``.  Every
+    ``evaluate_*.py`` and every transfer script reconstructs checkpoint paths
+    without ever building a dataset, so this deliberately depends only on the
+    epoch table and the dryrun limit -- never on ``num_batches``.  That is the
+    property that keeps a code-only clone able to name any checkpoint, and it is
+    why the filename records the 1x reference schedule rather than the realized
+    step count.
+
+    Note the semantics: ``min(table, limit)``, matching what the finetuners
+    write.  The readers previously used ``limit if limit is not None else
+    table``, which disagrees whenever a limit exceeds the table value -- the
+    writer would save one name and the reader look for another.  Readers follow
+    writers, not the reverse.
+    """
+    if dataset_name not in epochs_table:
+        raise KeyError(f"{dataset_name!r} has no entry in the epoch table")
+    base_epochs = epochs_table[dataset_name]
+    if limit_num_epochs is None:
+        return base_epochs
+    return min(base_epochs, limit_num_epochs)
+
+
 def run_meta(budget, num_batches, accum_steps, warmup_length):
     """Provenance for the realized budget, which no path component records.
 

@@ -20,6 +20,7 @@ from tqdm import tqdm
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from src.quantization import apply_ptq_
+from src.duration import checkpoint_epochs, mult_path_frag
 from src.text.data.common import DATASET_NAME_TO_EPOCHS
 from src.text.data.registry import get_dataset
 from src.vision.utils import random_tqdm_color, sanitize_hf_model_name, set_seed
@@ -116,8 +117,9 @@ def main(cfg: DictConfig):
 
     device = torch.device(f"cuda:{cfg.gpu}" if torch.cuda.is_available() else "cpu")
 
-    base_epochs = DATASET_NAME_TO_EPOCHS[cfg.dataset_name]
-    epochs = min(base_epochs, cfg.limit_num_epochs) if cfg.limit_num_epochs is not None else base_epochs
+    epochs = checkpoint_epochs(
+        cfg.dataset_name, DATASET_NAME_TO_EPOCHS, cfg.limit_num_epochs
+    )
 
     dataset = get_dataset(
         dataset_name=cfg.dataset_name,
@@ -143,6 +145,7 @@ def main(cfg: DictConfig):
         sanitize_hf_model_name(cfg.model_name),
         cfg.dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}_ml={cfg.max_length}",
+        mult_path_frag(cfg.epoch_mult),
         f"seed={cfg.seed}",
     ]
     if is_dryrun:
@@ -227,6 +230,7 @@ def main(cfg: DictConfig):
         sanitize_hf_model_name(cfg.model_name),
         cfg.dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}_ml={cfg.max_length}",
+        mult_path_frag(cfg.epoch_mult),
         f"ptq=bits={cfg.ptq.bits}_gran={cfg.ptq.granularity}_skip={skip_modules_tag}",
         f"seed={cfg.seed}",
     )

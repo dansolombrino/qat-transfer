@@ -12,6 +12,7 @@ load_dotenv()
 
 log = logging.getLogger(__name__)
 
+from src.duration import checkpoint_epochs, mult_path_frag
 from src.vision.ilharco_hf_clip.modeling import ImageClassifier, ImageEncoder
 from src.vision.ilharco_hf_clip.heads import get_classification_head
 from src.vision.data.registry import get_dataset
@@ -99,9 +100,9 @@ def main(cfg: DictConfig):
 
     device = torch.device(f"cuda:{cfg.gpu}" if torch.cuda.is_available() else "cpu")
 
-    epochs = DATASET_NAME_TO_EPOCHS[
-        cfg.dataset_name
-    ] if cfg.limit_num_epochs is None else cfg.limit_num_epochs
+    epochs = checkpoint_epochs(
+        cfg.dataset_name, DATASET_NAME_TO_EPOCHS, cfg.limit_num_epochs
+    )
 
     ############################################################################
     # BEGIN checkpoint loading
@@ -117,6 +118,7 @@ def main(cfg: DictConfig):
         sanitize_hf_model_name(cfg.model_name),
         cfg.dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
+        mult_path_frag(cfg.epoch_mult),
         f"seed={cfg.seed}",
     )
     checkpoint_path = os.path.join(checkpoint_dir, f"epoch_{epochs}.pt")
@@ -284,6 +286,7 @@ def main(cfg: DictConfig):
         sanitize_hf_model_name(cfg.model_name),
         cfg.dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
+        mult_path_frag(cfg.epoch_mult),
         f"ptq=bits={cfg.ptq.bits}_gran={cfg.ptq.granularity}_skip={skip_modules_tag}",
         f"seed={cfg.seed}",
     )
