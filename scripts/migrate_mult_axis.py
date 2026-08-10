@@ -25,14 +25,15 @@ Two independent reasons, either sufficient:
    nothing and is provably the same bytes (verified by inode identity, not by
    re-hashing 799 GiB).
 
-The seven grammars
+The eight grammars
 ------------------
 The mapping is not one rule.  Each phase family names its parameters
 differently, and the migration must reproduce *exactly* what the patched code
 now emits -- a divergence here is the single most dangerous failure mode in the
-whole change, because it would be silent.  ``--verify-construction`` exists for
-precisely that: it imports the real path builders and asserts the paths they
-produce are the paths this script created.
+whole change, because it would be silent.  It is checked empirically rather than
+by inspection: after migrating, the real readers are run against the stamped
+tree and their output is diffed against a pre-migration backup.  A mapping that
+disagrees with the code produces either an empty result or different numbers.
 
   1. baselines + checkpoints   insert ``mult=1`` after the ``optim=`` component
   2. transfer evaluations      ``src=X_seed=N`` -> ``src=X_seed=N_mult=1`` (and tgt)
@@ -41,6 +42,9 @@ produce are the paths this script created.
   5. 010 materialize run-id    insert ``mult=1`` after ``seed=N``
   6. 010 transfer run-id       insert ``smult=1``/``tmult=1`` after ``tseed=N``
   7. 005 alignment run-id      insert ``epoch_mult=1`` after ``epoch_policy=...``
+  8. rebuttal aggregates       ``smult=1``/``tmult=1`` after ``seed=N`` -- an
+                               aggregate spans a donor x receiver matrix, so it
+                               names both budgets rather than one
 
 Rule 1 and rule 2 are mutually exclusive by construction: a transfer path
 carries both an ``optim=`` component and ``src=``/``tgt=`` components, and there
@@ -53,7 +57,7 @@ Usage
     python scripts/migrate_mult_axis.py                      # dry run, default
     python scripts/migrate_mult_axis.py --yes                # act
     python scripts/migrate_mult_axis.py --revert             # undo via manifest
-    python scripts/migrate_mult_axis.py --verify-construction # code vs disk
+    python scripts/migrate_mult_axis.py --drop-legacy --yes   # retire pre-axis paths
 """
 
 import argparse
@@ -230,6 +234,41 @@ def apply(ops):
     return linked, existed
 
 
+def drop_legacy(manifest_path):
+    """Remove the pre-axis paths, once every gate has passed.
+
+    This cannot lose data.  Each legacy path is a hardlink to the same inode as
+    its stamped counterpart, so unlinking it drops the link count from 2 to 1 --
+    the bytes remain reachable under the stamped name.  Each removal is
+    nevertheless guarded: the destination must exist and must share the inode,
+    or the source is left alone.
+
+    There is a positive reason to do this rather than leave both trees standing.
+    While a legacy path exists, any reader that was missed during the migration
+    silently reads it and *appears* to work.  Removing it converts that from a
+    silent wrong answer into a loud failure.
+    """
+    data = json.loads(Path(manifest_path).read_text())
+    removed = skipped = 0
+    for src, dst in data["ops"]:
+        s, d = Path(src), Path(dst)
+        if s == d or not s.is_file():
+            skipped += 1
+            continue
+        if not d.is_file() or os.stat(s).st_ino != os.stat(d).st_ino:
+            print(f"[SKIP] no verified stamped twin for {src}", file=sys.stderr)
+            skipped += 1
+            continue
+        s.unlink()
+        removed += 1
+    for src, _dst in sorted(data["ops"], key=lambda o: -len(o[0])):
+        d = Path(src).parent
+        while d != Path(".") and d.is_dir() and not any(d.iterdir()):
+            d.rmdir()
+            d = d.parent
+    return removed, skipped
+
+
 def revert(manifest_path):
     data = json.loads(Path(manifest_path).read_text())
     removed = 0
@@ -254,13 +293,29 @@ def main():
     ap.add_argument("--yes", action="store_true",
                     help="actually create the hardlinks (default is a dry run)")
     ap.add_argument("--revert", action="store_true",
-                    help="remove everything recorded in the manifest")
+                    help="remove the stamped links recorded in the manifest")
+    ap.add_argument("--drop-legacy", action="store_true",
+                    help="remove the pre-axis paths, once every gate has passed. "
+                         "Cannot lose data: each is a hardlink sharing an inode "
+                         "with its stamped twin, and each removal is guarded on "
+                         "that twin existing.")
     ap.add_argument("--trees", nargs="+", default=list(TREES))
     ap.add_argument("--allow-dirty", action="store_true",
                     help="proceed even if the git tree has uncommitted changes")
     ap.add_argument("--limit", type=int, default=None,
                     help="plan only the first N operations (for a fast smoke test)")
     args = ap.parse_args()
+
+    if args.drop_legacy:
+        if not MANIFEST.exists():
+            raise SystemExit(f"no manifest at {MANIFEST}")
+        if not args.yes:
+            raise SystemExit("--drop-legacy is destructive to paths (not to data); "
+                             "pass --yes to confirm.")
+        removed, skipped = drop_legacy(MANIFEST)
+        print(f"removed {removed:,} legacy paths ({skipped:,} skipped); "
+              f"all bytes remain reachable under the stamped names")
+        return
 
     if args.revert:
         if not MANIFEST.exists():
