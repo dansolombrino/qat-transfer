@@ -314,25 +314,29 @@ def main():
     ap.add_argument("--trees", nargs="+", default=list(TREES))
     ap.add_argument("--allow-dirty", action="store_true",
                     help="proceed even if the git tree has uncommitted changes")
+    ap.add_argument("--manifest", default=str(MANIFEST),
+                    help="where to record the operations. Use a distinct file per "
+                         "tree so one migration's record cannot overwrite another's.")
     ap.add_argument("--limit", type=int, default=None,
                     help="plan only the first N operations (for a fast smoke test)")
     args = ap.parse_args()
+    manifest = Path(args.manifest)
 
     if args.drop_legacy:
-        if not MANIFEST.exists():
-            raise SystemExit(f"no manifest at {MANIFEST}")
+        if not manifest.exists():
+            raise SystemExit(f"no manifest at {manifest}")
         if not args.yes:
             raise SystemExit("--drop-legacy is destructive to paths (not to data); "
                              "pass --yes to confirm.")
-        removed, skipped = drop_legacy(MANIFEST)
+        removed, skipped = drop_legacy(manifest)
         print(f"removed {removed:,} legacy paths ({skipped:,} skipped); "
               f"all bytes remain reachable under the stamped names")
         return
 
     if args.revert:
-        if not MANIFEST.exists():
-            raise SystemExit(f"no manifest at {MANIFEST}; nothing to revert")
-        n = revert(MANIFEST)
+        if not manifest.exists():
+            raise SystemExit(f"no manifest at {manifest}; nothing to revert")
+        n = revert(manifest)
         print(f"removed {n:,} stamped links; legacy tree untouched throughout")
         return
 
@@ -361,9 +365,9 @@ def main():
         print("\nDRY RUN -- nothing written. Re-run with --yes to act.")
         return
 
-    MANIFEST.parent.mkdir(parents=True, exist_ok=True)
-    MANIFEST.write_text(json.dumps({"fragment": FRAG, "tag": TAG, "ops": ops}, indent=0))
-    print(f"\nmanifest written: {MANIFEST}")
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(json.dumps({"fragment": FRAG, "tag": TAG, "ops": ops}, indent=0))
+    print(f"\nmanifest written: {manifest}")
     linked, existed = apply(ops)
     print(f"linked {linked:,} files ({existed:,} already present)")
     print("Legacy tree is untouched. Verify, then remove it explicitly.")
