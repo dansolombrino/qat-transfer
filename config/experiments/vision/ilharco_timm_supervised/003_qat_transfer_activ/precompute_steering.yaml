@@ -27,6 +27,8 @@ steering_strategy: ???     # per_block | per_linear | per_attn_mlp
 source:
   dataset_names: ???       # list of donor dataset names to iterate over internally
   seed: ???
+  # Training-budget multiplier for this role's checkpoints.
+  epoch_mult: 1.0
   limit_num_epochs: null   # null -> DATASET_NAME_TO_EPOCHS[dataset_name]
 
 # Used to LOCATE the QAT source checkpoint. The donor is run in FULL PRECISION

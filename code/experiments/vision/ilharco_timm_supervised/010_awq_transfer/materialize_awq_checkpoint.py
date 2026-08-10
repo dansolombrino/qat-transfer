@@ -19,6 +19,7 @@ from torch import nn
 from common.run_id import guard_run_config, run_id_path
 from common.status import StatusWriter
 from src.awq import apply_awq_
+from src.duration import checkpoint_epochs, mult_path_frag, mult_tag
 from src.vision.data.common import DATASET_NAME_TO_EPOCHS, DATASET_NAME_TO_NUM_CLASSES
 from src.vision.data.registry import get_dataset
 from src.vision.ilharco_timm_supervised.modeling import ImageClassifier
@@ -49,16 +50,15 @@ def run_identity(cfg: DictConfig) -> dict:
         "model": sanitize_timm_model_name(cfg.model_name),
         "donor": cfg.dataset_name,
         "seed": cfg.seed,
+        "mult": mult_tag(cfg.epoch_mult),
         "optim": _optim_tag(cfg),
         "awq": _awq_tag(cfg),
     }
 
 
 def fp_checkpoint_path(cfg: DictConfig, dataset_name: str, seed: int) -> Path:
-    epochs = (
-        DATASET_NAME_TO_EPOCHS[dataset_name]
-        if cfg.limit_num_epochs is None
-        else cfg.limit_num_epochs
+    epochs = checkpoint_epochs(
+        dataset_name, DATASET_NAME_TO_EPOCHS, cfg.limit_num_epochs
     )
     return Path(
         os.environ["CHECKPOINT_BASE_PATH"],
@@ -71,6 +71,7 @@ def fp_checkpoint_path(cfg: DictConfig, dataset_name: str, seed: int) -> Path:
             f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}"
             f"_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}"
         ),
+        mult_path_frag(cfg.epoch_mult),
         f"seed={seed}",
         f"classifier_epoch_{epochs}.pt",
     )

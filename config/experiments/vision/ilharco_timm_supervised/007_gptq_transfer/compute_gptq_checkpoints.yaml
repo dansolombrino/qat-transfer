@@ -10,6 +10,9 @@ dataset_names: ???       # list of dataset names to materialize GPTQ(FP) checkpo
 batch_size: ???
 seed: ???
 gpu: ???
+# Training-budget multiplier of the checkpoints being read.
+epoch_mult: 1.0
+
 limit_num_epochs: null   # null -> DATASET_NAME_TO_EPOCHS[dataset_name]
 skip_existing: true      # skip datasets whose GPTQ checkpoint already exists
 

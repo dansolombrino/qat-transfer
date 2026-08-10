@@ -22,11 +22,15 @@ gpu: ???
 source:
   dataset_names: ???
   seed: ???
+  # Training-budget multiplier for this role's checkpoints.
+  epoch_mult: 1.0
   limit_num_epochs: null
 
 target:
   dataset_names: ???
   seed: ???
+  # Training-budget multiplier for this role's checkpoints.
+  epoch_mult: 1.0
   limit_num_epochs: null
 
 # Locates the QAT source checkpoint and records the QV's training grid.

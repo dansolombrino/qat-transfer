@@ -49,6 +49,7 @@ log = logging.getLogger(__name__)
 IS_SLURM = "SLURM_JOB_ID" in os.environ
 TQDM_KW = dict(disable=IS_SLURM, mininterval=1.0)
 
+from src.duration import checkpoint_epochs, mult_path_frag, role_path_frag
 from src.vision.ilharco_hf_clip.modeling import ImageClassifier, ImageEncoder
 from src.vision.ilharco_hf_clip.heads import get_classification_head
 from src.vision.data.registry import get_dataset
@@ -70,7 +71,7 @@ import torch
 from torch import nn
 
 
-def _fp_ckpt_path(cfg: DictConfig, dataset_name: str, seed: int, epochs: int) -> str:
+def _fp_ckpt_path(cfg: DictConfig, dataset_name: str, seed: int, epochs: int, epoch_mult) -> str:
     return os.path.join(
         os.environ['CHECKPOINT_BASE_PATH'],
         "vision",
@@ -79,12 +80,13 @@ def _fp_ckpt_path(cfg: DictConfig, dataset_name: str, seed: int, epochs: int) ->
         sanitize_hf_model_name(cfg.model_name),
         dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
+        mult_path_frag(epoch_mult),
         f"seed={seed}",
         f"epoch_{epochs}.pt",
     )
 
 
-def _qat_ckpt_path(cfg: DictConfig, dataset_name: str, seed: int, epochs: int) -> str:
+def _qat_ckpt_path(cfg: DictConfig, dataset_name: str, seed: int, epochs: int, epoch_mult) -> str:
     skip_modules_sorted = sorted(cfg.qat.skip_modules)
     skip_tag = "-".join(skip_modules_sorted) if skip_modules_sorted else "none"
     return os.path.join(
@@ -95,6 +97,7 @@ def _qat_ckpt_path(cfg: DictConfig, dataset_name: str, seed: int, epochs: int) -
         sanitize_hf_model_name(cfg.model_name),
         dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
+        mult_path_frag(epoch_mult),
         f"qat=bits={cfg.qat.bits}_gran={cfg.qat.granularity}_skip={skip_tag}",
         f"seed={seed}",
         f"epoch_{epochs}.pt",
@@ -177,16 +180,16 @@ def _run_pair(
 ):
     """Run QV transfer for a single (source, target) pair."""
 
-    src_epochs = DATASET_NAME_TO_EPOCHS[
-        source_dataset_name
-    ] if cfg.source.limit_num_epochs is None else cfg.source.limit_num_epochs
+    src_epochs = checkpoint_epochs(
+        source_dataset_name, DATASET_NAME_TO_EPOCHS, cfg.source.limit_num_epochs
+    )
 
     ############################################################################
     # BEGIN checkpoint paths
     ############################################################################
 
-    fp_source_path = _fp_ckpt_path(cfg, source_dataset_name, cfg.source.seed, src_epochs)
-    qat_source_path = _qat_ckpt_path(cfg, source_dataset_name, cfg.source.seed, src_epochs)
+    fp_source_path = _fp_ckpt_path(cfg, source_dataset_name, cfg.source.seed, src_epochs, cfg.source.epoch_mult)
+    qat_source_path = _qat_ckpt_path(cfg, source_dataset_name, cfg.source.seed, src_epochs, cfg.source.epoch_mult)
 
     if IS_SLURM:
         log.info("--- source=%s target=%s ---", source_dataset_name, target_dataset_name)
@@ -450,9 +453,9 @@ def _run_pair(
     qat_skip_tag = "-".join(sorted(cfg.qat.skip_modules)) if len(cfg.qat.skip_modules) > 0 else "none"
     ptq_skip_tag = "-".join(sorted(cfg.ptq.skip_modules)) if len(cfg.ptq.skip_modules) > 0 else "none"
 
-    fp_source_path = _fp_ckpt_path(cfg, source_dataset_name, cfg.source.seed, src_epochs)
-    qat_source_path = _qat_ckpt_path(cfg, source_dataset_name, cfg.source.seed, src_epochs)
-    fp_target_path = _fp_ckpt_path(cfg, target_dataset_name, cfg.target.seed, tgt_epochs)
+    fp_source_path = _fp_ckpt_path(cfg, source_dataset_name, cfg.source.seed, src_epochs, cfg.source.epoch_mult)
+    qat_source_path = _qat_ckpt_path(cfg, source_dataset_name, cfg.source.seed, src_epochs, cfg.source.epoch_mult)
+    fp_target_path = _fp_ckpt_path(cfg, target_dataset_name, cfg.target.seed, tgt_epochs, cfg.target.epoch_mult)
 
     eval_dir = os.path.join(
         evaluation_base_path,
@@ -462,8 +465,8 @@ def _run_pair(
         "vision",
         "qv_transfer",
         sanitize_hf_model_name(cfg.model_name),
-        f"src={source_dataset_name}_seed={cfg.source.seed}",
-        f"tgt={target_dataset_name}_seed={cfg.target.seed}",
+        role_path_frag("src", source_dataset_name, cfg.source.seed, cfg.source.epoch_mult),
+        role_path_frag("tgt", target_dataset_name, cfg.target.seed, cfg.target.epoch_mult),
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
         f"qat=bits={cfg.qat.bits}_gran={cfg.qat.granularity}_skip={qat_skip_tag}",
         f"ptq=bits={cfg.ptq.bits}_gran={cfg.ptq.granularity}_skip={ptq_skip_tag}",
@@ -582,15 +585,15 @@ def main(cfg: DictConfig):
             print(f"  Target {ti + 1}/{len(target_dataset_names)}: {target_dataset_name}")
             print(f"{'='*60}")
 
-        tgt_epochs = DATASET_NAME_TO_EPOCHS[
-            target_dataset_name
-        ] if cfg.target.limit_num_epochs is None else cfg.target.limit_num_epochs
+        tgt_epochs = checkpoint_epochs(
+        target_dataset_name, DATASET_NAME_TO_EPOCHS, cfg.target.limit_num_epochs
+    )
 
         ####################################################################
         # Load target checkpoint
         ####################################################################
 
-        fp_target_path = _fp_ckpt_path(cfg, target_dataset_name, cfg.target.seed, tgt_epochs)
+        fp_target_path = _fp_ckpt_path(cfg, target_dataset_name, cfg.target.seed, tgt_epochs, cfg.target.epoch_mult)
 
         if IS_SLURM:
             log.info("FP target  checkpoint: %s", fp_target_path)

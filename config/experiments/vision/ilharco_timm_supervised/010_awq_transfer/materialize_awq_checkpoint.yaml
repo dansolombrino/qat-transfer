@@ -12,6 +12,9 @@ dataset_name: ???
 batch_size: ???
 seed: ???
 gpu: ???
+# Training-budget multiplier of the checkpoints being read.
+epoch_mult: 1.0
+
 limit_num_epochs: null
 
 lr: ???

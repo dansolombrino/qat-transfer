@@ -32,7 +32,10 @@ from src.duration import (
     Duration,
     clamped_warmup,
     mult_path_frag,
+    mult_tag,
+    parse_role_frag,
     resolve_duration,
+    role_path_frag,
     run_meta,
     training_budget,
     unit_steps,
@@ -306,6 +309,51 @@ def test_training_budget():
 
 
 # ---------------------------------------------------------------------------
+# 6. Transfer-path role fragments
+# ---------------------------------------------------------------------------
+def test_role_fragments():
+    print("\n[6] role_path_frag / parse_role_frag round-trip")
+
+    check("src fragment literal",
+          role_path_frag("src", "Cars", 2038, 1.0) == "src=Cars_seed=2038_mult=1")
+    check("tgt fragment literal",
+          role_path_frag("tgt", "DTD", 2038, 4.0) == "tgt=DTD_seed=2038_mult=4")
+    check("fractional multiplier",
+          role_path_frag("src", "ImageNet", 2038, 0.25) == "src=ImageNet_seed=2038_mult=0.25")
+    check_raises("an invalid role is rejected", ValueError,
+                 role_path_frag, "donor", "Cars", 2038, 1.0)
+
+    # Round-trip over every real dataset name, including the awkward ones.
+    names = sorted(VISION_EPOCHS) + sorted(TEXT_EPOCHS) + ["Oxford-IIIT_Pet", "a_b-c_seed=x"]
+    ok = True
+    for name in names:
+        for mult in (1.0, 0.2, 0.25, 4.0, 4.8, 10.0):
+            for role in ("src", "tgt"):
+                frag = role_path_frag(role, name, 2038, mult)
+                got = parse_role_frag(frag)
+                if got is None or got.role != role or got.dataset != name \
+                        or got.seed != 2038 or got.epoch_mult != mult:
+                    ok = False
+                    print(f"  FAIL round-trip {frag!r} -> {got}")
+    check(f"round-trips for {len(names)} dataset names x 6 multipliers x 2 roles", ok)
+
+    # Donor and receiver must be independently expressible -- the whole point.
+    s = role_path_frag("src", "CIFAR10", 2038, 1.0)
+    t = role_path_frag("tgt", "DTD", 2038, 4.0)
+    check("donor and receiver budgets are independent",
+          parse_role_frag(s).epoch_mult == 1.0 and parse_role_frag(t).epoch_mult == 4.0)
+
+    # A legacy (pre-axis) fragment must NOT silently parse.
+    check("legacy fragment does not parse", parse_role_frag("src=Cars_seed=2038") is None)
+    check("garbage does not parse", parse_role_frag("nonsense") is None)
+
+    # mult_tag is the same canonicalisation without the prefix.
+    check("mult_tag drops the prefix", mult_tag(4.0) == "4" and mult_tag(0.25) == "0.25")
+    check("mult_tag agrees with mult_path_frag",
+          all(mult_path_frag(m) == "mult=" + mult_tag(m) for m in (1, 0.25, 4, 4.8, 10)))
+
+
+# ---------------------------------------------------------------------------
 def main():
     print(__doc__.strip().splitlines()[0])
     test_fragment_canonicalisation()
@@ -313,6 +361,7 @@ def main():
     test_scaling()
     test_warmup()
     test_training_budget()
+    test_role_fragments()
 
     print()
     if _failures:

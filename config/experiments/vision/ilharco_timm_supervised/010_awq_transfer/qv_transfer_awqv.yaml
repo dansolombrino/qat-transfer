@@ -21,11 +21,15 @@ max_grad_norm: ???
 source:
   dataset_name: ???
   seed: ???
+  # Training-budget multiplier for this role's checkpoints.
+  epoch_mult: 1.0
   limit_num_epochs: null
 
 target:
   dataset_name: ???
   seed: ???
+  # Training-budget multiplier for this role's checkpoints.
+  epoch_mult: 1.0
   limit_num_epochs: null
 
 qv:

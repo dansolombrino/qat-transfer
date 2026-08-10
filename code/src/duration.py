@@ -65,6 +65,7 @@ What lives here
 """
 
 import math
+import re
 from collections import namedtuple
 
 # ---------------------------------------------------------------------------
@@ -231,6 +232,65 @@ def training_budget(dataset_name, epoch_mult, num_batches, accum_steps,
         ckpt_epochs = min(ckpt_epochs, limit_num_epochs)
 
     return TrainingBudget(loop_epochs, max_steps, ckpt_epochs, duration)
+
+
+def mult_tag(epoch_mult):
+    """The canonical multiplier *number*, with no ``mult=`` prefix.
+
+    For the run-id based phases (009, 010), whose identity dicts use a
+    dash-separated style (``Cars-seed2038``) rather than the ``key=value``
+    directory grammar.  Routed through ``mult_path_frag`` so those phases get the
+    same canonicalisation -- otherwise 4 and 4.0 would drift apart there while
+    remaining unified everywhere else.
+    """
+    return mult_path_frag(epoch_mult)[len("mult="):]
+
+
+ROLE_FRAG_RX = re.compile(
+    r"^(?P<role>src|tgt)=(?P<dataset>.+?)_seed=(?P<seed>\d+)_mult=(?P<mult>[0-9]+(?:\.[0-9]+)?)$"
+)
+
+RoleFrag = namedtuple("RoleFrag", ["role", "dataset", "seed", "epoch_mult"])
+
+
+def role_path_frag(role, dataset_name, seed, epoch_mult):
+    """The ``src=``/``tgt=`` component of a transfer path.
+
+    Transfer paths name two datasets but carry a single shared ``optim=``
+    fragment, so a per-role budget cannot live beside it as a sibling component
+    the way it does in the baseline tree -- donor and receiver would have nowhere
+    to disagree.  It therefore rides inside these fragments, exactly as ``seed``
+    already does:
+
+        src=CIFAR10_seed=2038_mult=1 / tgt=DTD_seed=2038_mult=4
+
+    That asymmetry between the baseline and transfer grammars is not an
+    inconsistency introduced here; it is the one the tree already had for seeds.
+    """
+    if role not in ("src", "tgt"):
+        raise ValueError(f"role must be 'src' or 'tgt', got {role!r}")
+    return f"{role}={dataset_name}_seed={seed}_{mult_path_frag(epoch_mult)}"
+
+
+def parse_role_frag(fragment):
+    """Inverse of ``role_path_frag`` -> ``RoleFrag(role, dataset, seed, epoch_mult)``.
+
+    Roughly forty scripts -- every ``pick_best_alpha.py`` and most heatmap and
+    table plotters -- recover the donor and receiver names by applying their own
+    copy of ``^src=(.+?)_seed=\\d+$``.  Those copies all stop matching once the
+    fragment carries a multiplier, and several of them swallow the failure and
+    render an empty cell.  Parsing through one function instead means the
+    grammar has exactly one definition and one place to update.
+
+    Returns None if the fragment does not parse, so callers can count misses
+    rather than silently skipping.
+    """
+    m = ROLE_FRAG_RX.match(fragment)
+    if m is None:
+        return None
+    return RoleFrag(
+        m.group("role"), m.group("dataset"), int(m.group("seed")), float(m.group("mult"))
+    )
 
 
 def checkpoint_epochs(dataset_name, epochs_table, limit_num_epochs=None):

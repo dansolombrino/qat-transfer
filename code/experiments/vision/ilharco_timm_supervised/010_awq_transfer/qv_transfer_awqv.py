@@ -23,19 +23,22 @@ from src.vision.data.common import (
     DATASET_NAME_TO_NUM_CLASSES,
     maybe_dictionarize,
 )
+from src.duration import checkpoint_epochs, mult_path_frag, mult_tag
 from src.vision.data.registry import get_dataset
 from src.vision.ilharco_timm_supervised.modeling import ImageClassifier
 from src.vision.utils import accuracy, sanitize_timm_model_name, set_seed
 
 
 HEAD_PREFIX = "model.head."
-MATERIALIZE_RUN_ID_PARAMS = ["model", "donor", "seed", "optim", "awq"]
+MATERIALIZE_RUN_ID_PARAMS = ["model", "donor", "seed", "mult", "optim", "awq"]
 RUN_ID_PARAMS = [
     "model",
     "src",
     "tgt",
     "sseed",
     "tseed",
+    "smult",
+    "tmult",
     "optim",
     "awq",
     "alpha",
@@ -68,6 +71,7 @@ def materialize_identity(cfg: DictConfig) -> dict:
         "model": sanitize_timm_model_name(cfg.model_name),
         "donor": cfg.source.dataset_name,
         "seed": cfg.source.seed,
+        "mult": mult_tag(cfg.source.epoch_mult),
         "optim": _optim_tag(cfg),
         "awq": _awq_tag(cfg),
     }
@@ -80,6 +84,8 @@ def run_identity(cfg: DictConfig) -> dict:
         "tgt": cfg.target.dataset_name,
         "sseed": cfg.source.seed,
         "tseed": cfg.target.seed,
+        "smult": mult_tag(cfg.source.epoch_mult),
+        "tmult": mult_tag(cfg.target.epoch_mult),
         "optim": _optim_tag(cfg),
         "awq": _awq_tag(cfg),
         "alpha": float(cfg.qv.alpha),
@@ -88,12 +94,10 @@ def run_identity(cfg: DictConfig) -> dict:
 
 
 def fp_checkpoint_path(cfg: DictConfig, dataset_name: str, seed: int) -> Path:
-    limit = (
-        cfg.source.limit_num_epochs
-        if dataset_name == cfg.source.dataset_name
-        else cfg.target.limit_num_epochs
-    )
-    epochs = DATASET_NAME_TO_EPOCHS[dataset_name] if limit is None else limit
+    is_source = dataset_name == cfg.source.dataset_name
+    limit = cfg.source.limit_num_epochs if is_source else cfg.target.limit_num_epochs
+    epoch_mult = cfg.source.epoch_mult if is_source else cfg.target.epoch_mult
+    epochs = checkpoint_epochs(dataset_name, DATASET_NAME_TO_EPOCHS, limit)
     return Path(
         os.environ["CHECKPOINT_BASE_PATH"],
         "vision",
@@ -105,6 +109,7 @@ def fp_checkpoint_path(cfg: DictConfig, dataset_name: str, seed: int) -> Path:
             f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}"
             f"_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}"
         ),
+        mult_path_frag(epoch_mult),
         f"seed={seed}",
         f"classifier_epoch_{epochs}.pt",
     )

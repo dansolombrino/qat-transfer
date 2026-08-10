@@ -96,6 +96,7 @@ log = logging.getLogger(__name__)
 IS_SLURM = "SLURM_JOB_ID" in os.environ
 TQDM_KW = dict(disable=IS_SLURM, mininterval=1.0)
 
+from src.duration import checkpoint_epochs, mult_path_frag, mult_tag, role_path_frag
 from src.vision.ilharco_timm_supervised.modeling import ImageClassifier
 from src.vision.data.registry import get_dataset
 from src.vision.data.common import maybe_dictionarize, DATASET_NAME_TO_EPOCHS, DATASET_NAME_TO_NUM_CLASSES
@@ -139,8 +140,8 @@ def _run_identity(
     awq_skip = "-".join(sorted(cfg.awq.skip_modules)) or "none"
     return {
         "model": sanitize_timm_model_name(cfg.model_name),
-        "src": f"{source_dataset_name}-seed{cfg.source.seed}",
-        "tgt": f"{target_dataset_name}-seed{cfg.target.seed}",
+        "src": f"{source_dataset_name}-seed{cfg.source.seed}-mult{mult_tag(cfg.source.epoch_mult)}",
+        "tgt": f"{target_dataset_name}-seed{cfg.target.seed}-mult{mult_tag(cfg.target.epoch_mult)}",
         "optim": (
             f"lr{cfg.lr}-wd{cfg.wd}-ls{cfg.ls}-wl{cfg.wl}"
             f"-mgn{cfg.max_grad_norm}-bs{cfg.batch_size}"
@@ -158,7 +159,7 @@ def _run_identity(
     }
 
 
-def _fp_ckpt_dir(cfg: DictConfig, dataset_name: str, seed: int) -> str:
+def _fp_ckpt_dir(cfg: DictConfig, dataset_name: str, seed: int, epoch_mult) -> str:
     return os.path.join(
         os.environ['CHECKPOINT_BASE_PATH'],
         "vision",
@@ -167,11 +168,12 @@ def _fp_ckpt_dir(cfg: DictConfig, dataset_name: str, seed: int) -> str:
         sanitize_timm_model_name(cfg.model_name),
         dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
+        mult_path_frag(epoch_mult),
         f"seed={seed}",
     )
 
 
-def _qat_ckpt_dir(cfg: DictConfig, dataset_name: str, seed: int) -> str:
+def _qat_ckpt_dir(cfg: DictConfig, dataset_name: str, seed: int, epoch_mult) -> str:
     skip_modules_sorted = sorted(cfg.qat.skip_modules)
     skip_tag = "-".join(skip_modules_sorted) if skip_modules_sorted else "none"
     return os.path.join(
@@ -182,6 +184,7 @@ def _qat_ckpt_dir(cfg: DictConfig, dataset_name: str, seed: int) -> str:
         sanitize_timm_model_name(cfg.model_name),
         dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
+        mult_path_frag(epoch_mult),
         f"qat=bits={cfg.qat.bits}_gran={cfg.qat.granularity}_skip={skip_tag}",
         f"seed={seed}",
     )
@@ -288,9 +291,9 @@ def _run_pair(
 ):
     """Run QV transfer + AWQ for a single (source, target) pair, all alphas."""
 
-    src_epochs = DATASET_NAME_TO_EPOCHS[
-        source_dataset_name
-    ] if cfg.source.limit_num_epochs is None else cfg.source.limit_num_epochs
+    src_epochs = checkpoint_epochs(
+        source_dataset_name, DATASET_NAME_TO_EPOCHS, cfg.source.limit_num_epochs
+    )
 
     ############################################################################
     # BEGIN alpha selection (alpha=0 is donor-independent: self-pair only)
@@ -333,8 +336,8 @@ def _run_pair(
     # BEGIN checkpoint paths
     ############################################################################
 
-    fp_src_dir = _fp_ckpt_dir(cfg, source_dataset_name, cfg.source.seed)
-    qat_src_dir = _qat_ckpt_dir(cfg, source_dataset_name, cfg.source.seed)
+    fp_src_dir = _fp_ckpt_dir(cfg, source_dataset_name, cfg.source.seed, cfg.source.epoch_mult)
+    qat_src_dir = _qat_ckpt_dir(cfg, source_dataset_name, cfg.source.seed, cfg.source.epoch_mult)
 
     fp_source_path = os.path.join(fp_src_dir, f"classifier_epoch_{src_epochs}.pt")
     qat_source_path = os.path.join(qat_src_dir, f"classifier_epoch_{src_epochs}.pt")
@@ -740,13 +743,13 @@ def _run_pair_alpha_impl(
     # BEGIN save results
     ############################################################################
 
-    fp_src_dir = _fp_ckpt_dir(cfg, source_dataset_name, cfg.source.seed)
-    qat_src_dir = _qat_ckpt_dir(cfg, source_dataset_name, cfg.source.seed)
+    fp_src_dir = _fp_ckpt_dir(cfg, source_dataset_name, cfg.source.seed, cfg.source.epoch_mult)
+    qat_src_dir = _qat_ckpt_dir(cfg, source_dataset_name, cfg.source.seed, cfg.source.epoch_mult)
     fp_source_path_for_results = os.path.join(fp_src_dir, f"classifier_epoch_{src_epochs}.pt")
     qat_source_path_for_results = os.path.join(qat_src_dir, f"classifier_epoch_{src_epochs}.pt")
 
-    fp_tgt_dir = _fp_ckpt_dir(cfg, target_dataset_name, cfg.target.seed)
-    qat_tgt_dir = _qat_ckpt_dir(cfg, target_dataset_name, cfg.target.seed)
+    fp_tgt_dir = _fp_ckpt_dir(cfg, target_dataset_name, cfg.target.seed, cfg.target.epoch_mult)
+    qat_tgt_dir = _qat_ckpt_dir(cfg, target_dataset_name, cfg.target.seed, cfg.target.epoch_mult)
     fp_target_path_for_results = os.path.join(fp_tgt_dir, f"classifier_epoch_{tgt_epochs}.pt")
     qat_target_path_for_results = os.path.join(qat_tgt_dir, f"classifier_epoch_{tgt_epochs}.pt")
 
@@ -868,9 +871,9 @@ def main(cfg: DictConfig):
             print(f"  Target {ti + 1}/{len(target_dataset_names)}: {target_dataset_name}")
             print(f"{'='*60}")
 
-        tgt_epochs = DATASET_NAME_TO_EPOCHS[
-            target_dataset_name
-        ] if cfg.target.limit_num_epochs is None else cfg.target.limit_num_epochs
+        tgt_epochs = checkpoint_epochs(
+        target_dataset_name, DATASET_NAME_TO_EPOCHS, cfg.target.limit_num_epochs
+    )
 
         num_classes = DATASET_NAME_TO_NUM_CLASSES[target_dataset_name]
 
@@ -878,8 +881,8 @@ def main(cfg: DictConfig):
         # Load target checkpoints
         ####################################################################
 
-        fp_tgt_dir = _fp_ckpt_dir(cfg, target_dataset_name, cfg.target.seed)
-        qat_tgt_dir = _qat_ckpt_dir(cfg, target_dataset_name, cfg.target.seed)
+        fp_tgt_dir = _fp_ckpt_dir(cfg, target_dataset_name, cfg.target.seed, cfg.target.epoch_mult)
+        qat_tgt_dir = _qat_ckpt_dir(cfg, target_dataset_name, cfg.target.seed, cfg.target.epoch_mult)
 
         fp_target_path = os.path.join(fp_tgt_dir, f"classifier_epoch_{tgt_epochs}.pt")
         qat_target_path = os.path.join(qat_tgt_dir, f"classifier_epoch_{tgt_epochs}.pt")

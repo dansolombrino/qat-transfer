@@ -41,6 +41,7 @@ log = logging.getLogger(__name__)
 IS_SLURM = "SLURM_JOB_ID" in os.environ
 TQDM_KW = dict(disable=IS_SLURM, mininterval=1.0)
 
+from src.duration import checkpoint_epochs, mult_path_frag, role_path_frag
 from src.vision.ilharco_timm_supervised.modeling import ImageClassifier
 from src.vision.data.registry import get_dataset
 from src.vision.data.common import maybe_dictionarize, DATASET_NAME_TO_EPOCHS, DATASET_NAME_TO_NUM_CLASSES
@@ -144,16 +145,16 @@ def _capture_means(classifier, taps, loader, device, limit_num_batches):
 def _run_one_source(cfg: DictConfig, source_dataset_name: str, device: torch.device):
     """Compute and cache the steering vectors for a single source/donor dataset."""
 
-    src_epochs = DATASET_NAME_TO_EPOCHS[
-        source_dataset_name
-    ] if cfg.source.limit_num_epochs is None else cfg.source.limit_num_epochs
+    src_epochs = checkpoint_epochs(
+        source_dataset_name, DATASET_NAME_TO_EPOCHS, cfg.source.limit_num_epochs
+    )
 
     ############################################################################
     # BEGIN checkpoint paths
     ############################################################################
 
-    fp_src_dir = _fp_ckpt_dir(cfg, source_dataset_name, cfg.source.seed)
-    qat_src_dir = _qat_ckpt_dir(cfg, source_dataset_name, cfg.source.seed)
+    fp_src_dir = _fp_ckpt_dir(cfg, source_dataset_name, cfg.source.seed, cfg.source.epoch_mult)
+    qat_src_dir = _qat_ckpt_dir(cfg, source_dataset_name, cfg.source.seed, cfg.source.epoch_mult)
 
     fp_source_path = os.path.join(fp_src_dir, f"classifier_epoch_{src_epochs}.pt")
     qat_source_path = os.path.join(qat_src_dir, f"classifier_epoch_{src_epochs}.pt")

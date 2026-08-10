@@ -51,6 +51,7 @@ TQDM_KW = dict(disable=IS_SLURM, mininterval=1.0)
 
 from src.vision.ilharco_timm_supervised.modeling import ImageClassifier
 from src.vision.data.registry import get_dataset
+from src.duration import checkpoint_epochs, mult_path_frag
 from src.vision.data.common import DATASET_NAME_TO_EPOCHS, DATASET_NAME_TO_NUM_CLASSES
 from src.vision.utils import sanitize_timm_model_name, set_seed
 from src.gptq import apply_gptq_
@@ -71,6 +72,7 @@ def _fp_ckpt_dir(cfg: DictConfig, dataset_name: str) -> str:
         sanitize_timm_model_name(cfg.model_name),
         dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
+        mult_path_frag(cfg.epoch_mult),
         f"seed={cfg.seed}",
     )
 
@@ -86,6 +88,7 @@ def _gptq_ckpt_dir(cfg: DictConfig, dataset_name: str) -> str:
         sanitize_timm_model_name(cfg.model_name),
         dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
+        mult_path_frag(cfg.epoch_mult),
         f"gptq=bits={cfg.gptq.bits}_gran={cfg.gptq.granularity}_skip={skip_tag}"
         f"_ncal={cfg.gptq.num_calib_batches}_percdamp={cfg.gptq.percdamp}_actorder={cfg.gptq.actorder}",
         f"seed={cfg.seed}",
@@ -119,9 +122,9 @@ def main(cfg: DictConfig):
             print(f"  Dataset {di + 1}/{len(dataset_names)}: {dataset_name}")
             print(f"{'='*60}")
 
-        epochs = DATASET_NAME_TO_EPOCHS[
-            dataset_name
-        ] if cfg.limit_num_epochs is None else cfg.limit_num_epochs
+        epochs = checkpoint_epochs(
+            dataset_name, DATASET_NAME_TO_EPOCHS, cfg.limit_num_epochs
+        )
 
         gptq_dir = _gptq_ckpt_dir(cfg, dataset_name)
         gptq_path = os.path.join(gptq_dir, f"classifier_epoch_{epochs}.pt")
