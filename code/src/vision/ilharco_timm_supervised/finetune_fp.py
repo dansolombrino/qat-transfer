@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from dotenv import load_dotenv
 load_dotenv()
 
+import json
 import logging
 import os
 
@@ -25,9 +26,10 @@ TQDM_KW = dict(disable=IS_SLURM, mininterval=1.0)
 LOG_EVERY = 50
 REFERENCE_BATCH_SIZE = 128
 
+from src.duration import clamped_warmup, mult_path_frag, run_meta, training_budget
 from src.vision.data.common import (
-    DATASET_NAME_TO_NUM_CLASSES, 
-    DATASET_NAME_TO_EPOCHS, 
+    DATASET_NAME_TO_NUM_CLASSES,
+    DATASET_NAME_TO_EPOCHS,
     maybe_dictionarize
 )
 from src.vision.data.registry import get_dataset
@@ -74,6 +76,7 @@ def main(cfg: DictConfig) -> None:
         sanitize_timm_model_name(cfg.model_name),
         cfg.dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
+        mult_path_frag(cfg.epoch_mult),
         f"seed={cfg.seed}",
     ]
     if is_dryrun:
@@ -112,22 +115,27 @@ def main(cfg: DictConfig) -> None:
         pprint(list(classifier.state_dict().keys()), expand_all=True)
         pprint(classifier, expand_all=True)
 
-    epochs = DATASET_NAME_TO_EPOCHS[cfg.dataset_name]
-    epochs = (
-        min(epochs, cfg.limit_num_epochs)
-        if cfg.limit_num_epochs is not None
-        else epochs
-    )
     num_batches = len(dataset.train_loader)
     assert REFERENCE_BATCH_SIZE % cfg.batch_size == 0, (
         f"batch_size={cfg.batch_size} must evenly divide {REFERENCE_BATCH_SIZE}"
     )
     accum_steps = REFERENCE_BATCH_SIZE // cfg.batch_size
 
+    # Training budget. `epoch_mult` scales this dataset's schedule; mult=1.0 is
+    # pinned to reproduce the pre-multiplier behaviour exactly, so the loop still
+    # runs every epoch to completion and the max_steps break never fires.
+    budget = training_budget(
+        cfg.dataset_name, cfg.epoch_mult, num_batches, accum_steps,
+        DATASET_NAME_TO_EPOCHS, cfg.limit_num_epochs,
+    )
+    epochs = budget.loop_epochs
+    max_steps = budget.max_steps
+    ckpt_epochs = budget.ckpt_epochs
+
     # Optimizer / scheduler / loss
     params = [p for p in classifier.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(params, lr=cfg.lr, weight_decay=cfg.wd)
-    scheduler = cosine_lr(optimizer, cfg.lr, cfg.wl, epochs * num_batches // accum_steps)
+    scheduler = cosine_lr(optimizer, cfg.lr, clamped_warmup(cfg.wl, max_steps), max_steps)
     loss_fn = (
         LabelSmoothing(cfg.ls) if cfg.ls > 0 else torch.nn.CrossEntropyLoss()
     )
@@ -136,7 +144,10 @@ def main(cfg: DictConfig) -> None:
     epoch_bar = tqdm(
         range(epochs), desc="epochs", colour=random_tqdm_color(), **TQDM_KW
     )
+    budget_exhausted = False
     for epoch in epoch_bar:
+        if budget_exhausted:
+            break
         classifier.train()
         train_bar = tqdm(
             dataset.train_loader,
@@ -181,6 +192,13 @@ def main(cfg: DictConfig) -> None:
 
                 optimizer.zero_grad()
                 accum_loss = 0.0
+
+                # Stop mid-epoch once the budget is spent. At mult=1.0 max_steps
+                # equals the full schedule, so this never fires and the run is
+                # identical to the pre-multiplier behaviour.
+                if opt_step + 1 >= max_steps:
+                    budget_exhausted = True
+                    break
 
         # Per-epoch validation
         classifier.eval()
@@ -253,11 +271,19 @@ def main(cfg: DictConfig) -> None:
     else:
         print(f"Final test accuracy: {test_acc:.4f}")
 
-    # Save classifier and head checkpoints separately
-    classifier_path = os.path.join(save_dir, f"classifier_epoch_{epochs}.pt")
+    # Save classifier and head checkpoints separately. The filename names the 1x
+    # reference schedule, not the realized one -- see resolve_duration.
+    classifier_path = os.path.join(save_dir, f"classifier_epoch_{ckpt_epochs}.pt")
     classifier.save(classifier_path)
-    head_path = os.path.join(save_dir, f"head_epoch_{epochs}.pt")
+    head_path = os.path.join(save_dir, f"head_epoch_{ckpt_epochs}.pt")
     torch.save(classifier.model.head, head_path)
+
+    # The realized budget is not recoverable from the path, so record it.
+    meta = run_meta(budget, num_batches, accum_steps, cfg.wl)
+    meta["final_test_accuracy"] = test_acc
+    meta["classifier_path"] = classifier_path
+    with open(os.path.join(save_dir, "run_meta.json"), "w") as f:
+        json.dump(meta, f, indent=2)
 
 
 if __name__ == "__main__":

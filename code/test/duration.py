@@ -33,6 +33,8 @@ from src.duration import (
     clamped_warmup,
     mult_path_frag,
     resolve_duration,
+    run_meta,
+    training_budget,
     unit_steps,
 )
 from src.text.data.common import DATASET_NAME_TO_EPOCHS as TEXT_EPOCHS
@@ -256,12 +258,61 @@ def test_warmup():
 
 
 # ---------------------------------------------------------------------------
+# 5. training_budget and its interaction with limit_num_epochs
+# ---------------------------------------------------------------------------
+def test_training_budget():
+    print("\n[5] training_budget composes the multiplier with the dryrun knob")
+
+    # Without a limit, it is just resolve_duration destructured.
+    b = training_budget("Cars", 1.0, 58, 1, VISION_EPOCHS, None)
+    check("1x Cars: loop_epochs == 35", b.loop_epochs == 35)
+    check("1x Cars: max_steps == 2030", b.max_steps == 2030)
+    check("1x Cars: ckpt_epochs == 35", b.ckpt_epochs == 35)
+
+    # limit_num_epochs truncates and never extends -- the property that keeps it
+    # orthogonal to the multiplier.
+    lim = training_budget("Cars", 1.0, 58, 1, VISION_EPOCHS, 2)
+    check("limit=2 truncates loop_epochs", lim.loop_epochs == 2)
+    check("limit=2 truncates max_steps to 116", lim.max_steps == 116, f"got {lim.max_steps}")
+    check("limit=2 truncates the checkpoint name", lim.ckpt_epochs == 2)
+
+    big = training_budget("Cars", 1.0, 58, 1, VISION_EPOCHS, 999)
+    check("limit above the schedule never extends it",
+          (big.loop_epochs, big.max_steps, big.ckpt_epochs) == (35, 2030, 35),
+          f"got {big}")
+
+    # A limit applied on top of a multiplier truncates the *scaled* budget.
+    scaled = training_budget("Cars", 4.0, 58, 1, VISION_EPOCHS, None)
+    scaled_lim = training_budget("Cars", 4.0, 58, 1, VISION_EPOCHS, 10)
+    check("mult=4 Cars is 140 epochs / 8120 steps",
+          (scaled.loop_epochs, scaled.max_steps) == (140, 8120), f"got {scaled}")
+    check("mult=4 with limit=10 truncates to 10 epochs / 580 steps",
+          (scaled_lim.loop_epochs, scaled_lim.max_steps) == (10, 580), f"got {scaled_lim}")
+    check("mult=4 with a limit keeps ckpt_epochs at min(base, limit)",
+          scaled_lim.ckpt_epochs == 10)
+
+    # Truncation must never produce a zero-step budget.
+    tiny = training_budget("Flowers102", 0.25, 8, 1, VISION_EPOCHS, 1)
+    check("truncation never yields zero steps", tiny.max_steps >= 1, f"got {tiny.max_steps}")
+
+    # run_meta carries what no path component records.
+    meta = run_meta(scaled, 58, 1, 500)
+    check("run_meta records the multiplier", meta["epoch_mult"] == 4.0)
+    check("run_meta records the realized step count", meta["max_steps"] == 8120)
+    check("run_meta records the reference schedule", meta["base_epochs"] == 35)
+    check("run_meta records the clamped warmup", meta["warmup_length"] == 500)
+    check("run_meta tolerates a family with no warmup (text)",
+          run_meta(scaled, 58, 1, None)["warmup_length"] is None)
+
+
+# ---------------------------------------------------------------------------
 def main():
     print(__doc__.strip().splitlines()[0])
     test_fragment_canonicalisation()
     test_unit_invariant()
     test_scaling()
     test_warmup()
+    test_training_budget()
 
     print()
     if _failures:

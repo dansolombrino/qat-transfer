@@ -198,6 +198,63 @@ def resolve_duration(dataset_name, epoch_mult, num_batches, accum_steps, epochs_
     return Duration(max_steps, loop_epochs, base_epochs, value)
 
 
+TrainingBudget = namedtuple(
+    "TrainingBudget", ["loop_epochs", "max_steps", "ckpt_epochs", "duration"]
+)
+
+
+def training_budget(dataset_name, epoch_mult, num_batches, accum_steps,
+                    epochs_table, limit_num_epochs=None):
+    """The three numbers every finetuner needs, derived once rather than ten times.
+
+    ``loop_epochs``  how many epochs to iterate.
+    ``max_steps``    scheduler length, and the optimizer-step count at which the
+                     loop breaks.
+    ``ckpt_epochs``  the number that goes in the checkpoint filename.
+
+    ``limit_num_epochs`` is the pre-existing dryrun knob and stays orthogonal to
+    the multiplier: it *truncates* whatever budget the multiplier asked for and
+    never extends it.  Clamping rather than overriding is deliberate -- it is
+    what the finetuners already do, and the filename must name what was actually
+    written, so the readers are aligned to the writers rather than the reverse.
+    """
+    duration = resolve_duration(
+        dataset_name, epoch_mult, num_batches, accum_steps, epochs_table
+    )
+    loop_epochs = duration.loop_epochs
+    max_steps = duration.max_steps
+    ckpt_epochs = duration.base_epochs
+
+    if limit_num_epochs is not None:
+        loop_epochs = min(loop_epochs, limit_num_epochs)
+        max_steps = min(max_steps, max(1, loop_epochs * num_batches // accum_steps))
+        ckpt_epochs = min(ckpt_epochs, limit_num_epochs)
+
+    return TrainingBudget(loop_epochs, max_steps, ckpt_epochs, duration)
+
+
+def run_meta(budget, num_batches, accum_steps, warmup_length):
+    """Provenance for the realized budget, which no path component records.
+
+    The ``mult=`` fragment names the multiplier, and the filename names the 1x
+    reference schedule, but neither says how many optimizer steps actually ran --
+    that depends on the loader shape.  ``002_cost_amortization`` reconstructs
+    exactly this quantity today by multiplying epochs by dataset size; recording
+    it at source turns that derivation into a measurement.
+    """
+    return {
+        "epoch_mult": budget.duration.epoch_mult,
+        "base_epochs": budget.duration.base_epochs,
+        "loop_epochs": budget.loop_epochs,
+        "max_steps": budget.max_steps,
+        "ckpt_epochs": budget.ckpt_epochs,
+        "num_batches": num_batches,
+        "accum_steps": accum_steps,
+        "warmup_length": clamped_warmup(warmup_length, budget.max_steps)
+        if warmup_length is not None else None,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Warmup
 # ---------------------------------------------------------------------------
