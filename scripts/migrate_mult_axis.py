@@ -141,6 +141,18 @@ def stamp(rel_parts):
         parts[i + 1:i + 1] = [f"epoch_mult={TAG}"]
         return parts
 
+    # (9) plots. A figure is a donor x receiver matrix, so it names both budgets,
+    #     and they go after seed= rather than after optim= -- matching what the
+    #     visualization scripts now emit, which differs from the baseline trees.
+    #     Checked before the optim= rule below, which would otherwise claim these.
+    if parts and parts[0] == "plots":
+        seed = [i for i, p in enumerate(parts) if RE_SEED.match(p)]
+        if seed:
+            i = seed[0]
+            parts[i + 1:i + 1] = [f"smult={TAG}", f"tmult={TAG}"]
+            return parts
+        return None
+
     # (1) everything with an optim= anchor
     optim = [i for i, p in enumerate(parts) if RE_OPTIM.match(p)]
     if optim:
