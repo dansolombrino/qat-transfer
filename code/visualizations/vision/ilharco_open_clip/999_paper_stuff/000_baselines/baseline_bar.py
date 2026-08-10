@@ -115,24 +115,24 @@ def _ptq_frag(args):
 # ---------------------------------------------------------------------------
 # Per-baseline path builders
 # ---------------------------------------------------------------------------
-def _fp_path(model_dir, dataset, seed, optim_frag):
+def _fp_path(model_dir, dataset, seed, optim_frag, *, target_epoch_mult):
     return os.path.join(
         EVAL_ROOT_BASELINES, "fp", model_dir, dataset,
-        optim_frag, f"seed={seed}", "eval_results.json",
+        optim_frag, mult_path_frag(target_epoch_mult), f"seed={seed}", "eval_results.json",
     )
 
 
-def _qat_path(model_dir, dataset, seed, optim_frag, qat_frag):
+def _qat_path(model_dir, dataset, seed, optim_frag, qat_frag, *, target_epoch_mult):
     return os.path.join(
         EVAL_ROOT_BASELINES, "qat", model_dir, dataset,
-        optim_frag, qat_frag, f"seed={seed}", "eval_results.json",
+        optim_frag, mult_path_frag(target_epoch_mult), qat_frag, f"seed={seed}", "eval_results.json",
     )
 
 
-def _fp_ptq_path(model_dir, dataset, seed, optim_frag, ptq_frag):
+def _fp_ptq_path(model_dir, dataset, seed, optim_frag, ptq_frag, *, target_epoch_mult):
     return os.path.join(
         EVAL_ROOT_BASELINES, "fp_ptq", model_dir, dataset,
-        optim_frag, ptq_frag, f"seed={seed}", "eval_results.json",
+        optim_frag, mult_path_frag(target_epoch_mult), ptq_frag, f"seed={seed}", "eval_results.json",
     )
 
 
@@ -161,15 +161,15 @@ def load_data(model_dir, args, optim_frag, qat_frag, ptq_frag):
     data = {}
     for dataset in datasets:
         ft_acc = _load_value(
-            _fp_path(model_dir, dataset, args.seed, optim_frag),
+            _fp_path(model_dir, dataset, args.seed, optim_frag, target_epoch_mult=args.target_epoch_mult),
             TEST_ACC_KEY,
         )
         qat_acc = _load_value(
-            _qat_path(model_dir, dataset, args.seed, optim_frag, qat_frag),
+            _qat_path(model_dir, dataset, args.seed, optim_frag, qat_frag, target_epoch_mult=args.target_epoch_mult),
             TEST_ACC_KEY,
         )
         ptq_acc = _load_value(
-            _fp_ptq_path(model_dir, dataset, args.seed, optim_frag, ptq_frag),
+            _fp_ptq_path(model_dir, dataset, args.seed, optim_frag, ptq_frag, target_epoch_mult=args.target_epoch_mult),
             TEST_ACC_KEY,
         )
         data[dataset] = {"ft": ft_acc, "qat": qat_acc, "ptq": ptq_acc}

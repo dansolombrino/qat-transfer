@@ -200,19 +200,19 @@ def _load_value(path, key, misses):
 # ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
-def load_data(model_dir, optim_frag, seed, qat_frag, ptq_frag, misses):
+def load_data(model_dir, optim_frag, seed, qat_frag, ptq_frag, misses, *, target_epoch_mult):
     datasets = _swapped_dataset_order(DATASET_NAME_TO_EPOCHS)
     data = {}
     for dataset in datasets:
         ft_acc = _load_value(os.path.join(
             EVAL_ROOT_BASELINES, "fp", model_dir, dataset,
-            optim_frag, f"seed={seed}", "eval_results.json"), TEST_ACC_KEY, misses)
+            optim_frag, mult_path_frag(target_epoch_mult), f"seed={seed}", "eval_results.json"), TEST_ACC_KEY, misses)
         qat_acc = _load_value(os.path.join(
             EVAL_ROOT_BASELINES, "qat", model_dir, dataset,
-            optim_frag, qat_frag, f"seed={seed}", "eval_results.json"), TEST_ACC_KEY, misses)
+            optim_frag, mult_path_frag(target_epoch_mult), qat_frag, f"seed={seed}", "eval_results.json"), TEST_ACC_KEY, misses)
         ptq_acc = _load_value(os.path.join(
             EVAL_ROOT_BASELINES, "fp_ptq", model_dir, dataset,
-            optim_frag, ptq_frag, f"seed={seed}", "eval_results.json"), TEST_ACC_KEY, misses)
+            optim_frag, mult_path_frag(target_epoch_mult), ptq_frag, f"seed={seed}", "eval_results.json"), TEST_ACC_KEY, misses)
         data[dataset] = {"ft": ft_acc, "qat": qat_acc, "ptq": ptq_acc}
     return data
 
@@ -299,7 +299,7 @@ def main():
         display = MODEL_DISPLAY_NAMES.get(model_name, model_name)
         print(f"  Loading {display} ({of.rsplit('_', 1)[-1]}) ...")
         before = len(misses)
-        data = load_data(model_dir, of, args.seed, qf, pf, misses)
+        data = load_data(model_dir, of, args.seed, qf, pf, misses, target_epoch_mult=args.target_epoch_mult)
         model_misses = len(misses) - before
         expected = 3 * len(DATASET_NAME_TO_EPOCHS)
         if model_misses:

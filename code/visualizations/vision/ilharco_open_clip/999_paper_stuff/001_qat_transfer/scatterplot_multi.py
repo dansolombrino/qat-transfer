@@ -21,6 +21,7 @@ if str(_CODE_DIR) not in sys.path:
 
 os.chdir(_PROJECT_ROOT)
 
+from src.duration import mult_path_frag, role_path_frag
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -65,6 +66,10 @@ def parse_args():
     parser.add_argument("--pretrained-tags", required=True, nargs=3)
     parser.add_argument("--batch-sizes",     required=True, type=int, nargs=3)
     parser.add_argument("--seed",            required=True, type=int)
+    parser.add_argument("--source-epoch-mult", required=True, type=float,
+                        help="Training-budget multiplier of the DONOR checkpoints.")
+    parser.add_argument("--target-epoch-mult", required=True, type=float,
+                        help="Training-budget multiplier of the RECEIVER checkpoints.")
 
     parser.add_argument("--optim",           required=True, choices=["adamw", "sgd"])
     parser.add_argument("--lr",              required=True, type=float)
@@ -108,17 +113,17 @@ def _ptq_frag(args):
 # ---------------------------------------------------------------------------
 # Per-baseline path builders
 # ---------------------------------------------------------------------------
-def _fp_ptq_path(model_dir, dataset, seed, optim_frag, ptq_frag):
+def _fp_ptq_path(model_dir, dataset, seed, optim_frag, ptq_frag, *, target_epoch_mult):
     return os.path.join(
         EVAL_ROOT_BASELINES, "fp_ptq", model_dir, dataset,
-        optim_frag, ptq_frag, f"seed={seed}", "eval_results.json",
+        optim_frag, mult_path_frag(target_epoch_mult), ptq_frag, f"seed={seed}", "eval_results.json",
     )
 
 
-def _qat_ptq_path(model_dir, dataset, seed, optim_frag, qat_frag, ptq_frag):
+def _qat_ptq_path(model_dir, dataset, seed, optim_frag, qat_frag, ptq_frag, *, target_epoch_mult):
     return os.path.join(
         EVAL_ROOT_BASELINES, "qat_ptq", model_dir, dataset,
-        optim_frag, qat_frag, ptq_frag, f"seed={seed}", "eval_results.json",
+        optim_frag, mult_path_frag(target_epoch_mult), qat_frag, ptq_frag, f"seed={seed}", "eval_results.json",
     )
 
 
@@ -126,11 +131,11 @@ def _qat_ptq_path(model_dir, dataset, seed, optim_frag, qat_frag, ptq_frag):
 # QV transfer path builders
 # ---------------------------------------------------------------------------
 def _qv_transfer_cell_prefix(model_dir, qv_dataset, target_dataset, seed,
-                              optim_frag, qat_frag, ptq_frag):
+                              optim_frag, qat_frag, ptq_frag, *, source_epoch_mult, target_epoch_mult):
     return os.path.join(
         EVAL_ROOT_QV, model_dir,
-        f"src={qv_dataset}_seed={seed}",
-        f"tgt={target_dataset}_seed={seed}",
+        role_path_frag("src", qv_dataset, seed, source_epoch_mult),
+        role_path_frag("tgt", target_dataset, seed, target_epoch_mult),
         optim_frag, qat_frag, ptq_frag,
     )
 
@@ -160,12 +165,12 @@ def load_data(model_dir, args, optim_frag, qat_frag, ptq_frag):
     data = {}
     for target_dataset in datasets:
         fp_ptq_acc = _load_value(
-            _fp_ptq_path(model_dir, target_dataset, args.seed, optim_frag, ptq_frag),
+            _fp_ptq_path(model_dir, target_dataset, args.seed, optim_frag, ptq_frag, target_epoch_mult=args.target_epoch_mult),
             TEST_ACC_KEY,
         )
         qat_ptq_acc = _load_value(
             _qat_ptq_path(model_dir, target_dataset, args.seed,
-                          optim_frag, qat_frag, ptq_frag),
+                          optim_frag, qat_frag, ptq_frag, target_epoch_mult=args.target_epoch_mult),
             TEST_ACC_KEY,
         )
 
@@ -177,6 +182,8 @@ def load_data(model_dir, args, optim_frag, qat_frag, ptq_frag):
             cell_prefix = _qv_transfer_cell_prefix(
                 model_dir, qv_dataset, target_dataset, args.seed,
                 optim_frag, qat_frag, ptq_frag,
+            
+                source_epoch_mult=args.source_epoch_mult, target_epoch_mult=args.target_epoch_mult,
             )
             best_alpha_path = os.path.join(cell_prefix, BEST_ALPHA_FILE)
             if not os.path.exists(best_alpha_path):

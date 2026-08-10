@@ -25,6 +25,7 @@ if str(_CODE_DIR) not in sys.path:
 
 os.chdir(_PROJECT_ROOT)
 
+from src.duration import mult_path_frag, role_path_frag
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -86,6 +87,10 @@ def _swapped_dataset_order(datasets_dict):
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed",           required=True, type=int)
+    parser.add_argument("--source-epoch-mult", required=True, type=float,
+                        help="Training-budget multiplier of the DONOR checkpoints.")
+    parser.add_argument("--target-epoch-mult", required=True, type=float,
+                        help="Training-budget multiplier of the RECEIVER checkpoints.")
 
     parser.add_argument("--pretrained-tags", required=True, nargs="+",
                         help="One pretrained tag per model (3 values), positionally "
@@ -154,10 +159,10 @@ def _split_frag(eval_split):
 # ---------------------------------------------------------------------------
 # Per-baseline path builders
 # ---------------------------------------------------------------------------
-def _fp_ptq_path(model_dir, dataset, seed, optim_frag, ptq_frag):
+def _fp_ptq_path(model_dir, dataset, seed, optim_frag, ptq_frag, *, target_epoch_mult):
     return os.path.join(
         EVAL_ROOT_BASELINES, "fp_ptq", model_dir, dataset,
-        optim_frag, ptq_frag, f"seed={seed}", "eval_results.json",
+        optim_frag, mult_path_frag(target_epoch_mult), ptq_frag, f"seed={seed}", "eval_results.json",
     )
 
 
@@ -165,11 +170,11 @@ def _fp_ptq_path(model_dir, dataset, seed, optim_frag, ptq_frag):
 # QV transfer path builders
 # ---------------------------------------------------------------------------
 def _qv_transfer_path(model_dir, qv_dataset, target_dataset, seed,
-                       optim_frag, qat_frag, ptq_frag, qv_frag, eval_split):
+                       optim_frag, qat_frag, ptq_frag, qv_frag, eval_split, *, source_epoch_mult, target_epoch_mult):
     return os.path.join(
         EVAL_ROOT_QV, model_dir,
-        f"src={qv_dataset}_seed={seed}",
-        f"tgt={target_dataset}_seed={seed}",
+        role_path_frag("src", qv_dataset, seed, source_epoch_mult),
+        role_path_frag("tgt", target_dataset, seed, target_epoch_mult),
         optim_frag, qat_frag, ptq_frag, qv_frag,
         _split_frag(eval_split),
         "eval_results.json",
@@ -177,11 +182,11 @@ def _qv_transfer_path(model_dir, qv_dataset, target_dataset, seed,
 
 
 def _qv_transfer_cell_prefix(model_dir, qv_dataset, target_dataset, seed,
-                             optim_frag, qat_frag, ptq_frag):
+                             optim_frag, qat_frag, ptq_frag, *, source_epoch_mult, target_epoch_mult):
     return os.path.join(
         EVAL_ROOT_QV, model_dir,
-        f"src={qv_dataset}_seed={seed}",
-        f"tgt={target_dataset}_seed={seed}",
+        role_path_frag("src", qv_dataset, seed, source_epoch_mult),
+        role_path_frag("tgt", target_dataset, seed, target_epoch_mult),
         optim_frag, qat_frag, ptq_frag,
     )
 
@@ -212,7 +217,7 @@ def load_data_fixed_alpha(args, model_dir, optim_frag, qat_frag, ptq_frag):
     data = {}
     for target_dataset in datasets:
         fp_ptq_acc = _load_value(
-            _fp_ptq_path(model_dir, target_dataset, args.seed, optim_frag, ptq_frag),
+            _fp_ptq_path(model_dir, target_dataset, args.seed, optim_frag, ptq_frag, target_epoch_mult=args.target_epoch_mult),
             TEST_ACC_KEY,
         )
         qv_transfer = {}
@@ -220,6 +225,8 @@ def load_data_fixed_alpha(args, model_dir, optim_frag, qat_frag, ptq_frag):
             qv_path = _qv_transfer_path(
                 model_dir, qv_dataset, target_dataset, args.seed,
                 optim_frag, qat_frag, ptq_frag, qv_frag, args.eval_split,
+            
+                source_epoch_mult=args.source_epoch_mult, target_epoch_mult=args.target_epoch_mult,
             )
             qv_transfer[qv_dataset] = _load_value(qv_path, metric_key)
 
@@ -240,7 +247,7 @@ def load_data_best_alpha(args, model_dir, optim_frag, qat_frag, ptq_frag):
     data = {}
     for target_dataset in datasets:
         fp_ptq_acc = _load_value(
-            _fp_ptq_path(model_dir, target_dataset, args.seed, optim_frag, ptq_frag),
+            _fp_ptq_path(model_dir, target_dataset, args.seed, optim_frag, ptq_frag, target_epoch_mult=args.target_epoch_mult),
             TEST_ACC_KEY,
         )
         qv_transfer = {}
@@ -248,6 +255,8 @@ def load_data_best_alpha(args, model_dir, optim_frag, qat_frag, ptq_frag):
             cell_prefix = _qv_transfer_cell_prefix(
                 model_dir, qv_dataset, target_dataset, args.seed,
                 optim_frag, qat_frag, ptq_frag,
+            
+                source_epoch_mult=args.source_epoch_mult, target_epoch_mult=args.target_epoch_mult,
             )
 
             best_alpha_val = None

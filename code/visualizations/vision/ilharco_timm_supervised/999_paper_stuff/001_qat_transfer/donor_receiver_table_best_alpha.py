@@ -26,6 +26,7 @@ if str(_CODE_DIR) not in sys.path:
 
 os.chdir(_PROJECT_ROOT)
 
+from src.duration import mult_path_frag, role_path_frag
 from src.vision.data.common import DATASET_NAME_TO_EPOCHS
 from src.vision.utils import sanitize_timm_model_name
 
@@ -60,6 +61,10 @@ def parse_args():
     parser.add_argument("--model-names",     required=True, nargs="+",
                         help="timm model names, e.g. vit_base_patch16_224.orig_in21k")
     parser.add_argument("--seed",            required=True, type=int)
+    parser.add_argument("--source-epoch-mult", required=True, type=float,
+                        help="Training-budget multiplier of the DONOR checkpoints.")
+    parser.add_argument("--target-epoch-mult", required=True, type=float,
+                        help="Training-budget multiplier of the RECEIVER checkpoints.")
 
     parser.add_argument("--optim",           required=True, choices=["adamw", "sgd"])
     parser.add_argument("--lr",              required=True, type=float)
@@ -106,21 +111,21 @@ def _ptq_frag(args):
 # ---------------------------------------------------------------------------
 # Per-baseline path builders
 # ---------------------------------------------------------------------------
-def _fp_ptq_path(model_dir, dataset, seed, optim_frag, ptq_frag):
+def _fp_ptq_path(model_dir, dataset, seed, optim_frag, ptq_frag, *, target_epoch_mult):
     return os.path.join(
         EVAL_ROOT_BASELINES, "fp_ptq", model_dir, dataset,
-        optim_frag, ptq_frag, f"seed={seed}", "eval_results.json",
+        optim_frag, mult_path_frag(target_epoch_mult), ptq_frag, f"seed={seed}", "eval_results.json",
     )
 
 
 # ---------------------------------------------------------------------------
 # QV transfer cell prefix (without alpha)
 # ---------------------------------------------------------------------------
-def _qv_cell_prefix(model_dir, donor, receiver, seed, optim_frag, qat_frag, ptq_frag):
+def _qv_cell_prefix(model_dir, donor, receiver, seed, optim_frag, qat_frag, ptq_frag, *, source_epoch_mult, target_epoch_mult):
     return os.path.join(
         EVAL_ROOT_QV, model_dir,
-        f"src={donor}_seed={seed}",
-        f"tgt={receiver}_seed={seed}",
+        role_path_frag("src", donor, seed, source_epoch_mult),
+        role_path_frag("tgt", receiver, seed, target_epoch_mult),
         optim_frag, qat_frag, ptq_frag,
     )
 
@@ -147,7 +152,7 @@ def load_deltas(model_dir, datasets, seed, optim_frag, qat_frag, ptq_frag):
     deltas = {}
     for receiver in datasets:
         baseline = _load_value(
-            _fp_ptq_path(model_dir, receiver, seed, optim_frag, ptq_frag),
+            _fp_ptq_path(model_dir, receiver, seed, optim_frag, ptq_frag, target_epoch_mult=args.target_epoch_mult),
             TEST_ACC_KEY,
         )
         for donor in datasets:
@@ -156,6 +161,8 @@ def load_deltas(model_dir, datasets, seed, optim_frag, qat_frag, ptq_frag):
 
             cell_prefix = _qv_cell_prefix(
                 model_dir, donor, receiver, seed, optim_frag, qat_frag, ptq_frag,
+            
+                source_epoch_mult=args.source_epoch_mult, target_epoch_mult=args.target_epoch_mult,
             )
 
             # Read best alpha

@@ -53,6 +53,7 @@ if str(_CODE_DIR) not in sys.path:
 
 os.chdir(_PROJECT_ROOT)
 
+from src.duration import mult_path_frag, role_path_frag
 import plotly.graph_objects as go
 
 from src.pv_tuning import pv_path_frag
@@ -89,6 +90,10 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-name",     required=True)
     parser.add_argument("--seed",           required=True, type=int)
+    parser.add_argument("--source-epoch-mult", required=True, type=float,
+                        help="Training-budget multiplier of the DONOR checkpoints.")
+    parser.add_argument("--target-epoch-mult", required=True, type=float,
+                        help="Training-budget multiplier of the RECEIVER checkpoints.")
 
     parser.add_argument("--optim",          required=True, choices=["adamw", "sgd"])
     parser.add_argument("--lr",             required=True, type=float)
@@ -159,11 +164,11 @@ def _qv_frag(alpha):
 
 
 def _transfer_path(root, model_dir, qv_dataset, target_dataset, seed,
-                   optim_frag, method_frag, ptq_frag, qv_frag, eval_split):
+                   optim_frag, method_frag, ptq_frag, qv_frag, eval_split, *, source_epoch_mult, target_epoch_mult):
     return os.path.join(
         root, model_dir,
-        f"src={qv_dataset}_seed={seed}",
-        f"tgt={target_dataset}_seed={seed}",
+        role_path_frag("src", qv_dataset, seed, source_epoch_mult),
+        role_path_frag("tgt", target_dataset, seed, target_epoch_mult),
         optim_frag, method_frag, ptq_frag, qv_frag,
         f"split={eval_split}",
         "eval_results.json",
@@ -211,10 +216,14 @@ def load_data(args):
             pv_path = _transfer_path(
                 EVAL_ROOT_QV_PV, model_dir, qv_dataset, target_dataset, args.seed,
                 optim_frag, pv_frag, ptq_frag, qv_frag, split,
+            
+                source_epoch_mult=args.source_epoch_mult, target_epoch_mult=args.target_epoch_mult,
             )
             qat_path = _transfer_path(
                 EVAL_ROOT_QV_QAT, model_dir, qv_dataset, target_dataset, args.seed,
                 optim_frag, qat_frag, ptq_frag, qv_frag, split,
+            
+                source_epoch_mult=args.source_epoch_mult, target_epoch_mult=args.target_epoch_mult,
             )
 
             for tag, (pv_suffix, qat_suffix) in METRIC_TAGS.items():

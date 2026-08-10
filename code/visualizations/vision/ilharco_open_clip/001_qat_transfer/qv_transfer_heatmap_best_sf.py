@@ -34,6 +34,7 @@ if str(_CODE_DIR) not in sys.path:
 
 os.chdir(_PROJECT_ROOT)
 
+from src.duration import mult_path_frag, role_path_frag
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -105,6 +106,10 @@ def parse_args():
     parser.add_argument("--pretrained",     required=True,
                         help="open_clip pretrained tag, e.g. openai")
     parser.add_argument("--seed",           required=True, type=int)
+    parser.add_argument("--source-epoch-mult", required=True, type=float,
+                        help="Training-budget multiplier of the DONOR checkpoints.")
+    parser.add_argument("--target-epoch-mult", required=True, type=float,
+                        help="Training-budget multiplier of the RECEIVER checkpoints.")
 
     # optim path-fragment components
     parser.add_argument("--optim",          required=True, choices=["adamw", "sgd"])
@@ -155,48 +160,48 @@ def _ptq_frag(bits, gran, skip_modules):
 # ---------------------------------------------------------------------------
 # Per-baseline path builders
 # ---------------------------------------------------------------------------
-def _pretrained_path(model_dir, dataset, seed):
+def _pretrained_path(model_dir, dataset, seed, *, target_epoch_mult):
     return os.path.join(
         EVAL_ROOT_BASELINES, "pretrained", model_dir, dataset,
         f"seed={seed}", "eval_results.json",
     )
 
 
-def _fp_path(model_dir, dataset, seed, optim_frag):
+def _fp_path(model_dir, dataset, seed, optim_frag, *, target_epoch_mult):
     return os.path.join(
         EVAL_ROOT_BASELINES, "fp", model_dir, dataset,
-        optim_frag, f"seed={seed}", "eval_results.json",
+        optim_frag, mult_path_frag(target_epoch_mult), f"seed={seed}", "eval_results.json",
     )
 
 
-def _fp_ptq_path(model_dir, dataset, seed, optim_frag, ptq_frag):
+def _fp_ptq_path(model_dir, dataset, seed, optim_frag, ptq_frag, *, target_epoch_mult):
     return os.path.join(
         EVAL_ROOT_BASELINES, "fp_ptq", model_dir, dataset,
-        optim_frag, ptq_frag, f"seed={seed}", "eval_results.json",
+        optim_frag, mult_path_frag(target_epoch_mult), ptq_frag, f"seed={seed}", "eval_results.json",
     )
 
 
-def _qat_path(model_dir, dataset, seed, optim_frag, qat_frag):
+def _qat_path(model_dir, dataset, seed, optim_frag, qat_frag, *, target_epoch_mult):
     return os.path.join(
         EVAL_ROOT_BASELINES, "qat", model_dir, dataset,
-        optim_frag, qat_frag, f"seed={seed}", "eval_results.json",
+        optim_frag, mult_path_frag(target_epoch_mult), qat_frag, f"seed={seed}", "eval_results.json",
     )
 
 
-def _qat_ptq_path(model_dir, dataset, seed, optim_frag, qat_frag, ptq_frag):
+def _qat_ptq_path(model_dir, dataset, seed, optim_frag, qat_frag, ptq_frag, *, target_epoch_mult):
     return os.path.join(
         EVAL_ROOT_BASELINES, "qat_ptq", model_dir, dataset,
-        optim_frag, qat_frag, ptq_frag, f"seed={seed}", "eval_results.json",
+        optim_frag, mult_path_frag(target_epoch_mult), qat_frag, ptq_frag, f"seed={seed}", "eval_results.json",
     )
 
 
 def _qv_transfer_cell_prefix(model_dir, qv_dataset, target_dataset, seed,
-                             optim_frag, qat_frag, ptq_frag):
+                             optim_frag, qat_frag, ptq_frag, *, source_epoch_mult, target_epoch_mult):
     """Return the QV cell directory up to (but not including) the qv=alpha=* segment."""
     return os.path.join(
         EVAL_ROOT_QV, model_dir,
-        f"src={qv_dataset}_seed={seed}",
-        f"tgt={target_dataset}_seed={seed}",
+        role_path_frag("src", qv_dataset, seed, source_epoch_mult),
+        role_path_frag("tgt", target_dataset, seed, target_epoch_mult),
         optim_frag, qat_frag, ptq_frag,
     )
 
@@ -232,24 +237,24 @@ def load_data(args):
     for target_dataset in datasets:
         data[target_dataset] = {
             "pretrained": _load_value(
-                _pretrained_path(model_dir, target_dataset, args.seed),
+                _pretrained_path(model_dir, target_dataset, args.seed, target_epoch_mult=args.target_epoch_mult),
                 TEST_ACC_KEY,
             ),
             "fp": _load_value(
-                _fp_path(model_dir, target_dataset, args.seed, optim_frag),
+                _fp_path(model_dir, target_dataset, args.seed, optim_frag, target_epoch_mult=args.target_epoch_mult),
                 TEST_ACC_KEY,
             ),
             "fp_ptq": _load_value(
-                _fp_ptq_path(model_dir, target_dataset, args.seed, optim_frag, ptq_frag),
+                _fp_ptq_path(model_dir, target_dataset, args.seed, optim_frag, ptq_frag, target_epoch_mult=args.target_epoch_mult),
                 TEST_ACC_KEY,
             ),
             "qat": _load_value(
-                _qat_path(model_dir, target_dataset, args.seed, optim_frag, qat_frag),
+                _qat_path(model_dir, target_dataset, args.seed, optim_frag, qat_frag, target_epoch_mult=args.target_epoch_mult),
                 TEST_ACC_KEY,
             ),
             "qat_ptq": _load_value(
                 _qat_ptq_path(model_dir, target_dataset, args.seed,
-                              optim_frag, qat_frag, ptq_frag),
+                              optim_frag, qat_frag, ptq_frag, target_epoch_mult=args.target_epoch_mult),
                 TEST_ACC_KEY,
             ),
             "random": (
@@ -263,6 +268,8 @@ def load_data(args):
             cell_prefix = _qv_transfer_cell_prefix(
                 model_dir, qv_dataset, target_dataset, args.seed,
                 optim_frag, qat_frag, ptq_frag,
+            
+                source_epoch_mult=args.source_epoch_mult, target_epoch_mult=args.target_epoch_mult,
             )
 
             best_alpha_val = None
