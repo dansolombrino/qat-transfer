@@ -25,6 +25,8 @@ _CODE_DIR = _PROJECT_ROOT / "code"
 if str(_CODE_DIR) not in sys.path:
     sys.path.insert(0, str(_CODE_DIR))
 
+from src.duration import mult_tag
+
 os.chdir(_PROJECT_ROOT)
 
 
@@ -41,6 +43,11 @@ PLOT_ROOT = "plots/998_rebuttal/001_zero_shot_reframing"
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed",        required=True, type=int)
+    parser.add_argument("--source-epoch-mult", required=True, type=float,
+                        help="Training-budget multiplier of the DONOR checkpoints "
+                             "the aggregate was computed at.")
+    parser.add_argument("--target-epoch-mult", required=True, type=float,
+                        help="Training-budget multiplier of the RECEIVER checkpoints.")
     parser.add_argument("--qat-bits",    required=True, type=int)
     parser.add_argument("--ptq-bits",    required=True, type=int)
     parser.add_argument("--granularity", required=True, choices=["tensor", "channel"])
@@ -50,6 +57,8 @@ def parse_args():
 def _run_dir(args):
     return os.path.join(
         f"seed={args.seed}",
+        f"smult={mult_tag(args.source_epoch_mult)}",
+        f"tmult={mult_tag(args.target_epoch_mult)}",
         f"qat=bits={args.qat_bits}_gran={args.granularity}",
         f"ptq=bits={args.ptq_bits}_gran={args.granularity}",
         "split=test",

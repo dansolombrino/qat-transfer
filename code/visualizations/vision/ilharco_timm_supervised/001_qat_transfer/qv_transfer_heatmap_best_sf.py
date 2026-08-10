@@ -45,7 +45,7 @@ if str(_CODE_DIR) not in sys.path:
 
 os.chdir(_PROJECT_ROOT)
 
-from src.duration import mult_path_frag, role_path_frag
+from src.duration import mult_path_frag, mult_tag, role_path_frag
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
