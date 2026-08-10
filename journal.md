@@ -848,3 +848,54 @@ Both comparison scripts gained a `cross_task_only` aggregate block. The
 +38.66 and +44.30 figures had been derived by hand from the `delta_pp` matrices
 and appeared in no file; they are now emitted artifacts, and both reproduced
 their hand-derived values before the new data landed.
+
+## Training duration becomes an explicit axis (`epoch_mult`)
+
+Duration was never *named* anywhere: it was re-derived at every reader and
+writer as `DATASET_NAME_TO_EPOCHS[dataset_name]`. That made two planned
+experiments inexpressible -- ImageNet on the common budget, and ordinary
+datasets on ImageNet's -- because duration was a table lookup keyed only by
+dataset name.
+
+Measured from `002_cost_amortization/dataset_sizes.json`, the schedule
+normalises every dataset to ~2,000 optimizer steps (Cars 2,030, DTD 2,052,
+GTSRB 2,068, median 2,068) with ImageNet at **9,971, or 4.82x the median**.
+ImageNet is therefore confounded as a donor: most diverse *and* longest
+trained.
+
+The axis is a **multiplier**, not an absolute step count. Three reasons, the
+first decisive: `DATASET_NAME_TO_EPOCHS` is read by 118 files and in many of
+them it is not a duration table at all but the canonical dataset registry, the
+cost basis, or a frozen invariant with a RuntimeError tripwire -- a multiplier
+is orthogonal to all three. Second, one scalar is meaningful applied to a
+*list*, and the transfer configs take `dataset_names` as a list but the
+duration knob as a scalar. Third, `mult=1` is true by construction, whereas
+labelling Cars' real 2,030-step run `steps=2500` would put a number in the path
+describing a run that never happened.
+
+`mult=1` is written explicitly, never elided, so the legacy tree had to be
+stamped: 157,619 files hardlinked (799 GiB of checkpoints proven identical by
+inode, not by re-hashing), legacy tree left intact. The golden diff -- win_loss
+regenerated on the migrated tree -- matched the pre-migration backup across
+4,840 pairs and 10 models with zero numeric differences.
+
+Three pre-existing defects surfaced on the way, none related to the axis:
+
+- `baseline_bar_all_models.py` auto-discovered its `optim=` fragment by prefix,
+  silently combining bs=64 and bs=128 panels (and `classifier`/`score` skip
+  modules in text) into one figure without saying so. The runs are comparable
+  -- bs=64 trains at accum_steps=2 -- but the script could not state it.
+- `compute_win_loss_*` and `compute_lambda_curves_*` wrote their aggregate and
+  exited 0 even when every model produced zero pairs, so any path mismatch
+  replaced real numbers with an empty file and reported success. Caught when it
+  did exactly that to `win_loss_ilharco_timm_supervised.json`; restored from
+  backup and all six writers now refuse.
+- open_clip and text finetuners ran the loop for the clamped epoch count while
+  taking the scheduler length and checkpoint filename from the unclamped table
+  value, so a `limit_num_epochs` run wrote one filename and was read under
+  another.
+
+Two planned cleanups dissolved on inspection: hf_clip fp/qat and the
+frozen-params ablation were flagged as counting raw batches rather than
+optimizer steps, but they perform one optimizer step per batch and have no
+gradient accumulation at all, so the units already coincided.

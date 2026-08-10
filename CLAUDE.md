@@ -77,6 +77,7 @@ Supports vision (CLIP, OpenCLIP, timm) and text (AutoModelForSequenceClassificat
 | **donor** / **source** / `src` | The task the QV was computed on. |
 | **receiver** / **target** / `tgt` | The task the QV is applied to. |
 | **alpha** / **lambda** / **sf** (scaling factor) | **Synonyms** for the QV scaling coefficient. The code, config keys, and all filesystem paths say `alpha` (and `sf` in some visualization filenames); the paper and the `998_rebuttal` scripts say `lambda`. Prefer `lambda` in prose, keep `alpha` in code and paths. |
+| **epoch_mult** / **mult** | Training-budget multiplier on the dataset's entry in `DATASET_NAME_TO_EPOCHS`. `mult=1` is the schedule this repo has always run; ImageNet at `mult=0.25` is ~2,493 steps, Cars at `mult=4` is ~8,120. Always written explicitly into the path -- a path with no `mult=` predates the axis. |
 | **unit scaling** | `lambda = 1`. Needs no receiver data — this is the **data-free / zero-shot** setting the paper's headline claim rests on. |
 | **best alpha** / `lambda_best` / `lambda*` | Scaling selected on the receiver's **validation** split, then reported on **test**. Needs receiver data, so it is *not* zero-shot. |
 | **same-task pair** | donor == receiver. At `lambda = 1` this is algebraically just the receiver's own QAT checkpoint, so it is the **QAT ceiling**, not a transfer result. Exclude it from transfer statistics. |
@@ -143,6 +144,7 @@ qat-transfer/
 |---|---|
 | `code/src/quantization.py` | Core quantize/dequantize/fake-quantize functions, QATLinear, enable_qat_/disable_qat_/apply_ptq_ |
 | `code/src/task_vectors.py` | TaskVector class for computing and applying checkpoint deltas |
+| `code/src/duration.py` | Training-budget axis: `mult_path_frag` / `mult_tag` (the single source of the `mult=` fragment), `role_path_frag` / `parse_role_frag` (the `src=`/`tgt=` grammar), `training_budget` (writers), `checkpoint_epochs` (readers), `clamped_warmup` |
 | `code/src/awq.py` | AWQ (activation-aware weight quantization) on the project's grid: AWQ solver, `apply_awq_`, and `awq_path_frag` (the single source of the `awq=` path fragment) |
 | `code/src/pv_tuning.py` | PV-Tuning on the project's uniform grid: PVLinear, enable_pv_/pv_step_/settle_pv_/disable_pv_, and `pv_path_frag` (the single source of the `pv=` path fragment) |
 | `code/src/vision/utils.py` | Sanitizers, set_seed, accuracy, LR schedulers, LabelSmoothing, tqdm helpers |
@@ -352,13 +354,17 @@ Paths are built with `os.path.join(*parts_list)` — never pathlib for runtime p
 
 **Vision:**
 ```
-{CHECKPOINT_BASE_PATH}/vision/{family}/{fp,qat}/{sanitized_model}/{dataset}/optim=adamw_lr={lr}_wd={wd}_ls={ls}_wl={wl}_mgn={max_grad_norm}_bs={batch_size}/[qat=bits={bits}_gran={granularity}_skip={skip_tag}/]seed={seed}/classifier_epoch_{N}.pt
+{CHECKPOINT_BASE_PATH}/vision/{family}/{fp,qat}/{sanitized_model}/{dataset}/optim=adamw_lr={lr}_wd={wd}_ls={ls}_wl={wl}_mgn={max_grad_norm}_bs={batch_size}/mult={m}/[qat=bits={bits}_gran={granularity}_skip={skip_tag}/]seed={seed}/classifier_epoch_{N}.pt
 ```
 
 **Text:** same but uses `_ml={max_length}` instead of `_wl={wl}`:
 ```
-{CHECKPOINT_BASE_PATH}/text/{family}/{fp,qat}/{sanitized_model}/{dataset}/optim=adamw_lr={lr}_wd={wd}_ls={ls}_mgn={max_grad_norm}_bs={batch_size}_ml={max_length}/[qat=bits={bits}_gran={granularity}_skip={skip_tag}/]seed={seed}/backbone_epoch_{N}.pt
+{CHECKPOINT_BASE_PATH}/text/{family}/{fp,qat}/{sanitized_model}/{dataset}/optim=adamw_lr={lr}_wd={wd}_ls={ls}_mgn={max_grad_norm}_bs={batch_size}_ml={max_length}/mult={m}/[qat=bits={bits}_gran={granularity}_skip={skip_tag}/]seed={seed}/backbone_epoch_{N}.pt
 ```
+
+**The `mult=` fragment always immediately follows `optim=`** — it is a training hyperparameter like the rest of that block. Never spell it by hand: call `mult_path_frag` in `code/src/duration.py`, for the same reason `awq_path_frag` and `pv_path_frag` exist. Hydra hands overrides through as `4`, `4.0` or `"4.0"`, and divergent spellings would fork one budget into two half-populated trees; `mult_path_frag` canonicalises all of them to `mult=4` and *rejects* anything not exactly representable (`1/3`) rather than truncating it into a neighbour's directory.
+
+**The `_epoch_{N}` in the filename names the 1x reference schedule, not the realized run.** `N` stays `DATASET_NAME_TO_EPOCHS[dataset]` regardless of the multiplier, because the realized epoch count depends on `len(train_loader)` and every `evaluate_*.py` and `qv_transfer.py` reconstructs load paths *without ever building a dataset*. Deriving the filename from anything loader-dependent would break the property that a code-only clone can name any checkpoint. The budget is carried by the directory; the realized `max_steps`, `loop_epochs`, `num_batches` and clamped warmup are recorded in a `run_meta.json` written beside the checkpoints.
 
 Two further checkpoint subtrees sit alongside `fp/` and `qat/`, each replacing the `qat=` fragment with one naming the method that produced it:
 
@@ -369,15 +375,17 @@ Two further checkpoint subtrees sit alongside `fp/` and `qat/`, each replacing t
 
 Baselines:
 ```
-{EVALUATION_BASE_PATH}/{vision,text}/{family}/{phase}/{vision,text}/{experiment_type}/{sanitized_model}/{dataset}/[optim=.../][qat=.../][ptq=.../]seed={seed}/eval_results.json
+{EVALUATION_BASE_PATH}/{vision,text}/{family}/{phase}/{vision,text}/{experiment_type}/{sanitized_model}/{dataset}/[optim=.../]mult={m}/[qat=.../][ptq=.../]seed={seed}/eval_results.json
 ```
 
 `{experiment_type}` is the baseline variant and names the directory directly: `fp`, `fp_ptq`, `fp_gptq`, `fp_awq`, `qat`, `qat_ptq`, `pv`, `pv_ptq`, `pretrained`, `pretrained_ptq`, plus `*_dryrun` counterparts. `pv` / `pv_ptq` carry the `pv=` fragment where `qat` / `qat_ptq` carry `qat=`, and are expected to report *identical* accuracies: `finetune_pv.py` settles the model onto the grid before saving, so `apply_ptq_` is a no-op on a PV checkpoint. `evaluate_pv_ptq.py` records `ptq_max_abs_weight_delta` to keep that a measurement rather than an assumption — a non-zero value means the checkpoint did not come from the settle path and must not be used to build a QV. `fp_gptq` paths carry a `gptq=bits=..._gran=..._skip=..._ncal=..._percdamp=..._actorder=...` fragment in place of the `ptq=` fragment (`block_size` is deliberately excluded — result-invariant solver batching). `fp_awq` paths likewise carry `awq=bits=..._gran=..._skip=..._ncal=..._ngrid=..._clip=...` in place of `ptq=`; never spell it by hand — call `awq_path_frag` in `code/src/awq.py`, which every writer and reader of the `awq=` tree already uses. AWQ and GPTQ each *replace* `apply_ptq_` rather than preceding it: `apply_ptq_` must never run after either, and for AWQ this is destructive rather than merely redundant, since AWQ's output `Q(W·diag(s))·diag(1/s)` does not sit on the plain absmax grid a following RTN pass would re-round it onto.
 
 Transfer:
 ```
-{EVALUATION_BASE_PATH}/{vision,text}/{family}/{phase}/{vision,text}/qv_transfer/{sanitized_model}/src={donor}_seed={s}/tgt={receiver}_seed={s}/optim=.../qat=bits=..._gran=..._skip=.../ptq=bits=..._gran=..._skip=.../qv=alpha={alpha}/split={val,test}/eval_results.json
+{EVALUATION_BASE_PATH}/{vision,text}/{family}/{phase}/{vision,text}/qv_transfer/{sanitized_model}/src={donor}_seed={s}_mult={ms}/tgt={receiver}_seed={s}_mult={mt}/optim=.../qat=bits=..._gran=..._skip=.../ptq=bits=..._gran=..._skip=.../qv=alpha={alpha}/split={val,test}/eval_results.json
 ```
+
+**In transfer paths the multiplier lives inside `src=`/`tgt=`, not beside `optim=`.** This asymmetry with the baseline grammar is forced, not stylistic: a transfer path names two datasets but carries a single shared `optim=` fragment, so donor and receiver would have nowhere to disagree — and expressing "CIFAR10 donor at 0.25x, DTD receiver at 4x" is the entire point of the axis. It is the same place `seed` already lives. Build and parse these fragments only through `role_path_frag` / `parse_role_frag`; `parse_role_frag` returns `None` on a pre-axis fragment rather than half-matching, so callers count misses instead of silently skipping.
 
 Note the doubled modality segment (`.../ilharco_timm_supervised/001_qat_transfer/vision/qv_transfer/...`) — it is redundant but load-bearing for every existing path, so keep emitting it.
 
@@ -385,9 +393,9 @@ The `split={val,test}` leaf is what makes validation-based alpha selection possi
 
 `998_rebuttal` writes aggregate JSONs rather than per-run `eval_results.json`, under:
 ```
-evaluations/998_rebuttal/{sub_phase}/seed={seed}/qat=.../ptq=.../split={split}/<name>.json
+evaluations/998_rebuttal/{sub_phase}/seed={seed}/smult={ms}/tmult={mt}/qat=.../ptq=.../split={split}/<name>.json
 ```
-with `002_cost_amortization` writing flat files directly under its sub-phase directory.
+with `002_cost_amortization` writing flat files directly under its sub-phase directory. An aggregate spans a whole donor x receiver matrix at one *pair* of budgets, so it names both (`smult=`/`tmult=`) rather than a single `mult=`; without them an aggregate computed at a different budget would silently overwrite its neighbour.
 
 ### Plot paths
 

@@ -63,6 +63,8 @@ Emotion,IMDB,Banking77,AmazonReviewsClassification,AmazonCounterfactual,MassiveI
 
 All text datasets train for 5 epochs by default. Split constants shared across all domains: `SPLIT_SEED=0`, `VAL_FRACTION=0.1`, `MAX_VAL_SAMPLES=5000`.
 
+That per-dataset epoch schedule is the **1x** budget, and it is now scaled by an explicit `epoch_mult` (see `code/src/duration.py`). The schedule normalises every dataset to roughly 2,000 optimizer steps — Cars 2,030, DTD 2,052, GTSRB 2,068 — with **ImageNet the outlier at 9,971, about 4.8x the median**. ImageNet is therefore confounded as a donor: it is simultaneously the most diverse task and by far the longest-trained one. `epoch_mult` exists to separate those two explanations, by running ImageNet on the common budget (`mult=0.25`) and ordinary datasets on ImageNet's (`mult=4`). Every path states its budget explicitly; a path carrying no `mult=` predates the axis.
+
 ---
 
 ## Project structure
@@ -107,17 +109,17 @@ All sanitizers live in [code/src/vision/utils.py](code/src/vision/utils.py).
 
 **Checkpoint paths** (vision):
 ```
-{CHECKPOINT_BASE_PATH}/vision/{family}/{fp,qat}/{sanitized_model}/{dataset}/optim=adamw_lr={lr}_wd={wd}_ls={ls}_wl={wl}_mgn={max_grad_norm}_bs={batch_size}/[qat=bits={bits}_gran={granularity}_skip={skip_tag}/]seed={seed}/backbone_epoch_{N}.pt
+{CHECKPOINT_BASE_PATH}/vision/{family}/{fp,qat}/{sanitized_model}/{dataset}/optim=adamw_lr={lr}_wd={wd}_ls={ls}_wl={wl}_mgn={max_grad_norm}_bs={batch_size}/mult={m}/[qat=bits={bits}_gran={granularity}_skip={skip_tag}/]seed={seed}/backbone_epoch_{N}.pt
 ```
 
 **Checkpoint paths** (text): same structure but the optim fragment uses `_ml={max_length}` instead of `_wl={wl}`:
 ```
-{CHECKPOINT_BASE_PATH}/text/{family}/{fp,qat}/{sanitized_model}/{dataset}/optim=adamw_lr={lr}_wd={wd}_ls={ls}_mgn={max_grad_norm}_bs={batch_size}_ml={max_length}/[qat=bits={bits}_gran={granularity}_skip={skip_tag}/]seed={seed}/backbone_epoch_{N}.pt
+{CHECKPOINT_BASE_PATH}/text/{family}/{fp,qat}/{sanitized_model}/{dataset}/optim=adamw_lr={lr}_wd={wd}_ls={ls}_mgn={max_grad_norm}_bs={batch_size}_ml={max_length}/mult={m}/[qat=bits={bits}_gran={granularity}_skip={skip_tag}/]seed={seed}/backbone_epoch_{N}.pt
 ```
 
 **Evaluation paths**:
 ```
-{EVALUATION_BASE_PATH}/{vision,text}/{family}/{phase}/{experiment_type}/{sanitized_model}/{dataset}/optim=.../{seed}/eval_results.json
+{EVALUATION_BASE_PATH}/{vision,text}/{family}/{phase}/{experiment_type}/{sanitized_model}/{dataset}/optim=.../mult={m}/{seed}/eval_results.json
 ```
 
 ---

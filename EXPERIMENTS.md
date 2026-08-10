@@ -263,7 +263,7 @@ comparison, QAP permutation, and visualization design remains fixed.
 Producer run-id params, in order: `family`, `model_name`, `seed`, `optim`,
 `lr`, `wd`, `ls`, `wl`, `max_grad_norm`, `batch_size`, `qat_bits`,
 `qat_granularity`, `qat_skip_modules`, `ptq_skip_modules`, `checkpoint_kind`,
-`epoch_policy`, `vector_scope`, `module_selector`, `accumulation_dtype`,
+`epoch_policy`, `epoch_mult`, `vector_scope`, `module_selector`, `accumulation_dtype`,
 `aggregation_spec`. Analyzer run-id params remain `ptq_bits`,
 `ptq_granularity`, `outcome_protocol`, `outcome_split`, `unit_alpha`,
 `analysis_spec`, `n_permutations`, `permutation_seed`.
