@@ -98,7 +98,7 @@ load_dotenv()
 
 import torch
 
-from src.duration import mult_path_frag
+from src.duration import mult_path_frag, mult_tag
 from src.vision.data.common import DATASET_NAME_TO_EPOCHS, DATASET_NAME_TO_NUM_CLASSES
 from src.vision.utils import sanitize_timm_model_name
 

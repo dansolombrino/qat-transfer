@@ -46,7 +46,7 @@ if str(_CODE_DIR) not in sys.path:
 
 os.chdir(_PROJECT_ROOT)
 
-from src.duration import mult_path_frag, role_path_frag
+from src.duration import mult_path_frag, mult_tag, role_path_frag
 from src.text.data.common import DATASET_NAME_TO_EPOCHS
 from src.vision.utils import sanitize_hf_model_name
 

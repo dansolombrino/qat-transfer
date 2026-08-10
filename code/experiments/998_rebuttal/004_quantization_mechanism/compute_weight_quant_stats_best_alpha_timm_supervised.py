@@ -42,6 +42,8 @@ _CODE_DIR = _PROJECT_ROOT / "code"
 if str(_CODE_DIR) not in sys.path:
     sys.path.insert(0, str(_CODE_DIR))
 
+from src.duration import mult_tag
+
 os.chdir(_PROJECT_ROOT)
 
 from dotenv import load_dotenv

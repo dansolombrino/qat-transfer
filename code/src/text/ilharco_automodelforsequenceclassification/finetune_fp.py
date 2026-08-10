@@ -3,6 +3,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from src.duration import mult_path_frag, run_meta, training_budget
+
 # MUST be the first thing that runs: HF libs (transformers, huggingface_hub,
 # datasets) and our own src.text.data.common all snapshot env vars at import
 # time. Loading .env after those imports has no effect.
