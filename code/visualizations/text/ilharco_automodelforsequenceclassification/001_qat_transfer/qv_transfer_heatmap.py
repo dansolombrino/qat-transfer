@@ -173,6 +173,7 @@ def _split_frag(eval_split):
 def _pretrained_path(model_dir, dataset, seed, *, target_epoch_mult):
     return os.path.join(
         EVAL_ROOT_BASELINES, "pretrained", model_dir, dataset,
+        mult_path_frag(target_epoch_mult),
         f"seed={seed}", "eval_results.json",
     )
 

@@ -206,6 +206,7 @@ def _qv_frag(alpha):
 def _pretrained_path(model_dir, dataset, seed, *, target_epoch_mult):
     return os.path.join(
         EVAL_ROOT_BASELINES, "pretrained", model_dir, dataset,
+        mult_path_frag(target_epoch_mult),
         f"seed={seed}", "eval_results.json",
     )
 
@@ -213,6 +214,7 @@ def _pretrained_path(model_dir, dataset, seed, *, target_epoch_mult):
 def _pretrained_ptq_path(model_dir, dataset, seed, ptq_frag, *, target_epoch_mult):
     return os.path.join(
         EVAL_ROOT_BASELINES, "pretrained_ptq", model_dir, dataset,
+        mult_path_frag(target_epoch_mult),
         ptq_frag, f"seed={seed}", "eval_results.json",
     )
 
