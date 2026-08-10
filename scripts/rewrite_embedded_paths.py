@@ -100,43 +100,63 @@ def walk(obj, fn):
     return obj
 
 
+def _exists(value):
+    return os.path.exists(value if value.startswith("/") else str(_PROJECT_ROOT / value))
+
+
 def rewrite_file(path, act):
-    """-> (changed, n_paths, problem or None)."""
+    """-> (changed, n_paths, n_prerot, problem or None).
+
+    `n_prerot` counts paths that were ALREADY dangling before this rewrite --
+    they are left exactly as found. The repo carries some from a pre-restructure
+    era, when checkpoints lived at `storage/checkpoints/fp/<model>/...` rather
+    than `storage/checkpoints/<modality>/<family>/fp/<model>/...`; that flat
+    layout no longer exists anywhere. Repointing those would be fabrication: it
+    would turn a visibly broken reference into a plausible-looking one that is
+    equally wrong. They are reported and left alone.
+    """
     text = Path(path).read_text()
+    if not text.strip():
+        # A zero-byte result file: a run that died between open() and write().
+        # Reported, never repaired -- inventing content would be far worse than
+        # an obviously empty file.
+        return False, 0, 0, "EMPTY (0 bytes) -- pre-existing, left as found"
     try:
         before = json.loads(text)
     except json.JSONDecodeError as exc:
-        return False, 0, f"unparseable: {exc}"
+        return False, 0, 0, f"unparseable: {exc}"
 
-    changes = []
+    changes, prerot = [], 0
 
     def fix(s):
+        nonlocal prerot
         if not looks_like_artifact_path(s):
             return s
         new = remap(s)
         if new is None or new == s:
+            return s
+        if not _exists(s) and not _exists(new):
+            # Dangling before, dangling after: not ours, and not repairable by
+            # a grammar change. Leave the honest breakage visible.
+            prerot += 1
             return s
         changes.append((s, new))
         return new
 
     after = walk(before, fix)
     if not changes:
-        return False, 0, None
+        return False, 0, prerot, None
 
-    # The rewritten target must exist, or the mapping disagreed with the
-    # migration -- which is the one failure this whole exercise must not have.
+    # A rewritten target must exist. If the original resolved and the remapped
+    # one does not, the mapping disagrees with the migration -- the one failure
+    # this whole exercise must not have.
     for _old, new in changes:
-        probe = new if new.startswith("/") else str(_PROJECT_ROOT / new)
-        if not os.path.exists(probe):
-            return False, len(changes), f"target missing after remap: {new}"
-
-    # Structural identity: same shape, differing only at the intended leaves.
-    if json.dumps(walk(after, lambda s: s), sort_keys=True) == json.dumps(before, sort_keys=True):
-        return False, len(changes), "no-op after walk (unexpected)"
+        if not _exists(new):
+            return False, len(changes), prerot, f"target missing after remap: {new}"
 
     if act:
         Path(path).write_text(json.dumps(after, indent=2) + ("\n" if text.endswith("\n") else ""))
-    return True, len(changes), None
+    return True, len(changes), prerot, None
 
 
 # ---------------------------------------------------------------------------
@@ -177,27 +197,34 @@ def main():
             print(f"    {n} in {p}")
         sys.exit(1 if dangling else 0)
 
-    changed = paths = 0
+    changed = paths = prerot_total = 0
     problems = []
     for dirpath, _d, files in os.walk("evaluations"):
         for name in files:
             if not name.endswith(".json"):
                 continue
             p = os.path.join(dirpath, name)
-            did, n, problem = rewrite_file(p, args.yes)
+            did, n, prerot, problem = rewrite_file(p, args.yes)
             if problem:
                 problems.append((p, problem))
             if did:
                 changed += 1
             paths += n
+            prerot_total += prerot
 
     print(f"{'rewrote' if args.yes else 'would rewrite'} {changed:,} files "
           f"({paths:,} path strings)")
+    if prerot_total:
+        print(f"{prerot_total:,} path strings were ALREADY dangling before this "
+              f"rewrite and were left untouched -- pre-restructure references, "
+              f"not repairable by a grammar change.")
     if problems:
-        print(f"\n{len(problems)} problem(s):")
+        fatal = [x for x in problems if "EMPTY" not in x[1]]
+        print(f"\n{len(problems)} problem(s) ({len(fatal)} fatal):")
         for p, why in problems[:20]:
             print(f"  {why}\n    {p}")
-        sys.exit(1)
+        if fatal:
+            sys.exit(1)
     if not args.yes:
         print("DRY RUN -- nothing written.")
 
