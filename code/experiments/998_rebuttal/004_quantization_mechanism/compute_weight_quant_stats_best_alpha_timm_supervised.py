@@ -141,6 +141,11 @@ def _win_loss_path(args):
     return os.path.join(
         WIN_LOSS_ROOT,
         f"seed={args.seed}",
+        # The aggregate spans a whole donor x receiver matrix at one pair of
+        # budgets. Without these two components an aggregate computed at a
+        # different multiplier would silently overwrite this one.
+        f"smult={mult_tag(args.source_epoch_mult)}",
+        f"tmult={mult_tag(args.target_epoch_mult)}",
         f"qat=bits={args.qat_bits}_gran={args.granularity}",
         f"ptq=bits={args.ptq_bits}_gran={args.granularity}",
         "split=test",

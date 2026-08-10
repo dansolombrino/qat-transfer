@@ -153,6 +153,17 @@ def stamp(rel_parts):
             parts[i + 1:i + 1] = [f"mult={TAG}"]
             return parts
 
+    # (8) rebuttal aggregates. These span a whole donor x receiver matrix at one
+    #     pair of budgets and carry no optim= anchor at all, so they name both
+    #     multipliers directly after the seed -- otherwise an aggregate computed
+    #     at a different budget would overwrite this one.
+    if len(parts) > 1 and parts[0] == "evaluations" and parts[1] == "998_rebuttal":
+        seed = [i for i, p in enumerate(parts) if RE_SEED.match(p)]
+        if seed:
+            i = seed[0]
+            parts[i + 1:i + 1] = [f"smult={TAG}", f"tmult={TAG}"]
+            return parts
+
     # (3) pretrained evaluations: no optim anchor at all
     for i, p in enumerate(parts):
         if p in PRETRAINED and i + 3 <= len(parts):

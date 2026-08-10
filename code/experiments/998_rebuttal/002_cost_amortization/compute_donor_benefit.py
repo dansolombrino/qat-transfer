@@ -38,6 +38,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from src.duration import mult_tag
+
 import argparse
 import json
 import os
@@ -66,6 +68,11 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--family", default="ilharco_timm_supervised", choices=FAMILIES)
     parser.add_argument("--seed", type=int, default=2038)
+    parser.add_argument("--source-epoch-mult", required=True, type=float,
+                        help="Training-budget multiplier of the DONOR checkpoints "
+                             "the aggregated results were produced at.")
+    parser.add_argument("--target-epoch-mult", required=True, type=float,
+                        help="Training-budget multiplier of the RECEIVER checkpoints.")
     parser.add_argument("--qat-bits", type=int, default=3)
     parser.add_argument("--ptq-bits", type=int, default=3)
     parser.add_argument("--granularity", default="channel", choices=["tensor", "channel"])
@@ -91,6 +98,8 @@ def parse_args():
 def _run_dir(args):
     return os.path.join(
         f"seed={args.seed}",
+        f"smult={mult_tag(args.source_epoch_mult)}",
+        f"tmult={mult_tag(args.target_epoch_mult)}",
         f"qat=bits={args.qat_bits}_gran={args.granularity}",
         f"ptq=bits={args.ptq_bits}_gran={args.granularity}",
         f"split={args.split}",
