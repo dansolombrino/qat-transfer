@@ -39,7 +39,7 @@ from torch import nn
 
 from common.run_id import guard_run_config, run_id_path
 from common.status import StatusWriter
-from src.duration import mult_path_frag
+from src.duration import UNIT_MULT, mult_path_frag, mult_tag
 from src.vision.data.common import DATASET_NAME_TO_EPOCHS
 from src.vision.utils import sanitize_timm_model_name
 
@@ -148,8 +148,10 @@ def _validate_contract(cfg: DictConfig) -> None:
         "epoch_policy": "dataset_final",
         # Which training budget the checkpoints were produced at. Orthogonal to
         # epoch_policy: the policy says *which* checkpoint of a run is taken
-        # (the final one), the multiplier says how long that run was.
-        "epoch_mult": 1.0,
+        # (the final one), the multiplier says how long that run was. Spelled
+        # via mult_tag so this run-id component cannot drift from the mult=
+        # directory grammar used everywhere else.
+        "epoch_mult": mult_tag(UNIT_MULT),
         "vector_scope": "quantized_linear_weight",
         "module_selector": "apply_ptq_linear_v1",
         "accumulation_dtype": "float64",
