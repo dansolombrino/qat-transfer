@@ -26,7 +26,7 @@ if str(_CODE_DIR) not in sys.path:
 
 os.chdir(_PROJECT_ROOT)
 
-from src.duration import mult_path_frag, role_path_frag
+from src.duration import mult_path_frag, mult_tag, role_path_frag
 from src.vision.data.common import DATASET_NAME_TO_EPOCHS
 from src.vision.utils import sanitize_timm_model_name
 
@@ -305,7 +305,7 @@ def main():
     out_dir = os.path.join(
         "plots", "vision", "ilharco_timm_supervised",
         "999_paper_stuff", "001_qat_transfer", "donor_receiver_table_best_alpha",
-        f"seed={args.seed}", qat_frag,
+        f"seed={args.seed}", f"smult={mult_tag(args.source_epoch_mult)}", f"tmult={mult_tag(args.target_epoch_mult)}", qat_frag,
         _ptq_frag(args),
     )
     os.makedirs(out_dir, exist_ok=True)

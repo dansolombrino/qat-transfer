@@ -31,7 +31,7 @@ if str(_CODE_DIR) not in sys.path:
 
 os.chdir(_PROJECT_ROOT)
 
-from src.duration import mult_path_frag, role_path_frag
+from src.duration import mult_path_frag, mult_tag, role_path_frag
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -452,7 +452,7 @@ def plot_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag, metric_ta
         "plots", "text", "ilharco_automodelforsequenceclassification",
         "001_qat_transfer", "qv_transfer_heatmap",
 
-        model_dir, f"seed={args.seed}", optim_frag, qat_frag, _ptq_frag(args.ptq_bits, args.granularity, args.skip_modules),
+        model_dir, f"seed={args.seed}", f"smult={mult_tag(args.source_epoch_mult)}", f"tmult={mult_tag(args.target_epoch_mult)}", optim_frag, qat_frag, _ptq_frag(args.ptq_bits, args.granularity, args.skip_modules),
         qv_frag,
         _split_frag(args.eval_split),
     )
@@ -588,7 +588,7 @@ def plot_difference_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag
         "plots", "text", "ilharco_automodelforsequenceclassification",
         "001_qat_transfer", "qv_transfer_heatmap",
 
-        model_dir, f"seed={args.seed}", optim_frag, qat_frag, _ptq_frag(args.ptq_bits, args.granularity, args.skip_modules),
+        model_dir, f"seed={args.seed}", f"smult={mult_tag(args.source_epoch_mult)}", f"tmult={mult_tag(args.target_epoch_mult)}", optim_frag, qat_frag, _ptq_frag(args.ptq_bits, args.granularity, args.skip_modules),
         qv_frag,
         _split_frag(args.eval_split),
     )

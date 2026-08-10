@@ -29,7 +29,7 @@ if str(_CODE_DIR) not in sys.path:
 
 os.chdir(_PROJECT_ROOT)
 
-from src.duration import mult_path_frag, role_path_frag
+from src.duration import mult_path_frag, mult_tag, role_path_frag
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -445,7 +445,7 @@ def plot_sidebyside(data_fixed, data_best, args, model_dir, optim_frag, qat_frag
     out_dir = os.path.join(
         "plots", "vision", "ilharco_timm_supervised", "999_paper_stuff", "001_qat_transfer",
         "qv_transfer_heatmap_alpha_fixed_vs_best",
-        model_dir, f"seed={args.seed}", optim_frag, qat_frag,
+        model_dir, f"seed={args.seed}", f"smult={mult_tag(args.source_epoch_mult)}", f"tmult={mult_tag(args.target_epoch_mult)}", optim_frag, qat_frag,
         _ptq_frag(args.ptq_bits, args.granularity, args.skip_modules),
         _qv_frag(args.qv_alpha), _split_frag(args.eval_split),
     )

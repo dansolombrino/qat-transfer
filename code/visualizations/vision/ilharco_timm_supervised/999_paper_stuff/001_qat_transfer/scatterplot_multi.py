@@ -21,7 +21,7 @@ if str(_CODE_DIR) not in sys.path:
 
 os.chdir(_PROJECT_ROOT)
 
-from src.duration import mult_path_frag, role_path_frag
+from src.duration import mult_path_frag, mult_tag, role_path_frag
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -262,7 +262,7 @@ def plot_scatterplot(all_data, model_labels, args, qat_frag):
     model_tag = "__".join(sanitize_timm_model_name(m) for m in args.model_names)
     out_dir = os.path.join(
         "plots", "vision", "ilharco_timm_supervised", "999_paper_stuff", "001_qat_transfer",
-        "scatterplot_multi", model_tag, f"seed={args.seed}", qat_frag,
+        "scatterplot_multi", model_tag, f"seed={args.seed}", f"smult={mult_tag(args.source_epoch_mult)}", f"tmult={mult_tag(args.target_epoch_mult)}", qat_frag,
         _ptq_frag(args),
     )
     os.makedirs(out_dir, exist_ok=True)

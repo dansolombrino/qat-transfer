@@ -53,7 +53,7 @@ if str(_CODE_DIR) not in sys.path:
 
 os.chdir(_PROJECT_ROOT)
 
-from src.duration import mult_path_frag, role_path_frag
+from src.duration import mult_path_frag, mult_tag, role_path_frag
 import plotly.graph_objects as go
 
 from src.pv_tuning import pv_path_frag
@@ -411,7 +411,7 @@ def plot_difference(data, args, model_dir, optim_frag, pv_frag, qat_frag, qv_fra
     out_dir = os.path.join(
         "plots", "vision", "ilharco_timm_supervised", "008_pv_transfer",
         "qv_transfer_pv_heatmap_minus_qat",
-        model_dir, f"seed={args.seed}", optim_frag, pv_frag, qat_frag,
+        model_dir, f"seed={args.seed}", f"smult={mult_tag(args.source_epoch_mult)}", f"tmult={mult_tag(args.target_epoch_mult)}", optim_frag, pv_frag, qat_frag,
         _ptq_frag(args.ptq_bits, args.granularity, args.skip_modules),
         qv_frag,
         f"split={args.eval_split}",

@@ -616,7 +616,9 @@ def plot_best_alpha_minus_baseline_heatmap(data, args, model_dir, optim_frag,
 
     out_parts = [
         "plots", "vision", "ilharco_timm_supervised", "001_qat_transfer", "qv_transfer_heatmap",
-        model_dir, f"seed={args.seed}", optim_frag, qat_frag,
+        model_dir, f"seed={args.seed}",
+        f"smult={mult_tag(args.source_epoch_mult)}", f"tmult={mult_tag(args.target_epoch_mult)}",
+        optim_frag, qat_frag,
         _ptq_frag(args.ptq_bits, args.granularity, args.skip_modules),
     ]
     # Only a competitor's own figure is qualified by the sweep it subtracts;

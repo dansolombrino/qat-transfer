@@ -26,7 +26,7 @@ if str(_CODE_DIR) not in sys.path:
 
 os.chdir(_PROJECT_ROOT)
 
-from src.duration import mult_path_frag, role_path_frag
+from src.duration import mult_path_frag, mult_tag, role_path_frag
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -288,7 +288,7 @@ def plot_radar(all_data, model_labels, args, optim_frag, qat_frag):
     # -- export ---------------------------------------------------------------
     out_dir = os.path.join(
         "plots", "vision", "ilharco_open_clip", "999_paper_stuff", "001_qat_transfer",
-        "radar_plot", f"seed={args.seed}", optim_frag, qat_frag,
+        "radar_plot", f"seed={args.seed}", f"smult={mult_tag(args.source_epoch_mult)}", f"tmult={mult_tag(args.target_epoch_mult)}", optim_frag, qat_frag,
         _ptq_frag(args),
     )
     os.makedirs(out_dir, exist_ok=True)

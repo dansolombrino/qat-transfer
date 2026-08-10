@@ -26,7 +26,7 @@ if str(_CODE_DIR) not in sys.path:
 
 os.chdir(_PROJECT_ROOT)
 
-from src.duration import mult_path_frag, role_path_frag
+from src.duration import mult_path_frag, mult_tag, role_path_frag
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -362,7 +362,7 @@ def plot_radar(vision_data, text_data, args,
         "ilharco_timm_supervised_ilharco_automodelforsequenceclassification",
         "999_paper_stuff", "001_qat_transfer", "radar_plot",
         f"{vision_model_tag}__{text_model_tag}",
-        f"seed={args.seed}", combined_qat_frag,
+        f"seed={args.seed}", f"smult={mult_tag(args.source_epoch_mult)}", f"tmult={mult_tag(args.target_epoch_mult)}", combined_qat_frag,
         f"vision={_vision_ptq_frag(args)}__text={_text_ptq_frag(args)}",
     )
     os.makedirs(out_dir, exist_ok=True)

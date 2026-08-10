@@ -31,7 +31,7 @@ if str(_CODE_DIR) not in sys.path:
 
 os.chdir(_PROJECT_ROOT)
 
-from src.duration import mult_path_frag, role_path_frag
+from src.duration import mult_path_frag, mult_tag, role_path_frag
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -369,7 +369,7 @@ def _out_dir(args, model_dir, optim_frag, qat_frag, ptq_frag, gptq_frag, qv_frag
     # trees (mandatory quantizer-fragment rule for plot paths).
     return os.path.join(
         "plots", "vision", "ilharco_timm_supervised", "007_gptq_transfer", "qv_transfer_heatmap",
-        model_dir, f"seed={args.seed}", optim_frag, qat_frag, ptq_frag, gptq_frag,
+        model_dir, f"seed={args.seed}", f"smult={mult_tag(args.source_epoch_mult)}", f"tmult={mult_tag(args.target_epoch_mult)}", optim_frag, qat_frag, ptq_frag, gptq_frag,
         qv_frag,
         f"split={args.eval_split}",
     )

@@ -401,10 +401,10 @@ with `002_cost_amortization` writing flat files directly under its sub-phase dir
 
 Visualization output mirrors the evaluation grammar:
 ```
-plots/{vision,text,mixed_modalities}/{family}/{phase}/{plot_name}/{model_tag}/seed={seed}/[optim_frag/]{qat_frag}/{ptq_frag}/[qv_frag/]{split_frag}/<file>
+plots/{vision,text,mixed_modalities}/{family}/{phase}/{plot_name}/{model_tag}/seed={seed}/smult={ms}/tmult={mt}/[optim_frag/]{qat_frag}/{ptq_frag}/[qv_frag/]{split_frag}/<file>
 ```
 
-The fragments are built by module-level helpers (`_ptq_frag`, `_split_frag`, ...) shared by shape across the visualization scripts. **The `ptq_frag` segment is mandatory** — it was added so that runs sharing a QAT configuration but differing in evaluation-time PTQ no longer overwrite each other. When adding a plot script, include it.
+The fragments are built by module-level helpers (`_ptq_frag`, `_split_frag`, ...) shared by shape across the visualization scripts. The `smult=`/`tmult=` pair is mandatory for the same reason `ptq_frag` is: without it, figures for two training budgets overwrite each other. A figure names both budgets even when it plots a single family, because a transfer figure is a donor x receiver matrix. **The `ptq_frag` segment is mandatory** — it was added so that runs sharing a QAT configuration but differing in evaluation-time PTQ no longer overwrite each other. When adding a plot script, include it.
 
 ### Path construction pattern
 
