@@ -92,6 +92,10 @@ def parse_args():
     parser.add_argument("--model-names",   required=True, nargs="+",
                         help="timm model names, unsanitized")
     parser.add_argument("--seed",          required=True, type=int)
+    parser.add_argument("--source-epoch-mult", required=True, type=float,
+                        help="Training-budget multiplier of the DONOR checkpoints.")
+    parser.add_argument("--target-epoch-mult", required=True, type=float,
+                        help="Training-budget multiplier of the RECEIVER checkpoints.")
     parser.add_argument("--optim",         required=True, choices=["adamw", "sgd"])
     parser.add_argument("--lr",            required=True, type=float)
     parser.add_argument("--wd",            required=True, type=float)
@@ -196,8 +200,8 @@ def main():
         for donor in donors:
             donor_epochs = DATASET_NAME_TO_EPOCHS[donor]
 
-            fp_src_path  = _fp_ckpt_path(args, model_dir, optim_frag, donor, donor_epochs)
-            qat_src_path = _qat_ckpt_path(args, model_dir, optim_frag, donor, donor_epochs)
+            fp_src_path  = _fp_ckpt_path(args, model_dir, optim_frag, donor, donor_epochs, args.source_epoch_mult)
+            qat_src_path = _qat_ckpt_path(args, model_dir, optim_frag, donor, donor_epochs, args.source_epoch_mult)
 
             fp_src_sd  = _load(fp_src_path)
             qat_src_sd = _load(qat_src_path)
@@ -233,8 +237,8 @@ def main():
 
                 receiver_epochs = DATASET_NAME_TO_EPOCHS[receiver]
 
-                fp_tgt_path  = _fp_ckpt_path(args, model_dir, optim_frag, receiver, receiver_epochs)
-                qat_tgt_path = _qat_ckpt_path(args, model_dir, optim_frag, receiver, receiver_epochs)
+                fp_tgt_path  = _fp_ckpt_path(args, model_dir, optim_frag, receiver, receiver_epochs, args.target_epoch_mult)
+                qat_tgt_path = _qat_ckpt_path(args, model_dir, optim_frag, receiver, receiver_epochs, args.target_epoch_mult)
 
                 fp_tgt_sd = _load(fp_tgt_path)
                 if fp_tgt_sd is None:

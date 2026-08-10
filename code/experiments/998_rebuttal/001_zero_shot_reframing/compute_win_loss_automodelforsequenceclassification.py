@@ -46,6 +46,7 @@ if str(_CODE_DIR) not in sys.path:
 
 os.chdir(_PROJECT_ROOT)
 
+from src.duration import mult_path_frag, role_path_frag
 from src.text.data.common import DATASET_NAME_TO_EPOCHS
 from src.vision.utils import sanitize_hf_model_name
 
@@ -88,6 +89,11 @@ def parse_args():
     parser.add_argument("--model-names",     required=True, nargs="+",
                         help="HF model names, e.g. google-bert/bert-base-uncased")
     parser.add_argument("--seed",            required=True, type=int)
+    parser.add_argument("--source-epoch-mult", required=True, type=float,
+                        help="Training-budget multiplier of the DONOR checkpoints.")
+    parser.add_argument("--target-epoch-mult", required=True, type=float,
+                        help="Training-budget multiplier of the RECEIVER checkpoints, "
+                             "and of the baselines it is compared against.")
 
     parser.add_argument("--optim",           required=True, choices=["adamw", "sgd"])
     parser.add_argument("--lr",              required=True, type=float)
@@ -139,29 +145,29 @@ def _ptq_frag(args, skip_module):
 # ---------------------------------------------------------------------------
 # Per-baseline path builders
 # ---------------------------------------------------------------------------
-def _fp_ptq_path(model_dir, dataset, seed, optim_frag, ptq_frag):
+def _fp_ptq_path(model_dir, dataset, seed, target_epoch_mult, optim_frag, ptq_frag):
     return os.path.join(
         EVAL_ROOT_BASELINES, "fp_ptq", model_dir, dataset,
-        optim_frag, ptq_frag, f"seed={seed}", "eval_results.json",
+        optim_frag, mult_path_frag(target_epoch_mult), ptq_frag, f"seed={seed}", "eval_results.json",
     )
 
 
-def _qat_ptq_path(model_dir, dataset, seed, optim_frag, qat_frag, ptq_frag):
+def _qat_ptq_path(model_dir, dataset, seed, target_epoch_mult, optim_frag, qat_frag, ptq_frag):
     return os.path.join(
         EVAL_ROOT_BASELINES, "qat_ptq", model_dir, dataset,
-        optim_frag, qat_frag, ptq_frag, f"seed={seed}", "eval_results.json",
+        optim_frag, mult_path_frag(target_epoch_mult), qat_frag, ptq_frag, f"seed={seed}", "eval_results.json",
     )
 
 
 # ---------------------------------------------------------------------------
 # QV transfer path builders
 # ---------------------------------------------------------------------------
-def _qv_cell_prefix(model_dir, donor, receiver, seed, optim_frag, qat_frag, ptq_frag):
+def _qv_cell_prefix(model_dir, donor, receiver, seed, source_epoch_mult, target_epoch_mult, optim_frag, qat_frag, ptq_frag):
     """Everything above the qv=alpha=... level for one donor-receiver cell."""
     return os.path.join(
         EVAL_ROOT_QV, model_dir,
-        f"src={donor}_seed={seed}",
-        f"tgt={receiver}_seed={seed}",
+        role_path_frag("src", donor, seed, source_epoch_mult),
+        role_path_frag("tgt", receiver, seed, target_epoch_mult),
         optim_frag, qat_frag, ptq_frag,
     )
 
@@ -210,7 +216,7 @@ def load_pairs(model_dir, datasets, args, optim_frag, qat_frag, ptq_frag):
     missing = []
 
     for receiver in datasets:
-        baseline_path = _fp_ptq_path(model_dir, receiver, args.seed, optim_frag, ptq_frag)
+        baseline_path = _fp_ptq_path(model_dir, receiver, args.seed, args.target_epoch_mult, optim_frag, ptq_frag)
         baseline = _load_value(baseline_path, TEST_ACC_KEY)
         if baseline is None:
             missing.append(baseline_path)
@@ -218,6 +224,7 @@ def load_pairs(model_dir, datasets, args, optim_frag, qat_frag, ptq_frag):
 
         for donor in datasets:
             cell_prefix = _qv_cell_prefix(model_dir, donor, receiver, args.seed,
+                                          args.source_epoch_mult, args.target_epoch_mult,
                                           optim_frag, qat_frag, ptq_frag)
 
             unit_path = _qv_eval_path(cell_prefix, 1.0, "test")
@@ -438,13 +445,14 @@ def check_diagonal(model_dir, datasets, args, optim_frag, qat_frag, ptq_frag):
     discrepancies = {}
     for dataset in datasets:
         cell_prefix = _qv_cell_prefix(model_dir, dataset, dataset, args.seed,
+                                      args.source_epoch_mult, args.target_epoch_mult,
                                       optim_frag, qat_frag, ptq_frag)
         diag = _load_value(
             _qv_eval_path(cell_prefix, 1.0, "test"),
             DIAGONAL_CHECK_METRIC_KEY,
         )
         qat_ptq = _load_value(
-            _qat_ptq_path(model_dir, dataset, args.seed, optim_frag, qat_frag, ptq_frag),
+            _qat_ptq_path(model_dir, dataset, args.seed, args.target_epoch_mult, optim_frag, qat_frag, ptq_frag),
             TEST_ACC_KEY,
         )
         if diag is not None and qat_ptq is not None:
@@ -569,6 +577,20 @@ def main():
         "datasets": datasets,
         "models":   models,
     }
+
+    # Refuse to overwrite a good aggregate with an empty one. A model that
+    # yields zero pairs means the constructed path grammar does not match the
+    # tree -- a wrong seed, a wrong optim fragment, a wrong multiplier -- and
+    # writing that result out would replace real numbers with silence.
+    empty = [name for name, entry in models.items() if not entry.get("pairs")]
+    if empty or not models:
+        print(
+            f"[ERROR] {len(empty)} of {len(models)} model(s) produced zero pairs: "
+            f"{', '.join(sorted(empty)) or '(no models at all)'}.\n"
+            "        Refusing to write the aggregate; nothing was overwritten.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     out_dir = _out_dir(args)
     os.makedirs(out_dir, exist_ok=True)

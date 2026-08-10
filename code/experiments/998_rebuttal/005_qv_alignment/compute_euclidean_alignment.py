@@ -39,6 +39,7 @@ from torch import nn
 
 from common.run_id import guard_run_config, run_id_path
 from common.status import StatusWriter
+from src.duration import mult_path_frag
 from src.vision.data.common import DATASET_NAME_TO_EPOCHS
 from src.vision.utils import sanitize_timm_model_name
 
@@ -64,6 +65,7 @@ RUN_ID_PARAMS = [
     "ptq_skip_modules",
     "checkpoint_kind",
     "epoch_policy",
+    "epoch_mult",
     "vector_scope",
     "module_selector",
     "accumulation_dtype",
@@ -144,6 +146,10 @@ def _validate_contract(cfg: DictConfig) -> None:
         "qat_granularity": "channel",
         "checkpoint_kind": "classifier",
         "epoch_policy": "dataset_final",
+        # Which training budget the checkpoints were produced at. Orthogonal to
+        # epoch_policy: the policy says *which* checkpoint of a run is taken
+        # (the final one), the multiplier says how long that run was.
+        "epoch_mult": 1.0,
         "vector_scope": "quantized_linear_weight",
         "module_selector": "apply_ptq_linear_v1",
         "accumulation_dtype": "float64",
@@ -254,6 +260,7 @@ def _checkpoint_path(cfg: DictConfig, task: str, kind: str) -> Path:
         / sanitize_timm_model_name(cfg.model_name)
         / task
         / optim_tag
+        / mult_path_frag(cfg.epoch_mult)
     )
     if kind == "qat":
         skip_tag = "-".join(sorted(cfg.qat_skip_modules)) or "none"
