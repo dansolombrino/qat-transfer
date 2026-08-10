@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # One fp_awq baseline cell (rebuttal WP7).
-# Usage: v_fp_awq.sh <BITS> <DATASET> <GPU> <PY> <ROOT> [LIMIT_NUM_BATCHES]
+# Usage: v_fp_awq.sh <BITS> <DATASET> <GPU> <PY> <ROOT> [LIMIT_NUM_BATCHES] [EPOCH_MULT]
+#
+# EPOCH_MULT (canonical form: 1, 0.25, 4) defaults to 1 -- the schedule every
+# existing run used -- so omitting it reproduces the previous behaviour.
 #
 # Model is fixed to vit_base_patch16_224.orig_in21k (wave-1 scope, matching the
 # fp_gptq wave so the two competitor columns are directly comparable). All Hydra
@@ -14,7 +17,7 @@
 # tree, so a smoke can never contaminate real results -- but it also means a
 # smoke needs a dryrun FP checkpoint to exist. Leave it unset for real runs.
 set -u
-BITS="$1"; DS="$2"; GPU="$3"; PY="$4"; ROOT="$5"; LNB="${6:-}"
+BITS="$1"; DS="$2"; GPU="$3"; PY="$4"; ROOT="$5"; LNB="${6:-}"; MULT="${7:-1}"
 cd "$ROOT" || exit 1
 
 EXTRA=()
@@ -29,6 +32,7 @@ fi
   dataset_name="$DS" \
   seed=2038 \
   gpu="$GPU" \
+  epoch_mult="$MULT" \
   batch_size=128 \
   lr=1e-05 \
   wd=0.1 \

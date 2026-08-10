@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # PV baselines for one dataset: evaluate_pv.py and evaluate_pv_ptq.py.
-# Usage: v_pv_baseline.sh <DATASET> <GPU> <PY> <ROOT> <TAU> [TORCH_NUM_WORKERS]
+# Usage: v_pv_baseline.sh <DATASET> <GPU> <PY> <ROOT> <TAU> [TORCH_NUM_WORKERS] [EPOCH_MULT]
+#
+# EPOCH_MULT (canonical form: 1, 0.25, 4) defaults to 1 -- the schedule every
+# existing run used -- so omitting it reproduces the previous behaviour.
 #
 # These fill the `PV` and `PV+PTQ` columns of the 008 heatmap. They are also a
 # real check, not just plotting furniture: finetune_pv.py settles the model onto
@@ -14,12 +17,14 @@
 #
 # Overrides live here, not in the dispatcher (multi-rig-dispatch rule 6).
 set -u
-DS="$1"; GPU="$2"; PY="$3"; ROOT="$4"; TAU="$5"; NW="${6:-}"
+DS="$1"; GPU="$2"; PY="$3"; ROOT="$4"; TAU="$5"; NW="${6:-}"; MULT="${7:-1}"
 
 cd "$ROOT" || exit 1
 [ -n "$NW" ] && export TORCH_NUM_WORKERS="$NW"
 
 PV_ARGS=(
+
+  epoch_mult="$MULT"
   model_name=vit_base_patch16_224.orig_in21k
   dataset_name="$DS"
   batch_size=128

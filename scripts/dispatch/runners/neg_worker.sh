@@ -10,9 +10,12 @@
 # used only to launch these workers and to poll them, and the work-stealing
 # happens locally under flock.
 #
-# Usage: neg_worker.sh <QUEUE> <DONE> <LOG> <GPU> <NAME> <RUNNER> <PY> <ROOT>
+# Usage: neg_worker.sh <QUEUE> <DONE> <LOG> <GPU> <NAME> <RUNNER> <PY> <ROOT> [SRC_MULT] [TGT_MULT]
+#
+# The two multipliers are only passed through to t_qv_alpha.sh; this worker
+# builds no paths of its own. Both default to 1.
 set -u
-QUEUE=$1; DONE=$2; LOG=$3; GPU=$4; NAME=$5; RUNNER=$6; PY=$7; ROOT=$8
+QUEUE=$1; DONE=$2; LOG=$3; GPU=$4; NAME=$5; RUNNER=$6; PY=$7; ROOT=$8; SMULT=${9:-1}; TMULT=${10:-1}
 LOCK="${QUEUE%.txt}.lock"
 MODEL="google-bert/bert-base-uncased"
 SKIP="classifier"
@@ -40,7 +43,7 @@ while item=$(pop); do
   [ -z "$SRCS" ] && SRCS="$ALLT"
   echo "### [$(date +%T)] $NAME gpu$GPU <- alpha=$ALPHA split=$SPLIT tgt=$TGT" >> "$LOG"
   START=$(date +%s)
-  if bash "$RUNNER" "$BITS" "$MODEL" "$TGT" "$SRCS" "$SKIP" "$ALPHA" "$SPLIT" "$GPU" "$PY" "$ROOT" >> "$LOG" 2>&1; then
+  if bash "$RUNNER" "$BITS" "$MODEL" "$TGT" "$SRCS" "$SKIP" "$ALPHA" "$SPLIT" "$GPU" "$PY" "$ROOT" "$SMULT" "$TMULT" >> "$LOG" 2>&1; then
     RC=OK
   else
     RC=FAILED

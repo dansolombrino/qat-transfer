@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # One 006 qv_transfer_repqvit shard (rebuttal WP4, Task 2).
-# Usage: v_qv_repqvit.sh <TARGETS_CSV> <GPU> <W_BITS> <A_BITS> <PY> <ROOT>
+# Usage: v_qv_repqvit.sh <TARGETS_CSV> <GPU> <W_BITS> <A_BITS> <PY> <ROOT> [SRC_MULT] [TGT_MULT]
+#
+# SRC_MULT / TGT_MULT (canonical form: 1, 0.25, 4) are independent -- that is the
+# point of the epoch_mult axis, since donor and receiver share one optim= fragment
+# and would otherwise have nowhere to disagree. Both default to 1.
 # All 22 donors are swept against the shard's receivers. Overrides live here,
 # not in the dispatcher, so nothing crosses two levels of ssh quoting
 # (multi-rig-dispatch rule 6). The script's own skip_existing guard makes this
 # safe to re-run after an interruption.
 set -u
-TGTS="$1"; GPU="$2"; WB="$3"; AB="$4"; PY="$5"; ROOT="$6"
+TGTS="$1"; GPU="$2"; WB="$3"; AB="$4"; PY="$5"; ROOT="$6"; SMULT="${7:-1}"; TMULT="${8:-1}"
 SRCS=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet
 cd "$ROOT" || exit 1
 "$PY" code/experiments/vision/ilharco_timm_supervised/006_qat_transfer_repqvit/qv_transfer_repqvit.py \
@@ -18,9 +22,9 @@ cd "$ROOT" || exit 1
   wl=500 \
   max_grad_norm=1.0 \
   "source.dataset_names=[$SRCS]" \
-  source.seed=2038 \
+  source.seed=2038 source.epoch_mult=$SMULT \
   "target.dataset_names=[$TGTS]" \
-  target.seed=2038 \
+  target.seed=2038 target.epoch_mult=$TMULT \
   qat.bits=3 \
   qat.granularity=channel \
   'qat.skip_modules=[head]' \

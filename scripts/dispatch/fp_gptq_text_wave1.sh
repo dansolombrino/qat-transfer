@@ -23,7 +23,7 @@ DATASETS=(AmazonReviewsClassification IMDB ToxicConversations Banking77 MassiveI
 
 # Hard precondition (skill rule 3): every FP backbone checkpoint must exist on
 # behemoth before launching, at the canonical bs=32/ml=128 fragment.
-CK=$($RSSH behemoth "n=0; for d in ${DATASETS[*]}; do ls $B/storage/checkpoints/text/ilharco_automodelforsequenceclassification/fp/$MODEL_SAN/\$d/optim=adamw_lr=1e-05_wd=0.1_ls=0.0_mgn=1.0_bs=32_ml=128/seed=2038/backbone_epoch_*.pt >/dev/null 2>&1 && n=\$((n+1)); done; echo \$n")
+CK=$($RSSH behemoth "n=0; for d in ${DATASETS[*]}; do ls $B/storage/checkpoints/text/ilharco_automodelforsequenceclassification/fp/$MODEL_SAN/\$d/optim=adamw_lr=1e-05_wd=0.1_ls=0.0_mgn=1.0_bs=32_ml=128/mult=*/seed=2038/backbone_epoch_*.pt >/dev/null 2>&1 && n=\$((n+1)); done; echo \$n")
 if [ "${CK:-0}" -ne "${#DATASETS[@]}" ]; then
   echo "PRECONDITION FAILED: $CK/${#DATASETS[@]} FP backbones on behemoth -- aborting" | tee "$DONE"
   exit 1

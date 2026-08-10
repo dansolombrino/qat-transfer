@@ -19,7 +19,7 @@
 # the wave safe to re-run after an interruption -- and it must be checked on
 # the artifact, never on an ssh exit status (rule 2).
 set -u
-DS="$1"; GPU="$2"; PY="$3"; ROOT="$4"; NW="${5:-}"; DELTA="${6:-0.0}"; TAU="${7:-0.01}"
+DS="$1"; GPU="$2"; PY="$3"; ROOT="$4"; NW="${5:-}"; DELTA="${6:-0.0}"; TAU="${7:-0.01}"; MULT="${8:-1}"
 
 cd "$ROOT" || exit 1
 
@@ -30,8 +30,13 @@ cd "$ROOT" || exit 1
 
 MODEL_SAN=vit_base_patch16_224_orig_in21k
 OPTIM="optim=adamw_lr=1e-05_wd=0.1_ls=0.0_wl=500_mgn=1.0_bs=128"
+# Training-budget multiplier, in its canonical form (1, 0.25, 4) -- the same
+# token mult_path_frag emits, and accepted verbatim as the Hydra override since
+# mult_path_frag(1) and mult_path_frag(1.0) agree. It is part of the path since
+# the epoch_mult axis, so the idempotency check below must carry it, or a
+# completed run looks absent and is re-run -- hours of GPU time, silently.
 PVFRAG="pv=bits=3_gran=channel_skip=head_delta=${DELTA}_tau=${TAU}_trust=none_pevery=1_temp=0.0"
-CKDIR="$ROOT/storage/checkpoints/vision/ilharco_timm_supervised/pv/$MODEL_SAN/$DS/$OPTIM/$PVFRAG/seed=2038"
+CKDIR="$ROOT/storage/checkpoints/vision/ilharco_timm_supervised/pv/$MODEL_SAN/$DS/$OPTIM/mult=$MULT/$PVFRAG/seed=2038"
 
 if ls "$CKDIR"/classifier_epoch_*.pt >/dev/null 2>&1; then
   echo "V_PV_SKIP $DS d=$DELTA t=$TAU gpu$GPU (checkpoint already present)"
@@ -49,6 +54,7 @@ fi
   ls=0.0 \
   wl=500 \
   max_grad_norm=1.0 \
+  epoch_mult="$MULT" \
   pv.bits=3 \
   pv.granularity=channel \
   'pv.skip_modules=[head]' \

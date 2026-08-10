@@ -77,7 +77,7 @@ HAVE="$RUNDIR/have.txt"; : > "$HAVE"
 for spec in "${GATED[@]}"; do
   IFS='|' read -r name ssh root ckpt evalb gpus ppg <<< "$spec"
   run_on "$ssh" "find $evalb/$QVREL/$MODEL_DIR -path '*$QATF*' -path '*$PTQF*' -path '*qv=alpha=-*' -name eval_results.json 2>/dev/null" \
-    | sed -E 's#.*/src=([^_]+)_seed=[0-9]+/tgt=([^_]+)_seed=[0-9]+/.*/qv=alpha=([^/]+)/split=([^/]+)/.*#\3 \4 \2#' >> "$HAVE"
+    | sed -E 's#.*/src=([^_]+)_seed=[0-9]+_mult=[^/]+/tgt=([^_]+)_seed=[0-9]+_mult=[^/]+/.*/qv=alpha=([^/]+)/split=([^/]+)/.*#\3 \4 \2#' >> "$HAVE"
 done
 sort "$HAVE" | uniq -c | awk '$1>=11 {print $2, $3, $4}' | sort -u > "$RUNDIR/done_jobs.txt"
 say "already complete: $(wc -l < "$RUNDIR/done_jobs.txt") jobs"

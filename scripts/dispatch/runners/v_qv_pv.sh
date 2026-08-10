@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # One 008 qv_transfer_pv shard: a single receiver, swept against all 22 donors.
-# Usage: v_qv_pv.sh <TARGET> <GPU> <PY> <ROOT> <TAU> <SPLIT> [TORCH_NUM_WORKERS]
+# Usage: v_qv_pv.sh <TARGET> <GPU> <PY> <ROOT> <TAU> <SPLIT> [TORCH_NUM_WORKERS] [SRC_MULT] [TGT_MULT]
+#
+# SRC_MULT / TGT_MULT (canonical form: 1, 0.25, 4) are independent -- that is the
+# point of the epoch_mult axis, since donor and receiver share one optim= fragment
+# and would otherwise have nowhere to disagree. Both default to 1.
 #
 # Overrides live here, not in the dispatcher, so nothing crosses two levels of
 # ssh quoting (multi-rig-dispatch rule 6). The script's own skip_existing guard
@@ -12,7 +16,7 @@
 # than the QAT QV and orthogonal to it (cosine 0.035), because it is dominated
 # by quantization rounding error rather than by anything PV learned.
 set -u
-TGT="$1"; GPU="$2"; PY="$3"; ROOT="$4"; TAU="$5"; SPLIT="$6"; NW="${7:-}"
+TGT="$1"; GPU="$2"; PY="$3"; ROOT="$4"; TAU="$5"; SPLIT="$6"; NW="${7:-}"; SMULT="${8:-1}"; TMULT="${9:-1}"
 
 SRCS=Cars,DTD,EuroSAT,GTSRB,MNIST,RESISC45,SUN397,SVHN,CIFAR10,CIFAR100,STL10,Food101,Flowers102,FER2013,PCAM,OxfordIIITPet,RenderedSST2,EMNIST,FashionMNIST,KMNIST,TinyImageNet,ImageNet
 

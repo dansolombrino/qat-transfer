@@ -25,7 +25,7 @@ DATASETS=(ImageNet SUN397 TinyImageNet Food101 PCAM EMNIST Cars CIFAR100 CIFAR10
 # Hard precondition (skill rule 3): every FP checkpoint must exist on behemoth
 # before launching -- the eval script would die per-cell otherwise, and a grid
 # against an incomplete set silently omits rows.
-CK=$($RSSH behemoth "n=0; for d in ${DATASETS[*]}; do ls $B/storage/checkpoints/vision/ilharco_timm_supervised/fp/$MODEL_SAN/\$d/optim=*/seed=2038/classifier_epoch_*.pt >/dev/null 2>&1 && n=\$((n+1)); done; echo \$n")
+CK=$($RSSH behemoth "n=0; for d in ${DATASETS[*]}; do ls $B/storage/checkpoints/vision/ilharco_timm_supervised/fp/$MODEL_SAN/\$d/optim=*/mult=*/seed=2038/classifier_epoch_*.pt >/dev/null 2>&1 && n=\$((n+1)); done; echo \$n")
 if [ "${CK:-0}" -ne "${#DATASETS[@]}" ]; then
   echo "PRECONDITION FAILED: $CK/${#DATASETS[@]} FP checkpoints on behemoth -- aborting" | tee "$DONE"
   exit 1

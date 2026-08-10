@@ -21,6 +21,12 @@ PY=.venv/bin/python
 GPU=0
 MODEL_SAN=vit_base_patch16_224_orig_in21k
 OPTIM_FRAG='optim=adamw_lr=1e-05_wd=0.1_ls=0.0_wl=500_mgn=1.0_bs=128'
+# Training-budget multiplier, given in its CANONICAL form (1, 0.25, 4) -- the
+# same token mult_path_frag emits. Do not re-derive it in shell: canonicalising
+# floats is the one thing src/duration.py exists to keep in a single place, and
+# a bash approximation is how "mult=4" and "mult=4.0" become two trees.
+MULT=${MULT:-1}
+MULT_FRAG="mult=$MULT"
 EVAL_ROOT="$ROOT/evaluations/vision/ilharco_timm_supervised/000_baselines/vision/fp_repqvit/$MODEL_SAN"
 CK_ROOT="$ROOT/storage/checkpoints/vision/ilharco_timm_supervised/fp/$MODEL_SAN"
 
@@ -36,7 +42,7 @@ SETTINGS=(4:4 3:8 3:4)
 # the grid silently omits rows.
 CK=0
 for DS in "${DATASETS[@]}"; do
-  ls "$CK_ROOT/$DS/$OPTIM_FRAG/seed=2038/classifier_epoch_"*.pt >/dev/null 2>&1 && CK=$((CK + 1))
+  ls "$CK_ROOT/$DS/$OPTIM_FRAG/$MULT_FRAG/seed=2038/classifier_epoch_"*.pt >/dev/null 2>&1 && CK=$((CK + 1))
 done
 if [ "$CK" -ne "${#DATASETS[@]}" ]; then
   echo "PRECONDITION FAILED: $CK/${#DATASETS[@]} FP checkpoints present -- aborting" | tee "$DONE"
@@ -50,7 +56,7 @@ TOTAL=$((${#DATASETS[@]} * ${#SETTINGS[@]}))
 for WA in "${SETTINGS[@]}"; do
   WB="${WA%%:*}"; AB="${WA##*:}"
   for DS in "${DATASETS[@]}"; do
-    ART="$EVAL_ROOT/$DS/$OPTIM_FRAG/repqvit=wbits=${WB}_abits=${AB}_skip=head_cbs=32/seed=2038/eval_results.json"
+    ART="$EVAL_ROOT/$DS/$OPTIM_FRAG/$MULT_FRAG/repqvit=wbits=${WB}_abits=${AB}_skip=head_cbs=32/seed=2038/eval_results.json"
     if [ -f "$ART" ]; then
       echo "w${WB}a${AB}|$DS|SKIP_EXISTING" >> "$DONE"
       continue
