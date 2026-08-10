@@ -46,6 +46,7 @@ os.chdir(_PROJECT_ROOT)
 from dotenv import load_dotenv
 load_dotenv()
 
+from src.duration import mult_path_frag, parse_role_frag, role_path_frag
 from src.pv_tuning import pv_path_frag
 from src.vision.utils import sanitize_timm_model_name
 
@@ -81,6 +82,12 @@ def parse_args():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--model-name",    required=True)
     p.add_argument("--seed",          required=True, type=int)
+    p.add_argument("--source-epoch-mult", required=True, type=float,
+                   help="Training-budget multiplier of the DONOR checkpoints. "
+                        "Selection and the reported test number must use the "
+                        "same budget, so this is explicit with no default.")
+    p.add_argument("--target-epoch-mult", required=True, type=float,
+                   help="Training-budget multiplier of the RECEIVER checkpoints.")
 
     p.add_argument("--lr",            required=True, type=float)
     p.add_argument("--wd",            required=True, type=float)
@@ -143,8 +150,8 @@ def _pair_dir(args, src, tgt):
     return os.path.join(
         EVAL_ROOT_QV,
         sanitize_timm_model_name(args.model_name),
-        f"src={src}_seed={args.seed}",
-        f"tgt={tgt}_seed={args.seed}",
+        role_path_frag("src", src, args.seed, args.source_epoch_mult),
+        role_path_frag("tgt", tgt, args.seed, args.target_epoch_mult),
         _optim_frag(args.lr, args.wd, args.ls, args.wl, args.max_grad_norm, args.batch_size),
         _pv_frag(args),
         _ptq_frag(args.ptq_bits, args.ptq_granularity, args.ptq_skip_modules),
@@ -198,9 +205,6 @@ def _read_test_accuracy(args, src, tgt, alpha, metric_key):
 def find_best_alphas_for_metric(args, files, metric_key):
     # best[src_dataset][tgt_dataset] = {"alpha", "val_acc", "test_acc"}
     best = {}
-
-    src_re = re.compile(r"^src=(.+?)_seed=\d+$")
-    tgt_re = re.compile(r"^tgt=(.+?)_seed=\d+$")
     alpha_re = re.compile(r"^qv=alpha=(.+)$")
 
     for fpath in files:
@@ -208,13 +212,12 @@ def find_best_alphas_for_metric(args, files, metric_key):
 
         src_dataset = tgt_dataset = alpha_val = None
         for part in parts:
-            m = src_re.match(part)
-            if m:
-                src_dataset = m.group(1)
-                continue
-            m = tgt_re.match(part)
-            if m:
-                tgt_dataset = m.group(1)
+            role = parse_role_frag(part)
+            if role is not None:
+                if role.role == "src":
+                    src_dataset = role.dataset
+                else:
+                    tgt_dataset = role.dataset
                 continue
             m = alpha_re.match(part)
             if m:

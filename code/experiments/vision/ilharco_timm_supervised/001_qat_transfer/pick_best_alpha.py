@@ -30,6 +30,7 @@ if str(_CODE_DIR) not in sys.path:
 from dotenv import load_dotenv
 load_dotenv()
 
+from src.duration import mult_path_frag, parse_role_frag, role_path_frag
 from src.vision.utils import sanitize_timm_model_name
 
 
@@ -79,6 +80,12 @@ def parse_args():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--model-name",    required=True)
     p.add_argument("--seed",          required=True, type=int)
+    p.add_argument("--source-epoch-mult", required=True, type=float,
+                   help="Training-budget multiplier of the DONOR checkpoints. "
+                        "Selection and the reported test number must use the "
+                        "same budget, so this is explicit with no default.")
+    p.add_argument("--target-epoch-mult", required=True, type=float,
+                   help="Training-budget multiplier of the RECEIVER checkpoints.")
 
     p.add_argument("--lr",            required=True, type=float)
     p.add_argument("--wd",            required=True, type=float)
@@ -134,8 +141,8 @@ def _glob_val_results(args):
     # Glob: src=*_seed=*/tgt=*_seed=*/<optim>/<qat>/<ptq>/qv=alpha=*/split=val/eval_results.json
     pattern = os.path.join(
         EVAL_ROOT_QV, model_dir,
-        f"src=*_seed={args.seed}",
-        f"tgt=*_seed={args.seed}",
+        f"src=*_seed={args.seed}_{mult_path_frag(args.source_epoch_mult)}",
+        f"tgt=*_seed={args.seed}_{mult_path_frag(args.target_epoch_mult)}",
         optim, qat, ptq,
         "qv=alpha=*",
         "split=val",
@@ -154,9 +161,6 @@ def _glob_val_results(args):
 def find_best_alphas_for_metric(files, metric_key):
     # best[src_dataset][tgt_dataset] = {"alpha": float, "acc": float}
     best = {}
-
-    src_re = re.compile(r"^src=(.+?)_seed=\d+$")
-    tgt_re = re.compile(r"^tgt=(.+?)_seed=\d+$")
     alpha_re = re.compile(r"^qv=alpha=(.+)$")
 
     for fpath in files:
@@ -164,13 +168,12 @@ def find_best_alphas_for_metric(files, metric_key):
 
         src_dataset = tgt_dataset = alpha_val = None
         for part in parts:
-            m = src_re.match(part)
-            if m:
-                src_dataset = m.group(1)
-                continue
-            m = tgt_re.match(part)
-            if m:
-                tgt_dataset = m.group(1)
+            role = parse_role_frag(part)
+            if role is not None:
+                if role.role == "src":
+                    src_dataset = role.dataset
+                else:
+                    tgt_dataset = role.dataset
                 continue
             m = alpha_re.match(part)
             if m:
@@ -270,8 +273,10 @@ def _build_cmd(args, src, tgt, alpha, skip_list, *, submitit=True):
         f"max_grad_norm={args.max_grad_norm}",
         f"'source.dataset_names=[{src}]'",
         f"source.seed={args.seed}",
+        f"source.epoch_mult={args.source_epoch_mult}",
         f"'target.dataset_names=[{tgt}]'",
         f"target.seed={args.seed}",
+        f"target.epoch_mult={args.target_epoch_mult}",
         f"qat.bits={args.bits}",
         f"qat.granularity={args.granularity}",
         f"'qat.skip_modules=[{skip_list}]'",
@@ -352,8 +357,8 @@ def output_disk(all_best, args):
                 entry = best[src][tgt]
                 best_alpha_dir = os.path.join(
                     EVAL_ROOT_QV, model_dir,
-                    f"src={src}_seed={args.seed}",
-                    f"tgt={tgt}_seed={args.seed}",
+                    role_path_frag("src", src, args.seed, args.source_epoch_mult),
+                    role_path_frag("tgt", tgt, args.seed, args.target_epoch_mult),
                     optim, qat, ptq,
                 )
                 os.makedirs(best_alpha_dir, exist_ok=True)
