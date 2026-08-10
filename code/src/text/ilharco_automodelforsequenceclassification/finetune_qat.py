@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import copy
+import json
 import logging
 import os
 
@@ -155,6 +156,7 @@ def main(cfg: DictConfig) -> None:
         sanitized_model,
         cfg.dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}_ml={cfg.max_length}",
+        mult_path_frag(cfg.epoch_mult),
         f"qat=bits={cfg.qat.bits}_gran={cfg.qat.granularity}_skip={skip_tag}",
         f"seed={cfg.seed}",
     ]
@@ -236,12 +238,6 @@ def main(cfg: DictConfig) -> None:
         pprint(model, expand_all=True)
 
     # Epochs, gradient accumulation
-    epochs = DATASET_NAME_TO_EPOCHS[cfg.dataset_name]
-    effective_epochs = (
-        min(epochs, cfg.limit_num_epochs)
-        if cfg.limit_num_epochs is not None
-        else epochs
-    )
     num_batches = len(dataset.train_loader)
     assert REFERENCE_BATCH_SIZE % cfg.batch_size == 0, (
         f"batch_size={cfg.batch_size} must evenly divide {REFERENCE_BATCH_SIZE}"
@@ -253,7 +249,26 @@ def main(cfg: DictConfig) -> None:
     # a regular nn.Parameter; STE keeps the forward differentiable).
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(params, lr=cfg.lr, weight_decay=cfg.wd)
-    scheduler = linear_lr(optimizer, cfg.lr, epochs * num_batches // accum_steps)
+    # Training budget. `epoch_mult` scales this dataset's schedule; mult=1.0 is
+    # pinned to reproduce the pre-multiplier behaviour exactly, so the loop still
+    # runs every epoch to completion and the max_steps break never fires.
+    #
+    # This family has no warmup at all -- linear_lr decays from lr to 0 with no
+    # warmup phase and the configs carry no `wl` -- so it is the one place the
+    # multiplier cannot interact with warmup length.
+    #
+    # It also repairs a pre-existing dryrun inconsistency: the loop ran
+    # `effective_epochs` (clamped by limit_num_epochs) while the scheduler length
+    # and the checkpoint filename used the *unclamped* table value.
+    budget = training_budget(
+        cfg.dataset_name, cfg.epoch_mult, num_batches, accum_steps,
+        DATASET_NAME_TO_EPOCHS, cfg.limit_num_epochs,
+    )
+    effective_epochs = budget.loop_epochs
+    max_steps = budget.max_steps
+    ckpt_epochs = budget.ckpt_epochs
+
+    scheduler = linear_lr(optimizer, cfg.lr, max_steps)
     loss_fn = (
         LabelSmoothing(cfg.ls) if cfg.ls > 0 else torch.nn.CrossEntropyLoss()
     )
@@ -262,7 +277,10 @@ def main(cfg: DictConfig) -> None:
     epoch_bar = tqdm(
         range(effective_epochs), desc="epochs", colour=random_tqdm_color(), **TQDM_KW
     )
+    budget_exhausted = False
     for epoch in epoch_bar:
+        if budget_exhausted:
+            break
         model.train()
         train_bar = tqdm(
             dataset.train_loader,
@@ -309,6 +327,12 @@ def main(cfg: DictConfig) -> None:
 
                 optimizer.zero_grad()
                 accum_loss = 0.0
+
+                # Stop mid-epoch once the budget is spent. At mult=1.0 max_steps
+                # equals the full schedule, so this never fires.
+                if opt_step + 1 >= max_steps:
+                    budget_exhausted = True
+                    break
 
         # Per-epoch validation: evaluate a PTQ-converted deepcopy so the
         # reported accuracy reflects the deployed (truly quantized) model.
@@ -358,11 +382,20 @@ def main(cfg: DictConfig) -> None:
     head_state = {k: v for k, v in full_sd.items() if k.startswith(head_prefix)}
     backbone_state = {k: v for k, v in full_sd.items() if not k.startswith(head_prefix)}
 
-    backbone_path = os.path.join(save_dir, f"backbone_epoch_{epochs}.pt")
+    backbone_path = os.path.join(save_dir, f"backbone_epoch_{ckpt_epochs}.pt")
     torch.save(backbone_state, backbone_path)
 
-    head_path = os.path.join(save_dir, f"head_epoch_{epochs}.pt")
+    head_path = os.path.join(save_dir, f"head_epoch_{ckpt_epochs}.pt")
     torch.save(head_state, head_path)
+
+
+    # The realized budget is not recoverable from the path, so record it. This
+    # family has no warmup, hence None.
+    meta = run_meta(budget, num_batches, accum_steps, None)
+    meta["final_test_accuracy"] = test_acc
+    meta["backbone_path"] = backbone_path
+    with open(os.path.join(save_dir, "run_meta.json"), "w") as f:
+        json.dump(meta, f, indent=2)
 
 
 if __name__ == "__main__":

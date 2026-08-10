@@ -80,6 +80,7 @@ LOG_EVERY = 50
 REFERENCE_BATCH_SIZE = 128
 
 from src.quantization import QATLinear, enable_qat_
+from src.duration import clamped_warmup, training_budget
 from src.vision.data.common import (
     DATASET_NAME_TO_EPOCHS,
     DATASET_NAME_TO_NUM_CLASSES,
@@ -217,17 +218,27 @@ def main(cfg: DictConfig) -> None:
     # BEGIN optimizer / scheduler / loss (mirrors finetune_qat.py)
     ############################################################################
 
-    epochs = DATASET_NAME_TO_EPOCHS[cfg.dataset_name]
     num_batches = len(dataset.train_loader)
     assert REFERENCE_BATCH_SIZE % cfg.batch_size == 0, (
         f"batch_size={cfg.batch_size} must evenly divide {REFERENCE_BATCH_SIZE}"
     )
     accum_steps = REFERENCE_BATCH_SIZE // cfg.batch_size
 
+    # This block mirrors finetune_qat.py and must keep mirroring it: what is
+    # being timed is a QAT step as actually configured, so a divergence here
+    # silently mistimes the amortization argument. Resolved through the same
+    # helper the finetuners use, for exactly that reason.
+    budget = training_budget(
+        cfg.dataset_name, cfg.epoch_mult, num_batches, accum_steps,
+        DATASET_NAME_TO_EPOCHS,
+    )
+    epochs = budget.loop_epochs
+    max_steps = budget.max_steps
+
     params = [p for p in classifier.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(params, lr=cfg.lr, weight_decay=cfg.wd)
     scheduler = cosine_lr(
-        optimizer, cfg.lr, cfg.wl, epochs * num_batches // accum_steps
+        optimizer, cfg.lr, clamped_warmup(cfg.wl, max_steps), max_steps
     )
     loss_fn = LabelSmoothing(cfg.ls) if cfg.ls > 0 else torch.nn.CrossEntropyLoss()
 

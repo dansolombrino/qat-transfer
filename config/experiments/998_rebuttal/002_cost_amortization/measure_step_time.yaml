@@ -13,6 +13,12 @@ ls: 0.0
 wl: 500           # warmup length (steps)
 max_grad_norm: 1.0
 
+# Training-budget multiplier, mirroring finetune_qat.yaml. It does not change
+# what is timed -- only warmup_batches + timed_batches are ever executed -- but
+# it does change the scheduler length, and this block must keep matching the
+# real QAT runs or the measured step stops being the step they execute.
+epoch_mult: 1.0
+
 # Timing protocol
 warmup_batches: 10   # discarded: CUDA context init and kernel autotune
 timed_batches: 50    # summarized by the median (plus p25/p75, stdev)

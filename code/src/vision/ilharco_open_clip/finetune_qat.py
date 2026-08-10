@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import copy
+import json
 import logging
 import os
 
@@ -142,6 +143,7 @@ def main(cfg: DictConfig) -> None:
         sanitized_model,
         cfg.dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
+        mult_path_frag(cfg.epoch_mult),
         f"qat=bits={cfg.qat.bits}_gran={cfg.qat.granularity}_skip={skip_tag}",
         f"seed={cfg.seed}",
     ]
@@ -241,12 +243,6 @@ def main(cfg: DictConfig) -> None:
         num_workers=num_workers,
         seed=cfg.seed,
     )
-    epochs = DATASET_NAME_TO_EPOCHS[cfg.dataset_name]
-    effective_epochs = (
-        min(epochs, cfg.limit_num_epochs)
-        if cfg.limit_num_epochs is not None
-        else epochs
-    )
     num_batches = len(dataset.train_loader)
     assert REFERENCE_BATCH_SIZE % cfg.batch_size == 0, (
         f"batch_size={cfg.batch_size} must evenly divide {REFERENCE_BATCH_SIZE}"
@@ -258,7 +254,24 @@ def main(cfg: DictConfig) -> None:
     # a regular nn.Parameter; STE keeps the forward differentiable).
     params = [p for p in classifier.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(params, lr=cfg.lr, weight_decay=cfg.wd)
-    scheduler = cosine_lr(optimizer, cfg.lr, cfg.wl, epochs * num_batches // accum_steps)
+    # Training budget. `epoch_mult` scales this dataset's schedule; mult=1.0 is
+    # pinned to reproduce the pre-multiplier behaviour exactly, so the loop still
+    # runs every epoch to completion and the max_steps break never fires.
+    #
+    # This also repairs a pre-existing dryrun inconsistency: the loop used to run
+    # `effective_epochs` (clamped by limit_num_epochs) while the scheduler length
+    # and the checkpoint filename used the *unclamped* table value -- and the
+    # evaluators then rebuilt that filename from the limit, so a limited run
+    # wrote one name and was read under another. All three now agree.
+    budget = training_budget(
+        cfg.dataset_name, cfg.epoch_mult, num_batches, accum_steps,
+        DATASET_NAME_TO_EPOCHS, cfg.limit_num_epochs,
+    )
+    effective_epochs = budget.loop_epochs
+    max_steps = budget.max_steps
+    ckpt_epochs = budget.ckpt_epochs
+
+    scheduler = cosine_lr(optimizer, cfg.lr, clamped_warmup(cfg.wl, max_steps), max_steps)
     loss_fn = (
         LabelSmoothing(cfg.ls) if cfg.ls > 0 else torch.nn.CrossEntropyLoss()
     )
@@ -267,7 +280,10 @@ def main(cfg: DictConfig) -> None:
     epoch_bar = tqdm(
         range(effective_epochs), desc="epochs", colour=random_tqdm_color(), **TQDM_KW
     )
+    budget_exhausted = False
     for epoch in epoch_bar:
+        if budget_exhausted:
+            break
         classifier.train()
         train_bar = tqdm(
             dataset.train_loader,
@@ -307,6 +323,12 @@ def main(cfg: DictConfig) -> None:
                 optimizer.zero_grad()
                 accum_loss = 0.0
 
+                # Stop mid-epoch once the budget is spent. At mult=1.0 max_steps
+                # equals the full schedule, so this never fires.
+                if opt_step + 1 >= max_steps:
+                    budget_exhausted = True
+                    break
+
         # Per-epoch validation: evaluate a PTQ-converted deepcopy so the
         # reported accuracy reflects the deployed (truly quantized) model.
         val_acc = _evaluate_ptq(
@@ -344,8 +366,15 @@ def main(cfg: DictConfig) -> None:
     # identical in format to finetune_fp.py output (plain nn.Linear keys) and
     # can be consumed unchanged by downstream scripts (e.g. evaluate_fp_ptq).
     disable_qat_open_clip_(classifier)
-    ckpt_path = os.path.join(save_dir, f"epoch_{epochs}.pt")
+    ckpt_path = os.path.join(save_dir, f"epoch_{ckpt_epochs}.pt")
     classifier.image_encoder.save(ckpt_path)
+
+    # The realized budget is not recoverable from the path, so record it.
+    meta = run_meta(budget, num_batches, accum_steps, cfg.wl)
+    meta["final_test_accuracy"] = test_acc
+    meta["encoder_path"] = ckpt_path
+    with open(os.path.join(save_dir, "run_meta.json"), "w") as f:
+        json.dump(meta, f, indent=2)
 
 
 if __name__ == "__main__":
