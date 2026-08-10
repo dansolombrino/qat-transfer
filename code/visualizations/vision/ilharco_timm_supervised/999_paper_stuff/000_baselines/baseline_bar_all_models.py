@@ -84,13 +84,36 @@ def _unsanitize_model_name(sanitized):
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed", required=True, type=int)
+
+    parser.add_argument("--model-names", required=True, nargs="+",
+                        help="Models to plot, in panel order.")
+    parser.add_argument("--batch-sizes", required=True, nargs="+", type=int,
+                        help="Per-model batch size, ordering must match --model-names. "
+                             "Large backbones were finetuned at bs=64 with accum_steps=2, "
+                             "so their effective batch matches the bs=128 runs -- but the "
+                             "path fragment differs and must be stated, not discovered.")
+
+    parser.add_argument("--optim", required=True, choices=["adamw", "sgd"])
+    parser.add_argument("--lr", required=True, type=float)
+    parser.add_argument("--wd", required=True, type=float)
+    parser.add_argument("--ls", required=True, type=float)
+    parser.add_argument("--wl", required=True, type=int)
+    parser.add_argument("--max-grad-norm", required=True, type=float)
+
     parser.add_argument("--qat-bits", required=True, type=int)
     parser.add_argument("--ptq-bits", required=True, type=int)
     parser.add_argument("--granularity", required=True, choices=["tensor", "channel"])
     parser.add_argument("--skip-modules", required=True, nargs="+",
                         help="One or more module names to skip during quantization "
                              "(no default: must be specified explicitly).")
-    return parser.parse_args()
+    parser.add_argument("--strict", action="store_true",
+                        help="Exit non-zero if any expected eval_results.json is missing. "
+                             "Without it, misses are still counted and reported on stderr.")
+    args = parser.parse_args()
+    if len(args.model_names) != len(args.batch_sizes):
+        parser.error(f"--model-names ({len(args.model_names)}) and --batch-sizes "
+                     f"({len(args.batch_sizes)}) must have the same length")
+    return args
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +121,11 @@ def parse_args():
 # ---------------------------------------------------------------------------
 def _skip_tag(skip_modules):
     return "-".join(sorted(skip_modules)) if len(skip_modules) > 0 else "none"
+
+
+def _optim_frag(args, batch_size):
+    return (f"optim={args.optim}_lr={args.lr}_wd={args.wd}_ls={args.ls}"
+            f"_wl={args.wl}_mgn={args.max_grad_norm}_bs={batch_size}")
 
 
 def _qat_frag(args):
@@ -111,67 +139,80 @@ def _ptq_frag(args):
 # ---------------------------------------------------------------------------
 # Auto-discover models and their optim frags
 # ---------------------------------------------------------------------------
-def discover_models(seed):
-    """Return [(model_name, model_dir, optim_frag), ...] sorted by MODEL_ORDER."""
+def resolve_models(args):
+    """Return [(model_name, model_dir, optim_frag), ...] in --model-names order.
+
+    Nothing is discovered.  The caller states which models to plot and the batch
+    size each was trained at; this only verifies that the resulting path exists.
+    The previous version auto-discovered the optim fragment by taking the first
+    directory starting with "optim=", which silently mixed bs=64 and bs=128 runs
+    into one figure without saying so.
+    """
     fp_root = os.path.join(EVAL_ROOT_BASELINES, "fp")
     if not os.path.isdir(fp_root):
         print(f"[ERROR] fp root not found: {fp_root}", file=sys.stderr)
-        return []
+        sys.exit(1)
 
-    found = []
-    for model_dir in sorted(os.listdir(fp_root)):
+    resolved = []
+    for model_name, batch_size in zip(args.model_names, args.batch_sizes):
+        model_dir = sanitize_timm_model_name(model_name)
+        optim_frag = _optim_frag(args, batch_size)
         model_path = os.path.join(fp_root, model_dir)
         if not os.path.isdir(model_path):
-            continue
-        first_ds = next((d for d in os.listdir(model_path) if os.path.isdir(os.path.join(model_path, d))), None)
-        if first_ds is None:
-            continue
-        ds_path = os.path.join(model_path, first_ds)
-        optim_frag = next((o for o in os.listdir(ds_path) if o.startswith("optim=")), None)
-        if optim_frag is None:
-            continue
-        seed_dir = os.path.join(ds_path, optim_frag, f"seed={seed}")
-        if not os.path.isdir(seed_dir):
-            continue
-        model_name = _unsanitize_model_name(model_dir)
-        if model_name not in MODEL_DISPLAY_NAMES:
-            continue
-        found.append((model_name, model_dir, optim_frag))
-
-    order_map = {name: i for i, name in enumerate(MODEL_ORDER)}
-    found.sort(key=lambda t: order_map.get(t[0], 999))
-    return found
+            print(f"[ERROR] no evaluations for {model_name} at {model_path}", file=sys.stderr)
+            sys.exit(1)
+        datasets = [d for d in os.listdir(model_path)
+                    if os.path.isdir(os.path.join(model_path, d))]
+        if not any(os.path.isdir(os.path.join(model_path, d, optim_frag, f"seed={args.seed}"))
+                   for d in datasets):
+            print(f"[ERROR] {model_name}: no dataset has "
+                  f"{optim_frag}/seed={args.seed}", file=sys.stderr)
+            sys.exit(1)
+        resolved.append((model_name, model_dir, optim_frag))
+    return resolved
 
 
 # ---------------------------------------------------------------------------
 # JSON loading
 # ---------------------------------------------------------------------------
-def _load_value(path, key):
+def _load_value(path, key, misses):
+    """Read `key` from a results JSON, recording a miss rather than swallowing it.
+
+    A silently-absent file renders as a zero-height bar, which is
+    indistinguishable from a genuine zero.  Every failure is therefore appended
+    to `misses` so the caller can report -- and under --strict, refuse -- a plot
+    built on incomplete data.
+    """
     if not os.path.exists(path):
+        misses.append((path, "missing"))
         return None
     try:
         with open(path) as f:
-            return json.load(f).get(key)
-    except (OSError, json.JSONDecodeError):
+            value = json.load(f).get(key)
+    except (OSError, json.JSONDecodeError) as exc:
+        misses.append((path, f"unreadable: {exc}"))
         return None
+    if value is None:
+        misses.append((path, f"no key {key!r}"))
+    return value
 
 
 # ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
-def load_data(model_dir, optim_frag, seed, qat_frag, ptq_frag):
+def load_data(model_dir, optim_frag, seed, qat_frag, ptq_frag, misses):
     datasets = _swapped_dataset_order(DATASET_NAME_TO_EPOCHS)
     data = {}
     for dataset in datasets:
         ft_acc = _load_value(os.path.join(
             EVAL_ROOT_BASELINES, "fp", model_dir, dataset,
-            optim_frag, f"seed={seed}", "eval_results.json"), TEST_ACC_KEY)
+            optim_frag, f"seed={seed}", "eval_results.json"), TEST_ACC_KEY, misses)
         qat_acc = _load_value(os.path.join(
             EVAL_ROOT_BASELINES, "qat", model_dir, dataset,
-            optim_frag, qat_frag, f"seed={seed}", "eval_results.json"), TEST_ACC_KEY)
+            optim_frag, qat_frag, f"seed={seed}", "eval_results.json"), TEST_ACC_KEY, misses)
         ptq_acc = _load_value(os.path.join(
             EVAL_ROOT_BASELINES, "fp_ptq", model_dir, dataset,
-            optim_frag, ptq_frag, f"seed={seed}", "eval_results.json"), TEST_ACC_KEY)
+            optim_frag, ptq_frag, f"seed={seed}", "eval_results.json"), TEST_ACC_KEY, misses)
         data[dataset] = {"ft": ft_acc, "qat": qat_acc, "ptq": ptq_acc}
     return data
 
@@ -249,18 +290,34 @@ def main():
     qf = _qat_frag(args)
     pf = _ptq_frag(args)
 
-    models = discover_models(args.seed)
-    if not models:
-        print("[ERROR] No models found.", file=sys.stderr)
-        sys.exit(1)
+    models = resolve_models(args)
 
-    print(f"Found {len(models)} models:")
+    print(f"Plotting {len(models)} models:")
     all_model_data = []
-    for model_name, model_dir, optim_frag in models:
+    misses = []
+    for model_name, model_dir, of in models:
         display = MODEL_DISPLAY_NAMES.get(model_name, model_name)
-        print(f"  Loading {display} ...")
-        data = load_data(model_dir, optim_frag, args.seed, qf, pf)
+        print(f"  Loading {display} ({of.rsplit('_', 1)[-1]}) ...")
+        before = len(misses)
+        data = load_data(model_dir, of, args.seed, qf, pf, misses)
+        model_misses = len(misses) - before
+        expected = 3 * len(DATASET_NAME_TO_EPOCHS)
+        if model_misses:
+            print(f"    [WARN] {model_misses}/{expected} lookups missing", file=sys.stderr)
+        if model_misses == expected:
+            print(f"[ERROR] {display}: every lookup missed -- the constructed path "
+                  f"grammar does not match this tree.", file=sys.stderr)
+            sys.exit(1)
         all_model_data.append((model_name, data))
+
+    if misses:
+        print(f"\n[SUMMARY] {len(misses)} missing lookups across "
+              f"{len(models)} models:", file=sys.stderr)
+        for path, why in misses:
+            print(f"  {why}: {path}", file=sys.stderr)
+        if args.strict:
+            print("[ERROR] --strict: refusing to plot on incomplete data.", file=sys.stderr)
+            sys.exit(1)
 
     plot_all(all_model_data, args)
 

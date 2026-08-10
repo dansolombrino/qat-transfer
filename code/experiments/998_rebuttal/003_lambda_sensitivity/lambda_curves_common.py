@@ -73,6 +73,7 @@ silently truncated at the last grid point.
 import bisect
 import os
 import statistics
+import sys
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +133,7 @@ def alpha_dir(alpha):
     return f"qv=alpha={alpha}"
 
 
-def discover_grid(cell_prefixes, split):
+def discover_grid(cell_prefixes, split, strict=False):
     """Lambdas actually evaluated on `split`, as a sorted list of floats.
 
     `cell_prefixes` are the directories above the qv=alpha=... level, one per
@@ -141,12 +142,21 @@ def discover_grid(cell_prefixes, split):
 
     The qv=alpha=/split= layout is identical in every family, so this lives here
     rather than being duplicated in each per-family script.
+
+    Unreadable prefixes and unparseable alpha directories used to be skipped
+    silently, which made a path-grammar mismatch indistinguishable from "this
+    cell was never swept": the grid simply came back empty and every downstream
+    curve was flat.  Both are now counted and reported, and `strict` turns them
+    into an error.
     """
     alphas = set()
+    unreadable = []
+    unparseable = []
     for prefix in cell_prefixes:
         try:
             entries = os.listdir(prefix)
-        except OSError:
+        except OSError as exc:
+            unreadable.append((prefix, str(exc)))
             continue
         for entry in entries:
             if not entry.startswith("qv=alpha="):
@@ -156,7 +166,29 @@ def discover_grid(cell_prefixes, split):
             try:
                 alphas.add(float(entry[len("qv=alpha="):]))
             except ValueError:
+                unparseable.append(os.path.join(prefix, entry))
                 continue
+
+    if unreadable:
+        print(f"[WARN] discover_grid: {len(unreadable)}/{len(cell_prefixes)} cell "
+              f"prefixes unreadable", file=sys.stderr)
+        for prefix, why in unreadable[:10]:
+            print(f"  {why}", file=sys.stderr)
+    if unparseable:
+        print(f"[WARN] discover_grid: {len(unparseable)} alpha directories did not "
+              f"parse as floats", file=sys.stderr)
+        for path in unparseable[:10]:
+            print(f"  {path}", file=sys.stderr)
+    if not alphas:
+        print(f"[ERROR] discover_grid: no lambda found on split={split} across "
+              f"{len(cell_prefixes)} cell prefixes -- the constructed path grammar "
+              f"does not match this tree.", file=sys.stderr)
+        raise RuntimeError(f"empty lambda grid for split={split}")
+    if strict and (unreadable or unparseable):
+        raise RuntimeError(
+            f"discover_grid: {len(unreadable)} unreadable prefixes, "
+            f"{len(unparseable)} unparseable alpha dirs (strict mode)")
+
     return sorted(alphas)
 
 

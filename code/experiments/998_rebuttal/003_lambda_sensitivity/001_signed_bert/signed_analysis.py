@@ -65,24 +65,48 @@ def cell_prefix(model_dir: str, donor: str, receiver: str) -> Path:
 
 
 def load_curve(
-    model_dir: str, donor: str, receiver: str, split: str
+    model_dir: str, donor: str, receiver: str, split: str, misses: list | None = None
 ) -> dict[float, float]:
+    """Alpha -> accuracy for one donor-receiver cell.
+
+    Failures used to be swallowed wholesale, so a prefix that does not exist and
+    a cell that was genuinely never swept produced the same empty curve.  Each
+    failure is now appended to `misses` with a reason, letting the caller tell a
+    path-grammar mismatch apart from missing data.
+    """
+    if misses is None:
+        misses = []
     prefix = cell_prefix(model_dir, donor, receiver)
     curve = {}
     if not prefix.exists():
+        misses.append((str(prefix), "prefix missing"))
         return curve
-    for alpha_dir in prefix.glob("qv=alpha=*"):
+
+    alpha_dirs = sorted(prefix.glob("qv=alpha=*"))
+    if not alpha_dirs:
+        misses.append((str(prefix), "no qv=alpha=* directories"))
+        return curve
+
+    for alpha_dir in alpha_dirs:
         path = alpha_dir / f"split={split}" / "eval_results.json"
         if not path.exists():
+            misses.append((str(path), "missing"))
             continue
         try:
             alpha = float(alpha_dir.name.split("=", 2)[2])
+        except (ValueError, IndexError):
+            misses.append((str(alpha_dir), "alpha did not parse"))
+            continue
+        try:
             data = json.loads(path.read_text())
             value = data[f"{split}_accuracy_fp_head_ptq"]
-        except (ValueError, KeyError, json.JSONDecodeError):
+        except (KeyError, json.JSONDecodeError, OSError) as exc:
+            misses.append((str(path), f"unreadable: {exc}"))
             continue
         if isinstance(value, (int, float)):
             curve[alpha] = float(value)
+        else:
+            misses.append((str(path), f"non-numeric accuracy: {value!r}"))
     return curve
 
 
@@ -159,9 +183,10 @@ def main() -> None:
     win_loss = json.loads(WIN_LOSS.read_text())
     model = win_loss["models"][model_name]
     all_rows = []
+    misses: list[tuple[str, str]] = []
     for pair in model["pairs"]:
         donor, receiver = pair["donor"], pair["receiver"]
-        curve = load_curve(model_dir, donor, receiver, "val")
+        curve = load_curve(model_dir, donor, receiver, "val", misses)
         if args.model == "bert-large":
             sampled = set(curve)
             missing_negative = sorted(REQUIRED_NEGATIVE_GRID - sampled)
@@ -194,6 +219,14 @@ def main() -> None:
             result["negative_test_delta"] = None
 
         all_rows.append(result)
+
+    if misses:
+        print(f"[WARN] {len(misses)} unreadable/absent lookups while loading curves:",
+              file=sys.stderr)
+        for path, why in misses[:20]:
+            print(f"  {why}: {path}", file=sys.stderr)
+        if len(misses) > 20:
+            print(f"  ... and {len(misses) - 20} more", file=sys.stderr)
 
     cross_task_rows = [row for row in all_rows if not row["same_task"]]
     rows = [row for row in cross_task_rows if not row["unit_scale_success"]]

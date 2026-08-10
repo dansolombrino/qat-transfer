@@ -117,3 +117,8 @@ shitpads/
 .github/
 
 misc/
+
+# Pre-migration baseline snapshots and golden outputs (mult= axis work)
+migration_baseline/
+evaluations.golden/
+plots.golden/
