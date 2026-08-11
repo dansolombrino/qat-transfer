@@ -122,3 +122,18 @@ misc/
 migration_baseline/
 evaluations.golden/
 plots.golden/
+# Budget-axis wave runtime state: queues are rewritten on every pop and the worker
+# logs are raw tqdm output. The generator (bx_gen_queues.py) reproduces the queues,
+# and the authoritative progress signal is the artifact tree, not these files.
+scripts/dispatch/budget_axis/waves/*/*/ft.q
+scripts/dispatch/budget_axis/waves/*/*/ft.retried
+scripts/dispatch/budget_axis/waves/*/*/ev.q.*
+scripts/dispatch/budget_axis/waves/*/*/ev.d.*
+scripts/dispatch/budget_axis/waves/*/*/done.txt
+scripts/dispatch/budget_axis/waves/*/*/pids.txt
+scripts/dispatch/budget_axis/waves/*/*/launch_local.sh
+scripts/dispatch/budget_axis/waves/*/*/logs/
+scripts/dispatch/budget_axis/waves/*/*/tmp/
+scripts/dispatch/budget_axis/waves/*/*/stale/
+scripts/dispatch/budget_axis/**/__pycache__/
+scripts/dispatch/budget_axis/waves/*/*/*.lock

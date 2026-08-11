@@ -26,7 +26,15 @@ cd "$ROOT" || exit 1
 
 MODEL_SAN=vit_base_patch16_224_orig_in21k
 OPTIM="optim=adamw_lr=1e-05_wd=0.1_ls=0.0_wl=500_mgn=1.0_bs=128"
-CKDIR="$ROOT/storage/checkpoints/vision/ilharco_timm_supervised/fp/$MODEL_SAN/$DS/$OPTIM/mult=$MULT/seed=2038"
+
+# The checkpoint tree is not always under $ROOT: rig-3090-ti keeps checkpoints on
+# /mnt/WD_4TB and evaluations on /mnt/KS_960GB, different mounts. Assuming
+# $ROOT/storage/checkpoints there makes the guard look somewhere nothing is ever
+# written, so a finished run reads as absent (re-run) and a successful run reads
+# as failed. Resolve the same variable the Python writer resolves.
+CB=$(grep -E '^CHECKPOINT_BASE_PATH=' "$ROOT/.env" 2>/dev/null | tail -1 | cut -d= -f2-)
+[ -z "${CB:-}" ] && CB="$ROOT/storage/checkpoints"
+CKDIR="$CB/vision/ilharco_timm_supervised/fp/$MODEL_SAN/$DS/$OPTIM/mult=$MULT/seed=2038"
 
 if ls "$CKDIR"/classifier_epoch_*.pt >/dev/null 2>&1; then
   echo "V_FP_SKIP ds=$DS mult=$MULT (checkpoint already present)"
