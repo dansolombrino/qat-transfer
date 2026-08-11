@@ -188,17 +188,31 @@ adds no aggregate throughput. Balance by *measured* rate, not by hardware tier. 
 
 ---
 
-## 9. Not yet committed
+## 9. Committed
 
-    M scripts/dispatch/runners/v_fp.sh      (fixed: guard used $ROOT/storage, wrong on rig-3090-ti)
-    M scripts/dispatch/runners/v_qat.sh     (added idempotency guard + artifact verification)
-    ?? scripts/dispatch/runners/v_baseline.sh
-    ?? scripts/dispatch/budget_axis/        (bx_common, bx_check, bx_status, bx_gen_queues,
-                                             ft_worker, ev_worker, replicator, bx_stop,
-                                             bx_reassign, waves/)
+All tooling is committed on `master` as **78a1588** ("feat(budget axis): dispatch
+tooling for the epoch_mult wave, and its guards"), whose message documents each guard
+and the silent failure it exists for. Committed to `master` because this repo has no
+branch workflow and every wave path references it; move it if you prefer otherwise.
 
-Worth committing so the tooling is reviewable and durable. Not done — needs the user's
-go-ahead.
+Queue files, worker logs, pids and lock files are gitignored — they are live mutable
+state, `bx_gen_queues.py` reproduces the queues, and the authoritative progress signal
+is the artifact tree.
+
+## 9b. The wave is independent of any chat session
+
+Verified 08:59: the tmux server (pid 6186 on rig-4090) is parented to `/sbin/init`, so
+all workers, the replicator and the status loop survive any chat closing. The 2-minute
+cron loop that was watching has been deleted, so a new session can start its own
+without double-checking.
+
+**A new session does not need to relaunch anything.** Confirm with:
+
+    tmux ls | grep bxaxis     # rig-4090: 4 sessions (ft, ev0, replicator, status)
+    cat logs/dispatch/budget_axis/20260810-222115/status.txt
+
+and one `ssh <rig> "tmux ls | grep bxaxis"` each for behemoth (expect 5) and
+rig-3090-ti (expect 2).
 
 ---
 
