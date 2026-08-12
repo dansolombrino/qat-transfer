@@ -476,7 +476,9 @@ def plot_heatmap(data, args, model_dir, optim_frag, qat_frag, awq_frag, qv_frag,
     skip_str = ",".join(sorted(args.skip_modules))
     title = (
         f"QV Transfer+AWQ ({head_label})<br>"
-        f"<sup>{args.model_name} | seed={args.seed} | optim={args.optim} | "
+        f"<sup>{args.model_name} | seed={args.seed} | "
+        f"src_mult={mult_tag(args.source_epoch_mult)} | tgt_mult={mult_tag(args.target_epoch_mult)} | "
+        f"optim={args.optim} | "
         f"qat_bits={args.qat_bits} | awq_bits={args.awq_bits} | granularity={args.granularity} | skip={skip_str} | "
         f"ncal={args.awq_ncal} | ngrid={args.awq_ngrid} | clip={args.awq_clip} | "
         f"alpha={args.qv_alpha}</sup>"
@@ -603,7 +605,9 @@ def plot_difference_heatmap(data, args, model_dir, optim_frag, qat_frag, awq_fra
     skip_str = ",".join(sorted(args.skip_modules))
     title = (
         f"QV Transfer+AWQ ({head_label}) − {BASELINE_METHOD_LABELS[subtractor]}<br>"
-        f"<sup>{args.model_name} | seed={args.seed} | optim={args.optim} | "
+        f"<sup>{args.model_name} | seed={args.seed} | "
+        f"src_mult={mult_tag(args.source_epoch_mult)} | tgt_mult={mult_tag(args.target_epoch_mult)} | "
+        f"optim={args.optim} | "
         f"qat_bits={args.qat_bits} | awq_bits={args.awq_bits} | granularity={args.granularity} | skip={skip_str} | "
         f"ncal={args.awq_ncal} | ngrid={args.awq_ngrid} | clip={args.awq_clip} | "
         f"alpha={args.qv_alpha}</sup>"

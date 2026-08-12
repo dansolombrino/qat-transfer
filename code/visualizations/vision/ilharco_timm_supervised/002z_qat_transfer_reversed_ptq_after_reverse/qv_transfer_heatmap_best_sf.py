@@ -473,7 +473,9 @@ def plot_best_alpha_raw_heatmap(data, args, model_dir, optim_frag,
     title = (
         f"Reversed QV Transfer+PTQ ({head_label}, Best Alpha)<br>"
         f"<sup>{formula}</sup><br>"
-        f"<sup>{args.model_name} | seed={args.seed} | optim={args.optim} | "
+        f"<sup>{args.model_name} | seed={args.seed} | "
+        f"src_mult={mult_tag(args.source_epoch_mult)} | tgt_mult={mult_tag(args.target_epoch_mult)} | "
+        f"optim={args.optim} | "
         f"qat_bits={args.qat_bits} | ptq_bits={args.ptq_bits} | granularity={args.granularity} | skip={skip_str} | "
         f"alpha=best</sup>"
     )
@@ -617,7 +619,9 @@ def plot_best_alpha_difference_heatmap(data, args, model_dir, optim_frag,
     title = (
         f"Reversed QV Transfer ({head_label}, Best Alpha) \u2212 {BASELINE_METHOD_LABELS[subtractor]}<br>"
         f"<sup>{formula}</sup><br>"
-        f"<sup>{args.model_name} | seed={args.seed} | optim={args.optim} | "
+        f"<sup>{args.model_name} | seed={args.seed} | "
+        f"src_mult={mult_tag(args.source_epoch_mult)} | tgt_mult={mult_tag(args.target_epoch_mult)} | "
+        f"optim={args.optim} | "
         f"qat_bits={args.qat_bits} | ptq_bits={args.ptq_bits} | granularity={args.granularity} | skip={skip_str} | "
         f"alpha=best</sup>"
     )

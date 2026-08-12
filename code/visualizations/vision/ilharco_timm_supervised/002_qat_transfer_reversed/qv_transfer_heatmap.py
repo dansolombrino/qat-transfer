@@ -437,7 +437,9 @@ def plot_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag, metric_ta
     title = (
         f"Reversed QV Transfer ({head_label})<br>"
         f"<sup>{formula}</sup><br>"
-        f"<sup>{args.model_name} | seed={args.seed} | optim={args.optim} | "
+        f"<sup>{args.model_name} | seed={args.seed} | "
+        f"src_mult={mult_tag(args.source_epoch_mult)} | tgt_mult={mult_tag(args.target_epoch_mult)} | "
+        f"optim={args.optim} | "
         f"qat_bits={args.qat_bits} | ptq_bits={args.ptq_bits} | granularity={args.granularity} | skip={skip_str} | "
         f"alpha={args.qv_alpha}</sup>"
     )
@@ -572,7 +574,9 @@ def plot_difference_heatmap(data, args, model_dir, optim_frag, qat_frag, qv_frag
     title = (
         f"Reversed QV Transfer ({head_label}, QAT+PTQ) \u2212 {BASELINE_METHOD_LABELS[subtractor]}<br>"
         f"<sup>{formula}</sup><br>"
-        f"<sup>{args.model_name} | seed={args.seed} | optim={args.optim} | "
+        f"<sup>{args.model_name} | seed={args.seed} | "
+        f"src_mult={mult_tag(args.source_epoch_mult)} | tgt_mult={mult_tag(args.target_epoch_mult)} | "
+        f"optim={args.optim} | "
         f"qat_bits={args.qat_bits} | ptq_bits={args.ptq_bits} | granularity={args.granularity} | skip={skip_str} | "
         f"alpha={args.qv_alpha}</sup>"
     )
