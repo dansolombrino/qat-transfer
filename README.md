@@ -1,28 +1,65 @@
-# Input fragility — predicting which inputs PTQ breaks
+# PTQ Routing — predicting which inputs post-training quantization breaks
 
-> **Branch:** `input-fragility`. This branch is a focused experimental project distinct from `master`. The original `master` repo hosts the parent quantization-aware-transfer research codebase; this branch reuses the shared infrastructure (finetuned ViT checkpoints, dataset loaders, PTQ utilities) and adds one new self-contained experimental phase that asks and answers a single research question.
+> Research code for **Input-Aware Mixed-Precision Routing for Quantized Transformers**.
+> Weight-only PTQ degrades accuracy non-uniformly: most inputs survive, a small minority flips.
+> This project predicts *which* inputs flip, cheaply enough to route only those to a
+> full-precision fallback at deployment time.
 >
-> If you are reading this without context: read this README front to back. It explains what we're studying, why, how the code is laid out, what we found, and how to reproduce the results.
+> The paper is tracked in [`paper/`](paper/): `short_main.tex` (5-page workshop version) and
+> `main.tex` (full version). Every number and figure in them is reproducible from this repo.
+>
+> If you are reading this without context: read this README front to back. It explains what
+> we're studying, why, how the code is laid out, what we found, and how to reproduce it.
 
 ---
 
 ## TL;DR — what's the project and what did we find?
 
-**Question.** Weight-only post-training quantization (PTQ) on a Vision Transformer degrades accuracy non-uniformly across inputs. The vast majority of inputs the full-precision (FP) model gets right are also handled fine by the quantized (Q) model. A small minority gets flipped. *Can we predict which inputs PTQ will flip, cheaply enough to be useful for deployment?*
+**Question.** Weight-only post-training quantization (PTQ) degrades accuracy non-uniformly across
+inputs. Of the inputs the full-precision (FP) model classifies correctly, the quantized (Q) model
+handles the vast majority fine; a small minority gets flipped — a few percent at W4-channel
+(4.2% / 3.8% / 4.3% on our three backbones). That minority dominates the accuracy drop.
+*Can we predict which inputs PTQ will flip, cheaply enough to be useful at deployment?*
 
-**Setup.** 21 vision classification tasks, each with a finetuned `vit_base_patch16_224.orig_in21k` checkpoint. Weight-only PTQ at W4-channel is applied to every linear layer except the classification head, producing a quantized variant of each finetuned model. For each (FP, Q) pair we dump per-sample features and predictions on val + test splits and study the relationship.
+**Setup.** Three backbones spanning two modalities: `vit_base_patch16_224.orig_in21k` and
+`vit_large_patch16_224.orig_in21k` on 21 vision tasks each, and `Qwen3-Embedding-0.6B` on 11 MTEB
+text tasks — 53 finetuned classifiers in total. Weight-only PTQ by naive round-to-nearest (RTN)
+at W4-channel is applied to every linear layer except the head. For each (FP, Q) pair we dump
+per-sample features and predictions on val + test and study the relationship.
 
-**Headline result.** A logistic regression on **three** features — the Q model's top-1/top-2 logit margin, top-1 softmax, and entropy — trained on a pool of 17 source tasks under leave-one-out cross-task transfer, routes **~24%** of unseen target-task test inputs to a full-precision fallback and recovers **~90%** of the FP→PTQ accuracy gap. The same classifier transfers across 18 tasks without per-task retraining.
+**Headline result.** The routing signal is a **single scalar from the forward pass the deployment
+already runs**: the quantized model's top-1/top-2 logit margin, `q_margin`. Sorting by it and
+routing the lowest-margin **22.2% / 18.4% / 20.2%** of inputs (ViT-B/16 / ViT-L/16 / Qwen3)
+recovers **90%** of the FP→PTQ accuracy gap. No training, no labels, no fitted weights — just a
+threshold. Against a random baseline needing 83.8% / 89.8% / 80.9%, that is a 3.8–4.9× improvement.
 
-**Mechanism finding.** The 24% deployable ceiling is bounded by what we call the **lucky-Q ambiguity**: features computable from a single forward pass cannot distinguish (a) inputs PTQ broke (bad) from (b) inputs where PTQ happens to be right and FP is wrong (lucky-Q). They have indistinguishable confidence patterns. Cross-model features that compare what FP thinks of Q's prediction *can* distinguish them — but they require running both models, defeating the compute saving. With cross-model features, X@90% drops to ~7% (the diagnostic ceiling) and the gap from the deployable claim quantifies the lucky-Q ambiguity.
+**It beats the canonical baseline.** Max-softmax probability (MSP), the selective-prediction
+default, needs 30.4% / 22.0% / 21.0% routing — worse by 8.2 / 3.6 / 0.8 pp. MSP measures *absolute
+confidence*; the failure mode is *boundary proximity*, which is exactly what the margin measures.
+Nothing else we tested beats a single `q_margin` threshold: not entropy, not pairwise
+combinations, not a 3-feature Q-side logistic regression, not an FP-side one.
 
-**Negative result, worth keeping.** Raw image pixel statistics (brightness, contrast, edge density, FFT high-frequency ratio) carry **zero** signal for PTQ fragility across all 18 tasks. PTQ-fragility is purely a property of the model's representation of the input, not of pixel-level input properties.
+**Theory.** `q_margin` is not merely a good heuristic. A size-ε logit perturbation can flip a
+prediction **iff** `q_margin < 2ε` (Prop. 1), and among all scores computed from the quantized
+logits, only those preserving `q_margin`'s strict order match the worst-case-flippable set at
+*every* perturbation size (Thm. 1). A matching conditional impossibility result (Prop. 2) delimits
+when the gap to the two-pass ceiling is structurally irreducible. Proofs in `paper/`, App. C.
 
-**Regime caveat.** This works at W4-channel where the FP→PTQ gap is small and "bad" inputs are a minority. At catastrophic regimes (W3-channel) where vanilla weight-only PTQ destroys most predictions, no input-aware routing can recover compute — even oracle needs to route ~54% of inputs to FP.
+**Mechanism finding — the lucky-Q ambiguity.** The deployable ~20% budget versus the ~7% two-pass
+diagnostic ceiling is bounded by what we call the **lucky-Q ambiguity**: single-pass features
+cannot distinguish (a) inputs PTQ broke (**bad**) from (b) inputs where PTQ happens to be right and
+FP is wrong (**lucky-Q**). Both straddle the decision boundary and look identical from the Q side.
+Cross-model features resolve it — but they require running *both* models, defeating the saving.
 
-The paper draft is in `paper/main.tex` (gitignored). The detailed finding log is in `INPUT_FRAGILITY_LOG.md`.
+**Negative result, worth keeping.** Raw input statistics carry **zero** signal: image brightness,
+contrast, edge density and FFT high-frequency ratio all sit at AUC ≈ 0.53–0.55, and the Qwen3
+text statistics reach AUROC 0.494. PTQ fragility is a property of the model's representation of
+the input, not of surface input properties.
 
----
+**Regime caveat.** This works at W4-channel, where the FP→PTQ gap is small and broken inputs are a
+minority. At W3-channel under per-channel RTN, PTQ breaks the *majority* of inputs (~62% on
+ViT-B/16, ~75% on ViT-L/16) and no input-aware routing recovers compute — even the oracle needs
+53.8% / 66.5%. Refining to per-group_128 scales relocates that boundary below W3.
 
 ## Table of contents
 
@@ -33,7 +70,7 @@ The paper draft is in `paper/main.tex` (gitignored). The detailed finding log is
 5. [Key findings](#key-findings)
 6. [Reproducibility — how to run this from scratch](#reproducibility--how-to-run-this-from-scratch)
 7. [Code layout](#code-layout)
-8. [Relation to other branches and shared infrastructure](#relation-to-other-branches-and-shared-infrastructure)
+8. [Relation to the parent codebase](#relation-to-the-parent-codebase)
 9. [Limitations and open questions](#limitations-and-open-questions)
 
 ---
@@ -49,7 +86,7 @@ This codebase's PTQ is implemented in [`code/src/quantization.py`](code/src/quan
 At inference time on dedicated low-bit-width hardware this would translate to memory and compute savings; on vanilla GPUs without int4 kernels, it's compute-equivalent to FP but quantization-faithful in the outputs.
 
 Two important hyperparameters:
-- **`bits`** ∈ {3, 4, 5, …}: target bit-width. We focus on W4 (4 bits) at this branch.
+- **`bits`** ∈ {3, 4, 5, …}: target bit-width. We focus on W4 (4 bits) in this work.
 - **`granularity`** ∈ {`channel`, `tensor`}:
   - `channel`: one scale + zero-point per output channel of the weight matrix. More flexible; preserves accuracy better.
   - `tensor`: a single scale + zero-point for the whole weight matrix. More aggressive; catastrophic on ViTs without smoothing tricks.
@@ -89,7 +126,7 @@ Each question is answered by a corresponding script (or pair of scripts). The pi
 ┌─────────────────────┐                                ┌───────────────────────┐
 │  21 FP checkpoints  │                                │  predictions_val.parquet  │
 │  (one per dataset)  │   Script A: dump features     │  predictions_test.parquet │
-│  shared with master │   + apply PTQ in place   ───► │  + dump_metadata.json     │
+│  see finetune_fp.py │   + apply PTQ in place   ───► │  + dump_metadata.json     │
 └─────────────────────┘                                │  (one set per task)       │
                                                        └───────────────┬───────────┘
                                                                        │
@@ -117,7 +154,7 @@ Each question is answered by a corresponding script (or pair of scripts). The pi
                                                        └──────────────────────────┘
 ```
 
-**Inputs to the whole pipeline:** the 21 finetuned ViT checkpoints already on disk under `${CHECKPOINT_BASE_PATH}/vision/ilharco_timm_supervised/fp/...` (provided externally or produced by `code/src/vision/ilharco_timm_supervised/finetune_fp.py` on master).
+**Inputs to the whole pipeline:** the 21 finetuned ViT checkpoints already on disk under `${CHECKPOINT_BASE_PATH}/vision/ilharco_timm_supervised/fp/...` (provided externally or produced by `code/src/vision/ilharco_timm_supervised/finetune_fp.py` in this repo). The Qwen3 pipeline is the mirror image under `text/ilharco_automodelforsequenceclassification/`.
 
 **Outputs:** the parquet dumps under `${CHECKPOINT_BASE_PATH}/vision/.../input_fragility_dumps/...` are the canonical record. Everything downstream (AUC tables, Pareto curves, threshold sweeps, paper figures) is derived from those parquets and can be re-run cheaply on CPU.
 
@@ -248,65 +285,90 @@ Reproduces from the parquets in seconds.
 
 ## Key findings
 
-These are the findings as recorded in [`INPUT_FRAGILITY_LOG.md`](INPUT_FRAGILITY_LOG.md), abbreviated. Each `Fk` is dated in the log.
+All numbers are W4-channel unless stated, averaged over the eligible tasks per backbone
+(18 / 16 / 9 for ViT-B/16 / ViT-L/16 / Qwen3; a task is eligible only if PTQ produces ≥10 broken
+samples on both val and test, otherwise the per-task metric is too noisy to estimate).
+Every figure below is re-derivable with `paper/scripts/verify_numbers.sh`.
 
-### F1/F2 — fragility is predictable from FP/Q confidence; image stats carry zero signal
+### F1 — fragility is predictable from Q-side confidence; input statistics carry none
 
-On 18 of 21 finetuned ViT-B tasks at W4-channel (three small-PTQ-gap tasks dropped: Flowers102, OxfordIIITPet, STL10), multivariate logistic regression on 15 features fits to test AUC = **0.926 ± 0.047**. Univariate discriminative AUC per feature, mean across 18 tasks:
+Univariate discriminative AUC (`max(AUC, 1−AUC)`) for **bad** vs **good** on FP-correct
+validation rows, ViT-B/16, mean over 18 tasks:
 
-| Feature | Discriminative AUC |
-|---|---|
-| q_margin | 0.937 |
-| fp_margin | 0.919 |
-| q_softmax_top1 / fp_softmax_top1 | ~0.90 |
-| fp_cls_dist_to_class_centroid | 0.834 |
-| fp_entropy / q_entropy | ~0.81 |
-| img_brightness / contrast / edge_density / high_freq_ratio | ~0.49–0.50 (no signal) |
+| Feature | AUC | | Feature | AUC |
+|---|---|---|---|---|
+| `q_margin` | **0.938** | | `img_brightness` | 0.537 |
+| `fp_margin` | 0.928 | | `img_contrast` | 0.544 |
+| `fp_softmax_top1` | 0.901 | | `img_edge_density` | 0.550 |
+| `q_softmax_top1` | 0.900 | | `img_high_freq_ratio` | 0.533 |
+| `fp_entropy` | 0.839 | | *(Qwen3 text stats)* | 0.494 |
+| `q_entropy` | 0.825 | | | |
 
-PTQ fragility is a model-representation phenomenon. Pixel-level statistics don't predict it.
+Model-derived margin/softmax/entropy features are strongly discriminative; pixel- and
+tokenizer-level statistics sit at chance. PTQ fragility is a representation phenomenon.
 
-### F3 — cross-model features close most of the gap to oracle but are not deployable
+### F2 — one feature is the whole recipe
 
-Adding the 6 cross-model features (`fp_logit_at_q_pred`, `q_softmax_at_fp_pred`, etc.) drops Pareto X@90% from 40% → **7%** across 18 tasks. The mechanism is that bad inputs have a specific FP/Q-disagreement signature (Q stole FP's runner-up) distinct from lucky-Q inputs (Q picked something FP ranked deep). The features quantify this.
+X@90 (smallest FP-compute fraction recovering 90% of the gap; **lower is better**):
 
-The catch: computing those features requires running both models, which defeats the compute saving. So this is a diagnostic ceiling, not a deployment recipe.
+| Subset | Deployment | ViT-B/16 | ViT-L/16 | Qwen3 |
+|---|---|---|---|---|
+| `msp_only` | MSP baseline | 30.4 ± 24.3 | 22.0 ± 16.5 | 21.0 ± 16.5 |
+| `q_margin_only` | **margin (proposed)** | **22.2 ± 17.2** | **18.4 ± 12.0** | **20.2 ± 16.5** |
+| `q_only` | all 3 Q-side (LogReg) | 24.4 ± 20.8 | 18.2 ± 11.9 | 20.8 ± 16.2 |
+| `fp_only` | FP-side only | 34.9 ± 23.1 | 26.9 ± 16.6 | 41.6 ± 21.2 |
+| `fp_plus_q_no_cross` | both models | 25.8 ± 20.9 | 18.9 ± 13.4 | 25.1 ± 18.6 |
+| `all_features` | ceiling (both + cross) | 7.5 ± 8.8 | 6.0 ± 5.1 | 6.0 ± 3.6 |
+| oracle | upper bound | 1.9 ± 1.4 | 2.3 ± 2.2 | 1.8 ± 1.1 |
+| random | lower bound | 83.8 ± 21.5 | 89.8 ± 2.8 | 80.9 ± 21.1 |
 
-### F4 — cross-task LOO generalises; one classifier ships across tasks
+Adding MSP and entropy to `q_margin` changes nothing beyond task-to-task variability; dropping
+`q_margin` is uniformly worse. The Q-side ceiling is reached by one feature with no fitted model.
 
-With `all_features`, LOO X@90% = 6.6% ± 8.6, beating same-task X@90% = 8.4% ± 9.1. LOO is *better* than same-task because the source pool provides 17× the training data, and per-task standardisation strips task-specific feature scales.
+### F3 — Q-side beats FP-side, even one feature against three
 
-With Q-only deployable features (3 features), LOO X@90% = 24.4% vs same-task 22.0% — within 2.5 pp. One classifier transfers across tasks at near-same-task efficiency. See `Table 2` of the paper draft.
+Single-feature `q_margin` (22.2%) beats the *multivariate* FP-side LogReg `fp_only` (34.9%) on
+ViT-B/16, and by ~1.5–2× on all three backbones. PTQ has its own decision boundaries, slightly
+shifted from FP's; the inputs near *those* boundaries are the ones PTQ flips.
 
-### F5 — bit-width robustness; sharp regime boundary at W3
+### F4 — cross-model features close the gap to oracle but are not deployable
 
-At W3-channel, mean PTQ test accuracy collapses to ~25%, and the bad-input population becomes the majority of test inputs (~70%). Oracle X@90% climbs from 1.9% (W4) to 53.8% (W3). Deployable Q-only X@90% goes from 24% to 81%. The predictor still ranks fragility correctly; it's the routing problem itself that's intractable when bad inputs are the majority.
+`all_features` reaches 7.5% / 6.0% / 6.0%, close to oracle's 1.9% / 2.3% / 1.8% — but it runs both
+FP and Q on every input, which defeats the purpose. Reported as a **diagnostic ceiling**, not a
+recipe. The gap between it and `q_margin` is the lucky-Q ambiguity (see TL;DR, and Prop. 2).
 
-**Practical implication.** The deployable routing recipe applies at recoverable PTQ regimes only (W4-channel and above). Harsher regimes need a stronger underlying PTQ method (SmoothQuant, AWQ, QuaRot) to recover useful accuracy before any input-aware routing can help.
+### F5 — cross-task LOO generalises
 
-### F6 — feature ablation; deployable headline is Q-only, not all-features
+The single-feature recipe needs no training, so this matters only for the multivariate ablations.
+For those, leave-one-out cross-task fitting lands within ~2.5 pp of a same-task fit in aggregate
+(`q_only`: 24.4% LOO vs 22.0% same-task on ViT-B/16). One fitted predictor ships across tasks.
 
-At W4-channel:
+### F6 — sharp regime boundary, and it is recipe-dependent
 
-| Subset | Deployment scenario | X@90% |
+At W3-channel under per-channel RTN, the mean FP→PTQ gap climbs to ~60 pp (ViT-B/16) and ~74 pp
+(ViT-L/16), broken inputs become the strict majority (~62% / ~75%), and even the oracle needs
+53.8% / 66.5%. The cheap-default-with-fallback pattern stops applying — a property of the regime,
+not the predictor. Switching to per-group_128 scales (same naive rounding, finer granularity, no
+calibration cost) cuts the W3 gap and the oracle's X@90 by 54–78% and the recipe applies again.
+
+### F7 — batch routing is rock-solid; label-free online routing is deployable but noisier
+
+| Strategy | Routed | Recovery |
 |---|---|---|
-| image_only | no model | 79.2% |
-| **q_only** | **PTQ-first deployable** | **24.4%** |
-| q_plus_image | PTQ-first + image | 24.5% (image adds 0) |
-| fp_only | FP-side only | 36.0% |
-| fp_plus_q_no_cross | both models, no cross | 29.1% |
-| **all_features** | diagnostic ceiling | **6.6%** |
+| `batch` (offline reference) | 22.2 / 18.4 / 20.2% | 91.0 / 90.7 / 90.8% (σ 2.3 / 1.2 / 0.8) |
+| `val_pct` (**label-free headline**) | 26.7 / 26.4 / 25.2% | 72.7 / 91.7 / 90.6% (σ 56.4 / 11.3 / 14.5) |
+| `val_x90` (label-aware variant) | 21.7 / 16.1 / 15.9% | 77.6 / 80.7 / 89.1% (σ 37.9 / 20.8 / 14.1) |
 
-Image features add nothing; Q-side beats FP-side; cross-features close most of the gap to oracle (1.9%) but at the cost of running both models. The 18-pp gap from Q-only (24%) to the ceiling (7%) is the cost of the lucky-Q ambiguity.
+`val_pct` sets τ at the 25th percentile of `q_margin` on the target's *unlabeled* validation split
+— no labels anywhere. The large ViT-B/16 σ is a metric artifact of near-zero-gap tasks admitted by
+its eligibility cut (a single misrouted input swings recovery by tens of pp when the gap is
+<0.5 pp), not a ranking failure; those tasks need no routing anyway and a label-free
+disagreement-rate pre-filter skips them.
 
-### F7 — batch deployment is rock-solid; online is noisier
+### Compute savings
 
-Batch routing (sort test set by P(bad), route top X%) on 18 W4-channel tasks: mean 26.7% routing → 91.0% recovery, σ = 2.3 pp. Stable. Drop-in deployment.
-
-Online fixed-threshold routing strategies (a single τ, no batch sorting): mean 24–37% routing → 70–82% recovery, σ in the tens of pp, driven largely by small-PTQ-gap outlier tasks. Workable but noisier.
-
-The paper's primary claim is the batch number; the online table extends to latency-sensitive deployments.
-
----
+At a typical int4 speedup (S = 2× per input), routing at the batch operating point saves
+**~28–32%** of compute versus always-FP on all three backbones, and past 50% at S = 4×.
 
 ## Reproducibility — how to run this from scratch
 
@@ -341,7 +403,7 @@ You need 21 finetuned `vit_base_patch16_224.orig_in21k` checkpoints, one per sup
 
 Two options:
 
-(a) **Run the finetune** via the script under master:
+(a) **Run the finetune** via the finetune script:
 ```
 uv run --active python code/src/vision/ilharco_timm_supervised/finetune_fp.py -m \
   model_name=vit_base_patch16_224.orig_in21k \
@@ -413,71 +475,103 @@ Re-run steps 1–2 with `ptq.bits=3` and `--bits 3` respectively. This reproduce
 ## Code layout
 
 ```
-qat-transfer/
-├── README.md                           ← this file (input-fragility branch)
-├── INPUT_FRAGILITY_LOG.md              ← dated finding log (F1–F7+)
-├── CLAUDE.md                           ← project conventions; mostly inherited from master
-├── paper/                              ← (gitignored) paper draft and figures
-│   ├── main.tex
-│   ├── references.bib                  ← still mostly TODO
-│   └── figs/*.pdf                      ← reproducible via generate_paper_figures.py
+qat-transfer/                        (branch: input-fragility)
+├── README.md                        ← this file
+├── paper/                           ← TRACKED (build artifacts gitignored)
+│   ├── short_main.tex               ← 5-page workshop version
+│   ├── main.tex                     ← full version
+│   ├── references.bib, neurips_2026.sty
+│   ├── figs/                        ← figure PDFs+PNGs (reproducible, see below)
+│   ├── tables/                      ← auto-generated LaTeX tables
+│   └── scripts/verify_numbers.sh    ← re-derives every number from the parquets
 ├── code/
-│   ├── experiments/vision/ilharco_timm_supervised/
-│   │   ├── 000_baselines/              ← inherited from master (evaluate_fp_ptq.py etc.)
-│   │   ├── 001_qat_transfer/           ← inherited
-│   │   └── 004_input_fragility/        ← THIS BRANCH'S WORK
-│   │       ├── dump_pred_and_input_props.py   ← Script A (GPU)
-│   │       └── (no other scripts here; analyses are visualization-style argparse)
-│   ├── visualizations/vision/ilharco_timm_supervised/
-│   │   └── 004_input_fragility/        ← THIS BRANCH'S WORK
-│   │       ├── analyze_input_props.py     ← Script B
-│   │       ├── pareto_routing.py          ← Script C
-│   │       ├── loo_pareto_routing.py      ← Script D
-│   │       ├── feature_ablation_pareto.py ← Script E
-│   │       ├── threshold_calibration.py   ← Script F
-│   │       └── generate_paper_figures.py  ← paper figures
-│   └── src/                            ← inherited shared infrastructure
-│       ├── quantization.py             ← apply_ptq_, fake_quantize_tensor, …
-│       ├── vision/data/                ← dataset loaders, registry, common.py
-│       └── vision/ilharco_timm_supervised/modeling.py  ← ImageClassifier
-├── config/                             ← Hydra YAMLs mirroring code/
-│   └── experiments/vision/ilharco_timm_supervised/
-│       └── 004_input_fragility/dump_pred_and_input_props.yaml
-└── storage/                            ← (gitignored) checkpoints + dumps live here
+│   ├── src/                         ← shared infrastructure
+│   │   ├── quantization.py          ← apply_ptq_, fake_quantize_tensor, QATLinear, …
+│   │   ├── vision/data/             ← 21 vision dataset loaders + registry
+│   │   ├── vision/ilharco_timm_supervised/   ← ImageClassifier, finetune_fp/qat
+│   │   ├── text/data/               ← 11 MTEB loaders + registry
+│   │   └── {repqvit,ptq4vit,aphq_vit}/       ← alternative PTQ methods (not used by the paper)
+│   ├── experiments/
+│   │   ├── vision/ilharco_timm_supervised/
+│   │   │   ├── 000_baselines/       ← evaluate_fp.py, evaluate_fp_ptq.py, …
+│   │   │   ├── 001_qat_transfer/    ← parent project
+│   │   │   ├── 002_quant_steering/  ← abandoned line
+│   │   │   └── 004_input_fragility/ ← THIS PROJECT
+│   │   │       ├── dump_pred_and_input_props.py   ← Script A (GPU)
+│   │   │       └── embedding_variance_probe.py    ← patch-embedding probe (negative result)
+│   │   └── text/ilharco_automodelforsequenceclassification/004_input_fragility/
+│   │       └── dump_pred_and_input_props.py       ← Script A, Qwen3
+│   └── visualizations/
+│       ├── vision/ilharco_timm_supervised/004_input_fragility/
+│       │   ├── analyze_input_props.py     ← Script B      pareto_routing.py        ← Script C
+│       │   ├── loo_pareto_routing.py      ← Script D      feature_ablation_pareto.py ← Script E
+│       │   ├── threshold_calibration.py   ← Script F
+│       │   ├── generate_paper_tables.py   ← LaTeX tables  → paper/tables/
+│       │   ├── generate_paper_figures.py  ← figure PDFs   → paper/figs/
+│       │   └── verify_paper_numbers.py    ← re-derives every reported number
+│       └── text/ilharco_automodelforsequenceclassification/004_input_fragility/
+│           └── analyze_qwen3.py           ← Qwen3 summary report
+├── config/                          ← Hydra YAMLs mirroring code/ 1:1
+└── storage/                         ← (gitignored) checkpoints + parquet dumps
 ```
 
-Hydra scripts under `code/experiments/` and `code/src/` have matching YAML configs under `config/`. Argparse scripts under `code/visualizations/` don't.
+Hydra scripts under `code/experiments/` and `code/src/` have matching YAMLs under `config/`.
+Argparse scripts under `code/visualizations/` do not.
 
-`storage/`, `plots/`, `evaluations/`, `logs/`, and `paper/` are gitignored.
+`storage/`, `plots/`, `evaluations/`, `logs/` and LaTeX build artifacts are gitignored. The paper
+*sources*, figures and generated tables are tracked.
 
 ---
 
-## Relation to other branches and shared infrastructure
+## Relation to the parent codebase
 
-This branch is one of three research projects sharing the same codebase:
+This branch sits on a larger quantization-aware-transfer codebase, which supplies the shared
+infrastructure reused here: model-family wrappers, `apply_ptq_`, dataset loaders, finetune scripts.
+Two sibling lines exist and are **not** part of this project:
 
-- **`master`** — the original quantization-aware-transfer line of research. Defines the shared infrastructure: ViT and CLIP family wrappers, `apply_ptq_`, dataset loaders for 22 vision tasks, finetune scripts.
-- **`quant-steering`** — an abandoned line. Tried to recover PTQ accuracy by adding rank-1 steering vectors to the residual stream. Hit a hard ceiling of ~26% gap recovery on the best task; written up as a dead-end in `QUANT_STEERING_LOG.md` on that branch. **Do not reopen** without a new mechanism reason.
-- **`input-fragility`** (this branch) — the project this README describes.
+- **`master`** — the original quantization-aware-transfer research (quantization vectors
+  transferred across tasks). Defines most of `code/src/`.
+- **`quant-steering`** — an abandoned line: recovering PTQ accuracy with rank-1 residual-stream
+  steering vectors. Hit a ~26% gap-recovery ceiling. Do not reopen without a new mechanism reason.
 
-The three branches all consume the same on-disk finetuned-FP checkpoints (~7 GB), which live under `${CHECKPOINT_BASE_PATH}/vision/ilharco_timm_supervised/fp/...`. Switching branches doesn't require re-finetuning; only re-running the per-branch analysis scripts.
+All three consume the same on-disk finetuned-FP checkpoints under
+`${CHECKPOINT_BASE_PATH}/…/fp/…`; switching branches never requires re-finetuning.
 
-Conventions (file naming, Hydra config structure, sanitised model names, the SPLIT_SEED=0 val carve-out, etc.) are inherited from master and documented in [`CLAUDE.md`](CLAUDE.md). 004_input_fragility follows them.
+Conventions — file naming, Hydra config structure, sanitised model names, the `SPLIT_SEED=0` val
+carve-out — are inherited and documented in [`CLAUDE.md`](CLAUDE.md). `004_input_fragility`
+follows them.
 
 ---
 
 ## Limitations and open questions
 
-**Limitations to flag in any writeup or discussion:**
+**Limitations:**
 
-- **Both models required at deployment**: the routing decision needs the Q model to have already produced its logits (for the Q-only deployable feature set), and the FP fallback to be available for the routed inputs. This is a recipe for systems where both models are co-deployed (Q is the cheap default, FP is selective), not a recipe for shipping pure-Q deployments.
-- **Compute-saving requires hardware difference**: on vanilla GPUs without int4 kernels, weight-only PTQ is compute-equivalent to FP and the routing-saves-compute story is hardware-conditional.
-- **Recoverable-regime caveat**: the deployable claim is empirically delimited to W4-channel and gentler. At catastrophic regimes (W3-channel, W4-tensor on this codebase), bad inputs are the majority of test inputs and no routing scheme helps.
-- **Single backbone tested**: `vit_base_patch16_224.orig_in21k`. The mechanism (FP/Q confidence + cross-model disagreement) is plausibly architecture-agnostic but we have not validated on ViT-S, ViT-L, or non-ViT backbones.
+- **Both models required at deployment.** The routing decision needs Q's logits, and the FP
+  fallback must be available for routed inputs. This suits systems where Q is the cheap default
+  and FP is selective — not a recipe for shipping pure-Q deployments.
+- **Compute saving is hardware-conditional.** On vanilla GPUs without int4 kernels, weight-only
+  PTQ is compute-equivalent to FP and the savings story evaporates. We report savings
+  parametrically in the per-input speedup S.
+- **Recoverable-regime bound.** The deployable claim is delimited to W4-channel and gentler. At
+  W3-channel per-channel RTN, broken inputs are the majority and no routing scheme helps.
+- **RTN only.** All results use naive round-to-nearest — deliberately, as the weakest weight-only
+  PTQ, to isolate the routing question from the quantization-algorithm question. GPTQ, AWQ,
+  SmoothQuant and QuaRot would each shift the recoverable boundary; none is tested here.
+- **Prop. 2 is hypothesis-dependent.** It proves single-pass features cannot separate bad from
+  lucky-Q *under a symmetry assumption* on the Q-logit distribution that we cannot verify
+  empirically. The observed ceiling gap is consistent with it, not proof of it.
 
-**Open questions worth a follow-up paper or section:**
+**Open questions:**
 
-- **Stronger PTQ methods** (GPTQ, AWQ, SmoothQuant, QuaRot) produce gentler degradation at W3 and below. Re-running this analysis with one of those as the underlying PTQ would extend the recoverable regime and tighten the deployment story to "near-fp accuracy at W3-class memory savings, with X% routing budget."
-- **Calibrating online τ better.** Script F's val-percentile calibration is label-free but adds variance. A small target-task labeled set could pick τ more precisely; the labeled-cost vs.\ recovery trade-off is worth quantifying.
-- **The lucky-Q ambiguity bound.** Is there a feature *cheaper than running both models* that breaks the ambiguity? Plausibly something derived from intermediate Q activations (not just final logits) carries enough information; we have not explored this.
-- **Architecture transfer.** Does a LogReg trained on ViT-B fragility transfer to ViT-L? Or does each backbone need its own classifier? Plausible that the feature distributions differ enough that a one-classifier-per-backbone setup is the natural unit.
+- **Stronger PTQ methods.** Re-running under GPTQ-class quantization is the natural next step:
+  it would extend the recoverable regime and sharpen the deployment story. The implementations
+  are already in `code/src/{repqvit,ptq4vit,aphq_vit}/` and `…/baselines/gptq.py`.
+- **Breaking the lucky-Q ambiguity cheaply.** Is there a signal cheaper than a second forward pass
+  that separates bad from lucky-Q? We tested one candidate and it failed: patch-embedding variance
+  (`embedding_variance_probe.py`) is at or below chance (AUROC 0.43–0.50 across CIFAR10, Cars,
+  SUN397) — fragility is not visible at the input-embedding stage. The pre-head representation
+  remains unexplored and is the more promising place to look.
+- **Per-backbone vs universal thresholds.** `q_margin` is scale-robust (X@90 stays in 18–22%
+  across three backbones), but the *absolute* τ differs per task. Whether a single normalised
+  threshold could ship across backbones is untested.

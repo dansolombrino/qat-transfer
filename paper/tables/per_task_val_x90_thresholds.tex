@@ -1,0 +1,88 @@
+\begin{table}[t]
+\centering
+\caption{Per-task online thresholds on \textbf{ViT-B/16} at W4-channel, comparing the two deployable recipes side-by-side. For \texttt{val\_x90} (label-aware, per-task), the val routing fraction is the val \xat{90}; for \texttt{val\_pct} (label-free, global 25\%), the val routing fraction is fixed at 25\% by construction. Both recipes set $\tau$ on val and apply it to the unseen test set. Test recovery $<$ 90\% on a task reflects honest val$\to$test transfer slack; recoveries $>$ 100\% occur when the test score distribution happens to be tighter than the val one. Bottom row: mean across listed tasks.}
+\label{tab:per_task_taus_vit_b}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lr|rrrr|rrr}
+\toprule
+ & & \multicolumn{4}{c|}{\texttt{val\_x90} (val labels, per-task)} & \multicolumn{3}{c}{\texttt{val\_pct} (label-free, 25\%)} \\
+\cmidrule(lr){3-6} \cmidrule(lr){7-9}
+Task & $n_{\text{val}}$ & val \xat{90} & $\tau$ & test frac & test rec & $\tau$ & test frac & test rec \\
+\midrule
+\texttt{CIFAR10} & 5000 & 3.6\% & 1.167 & 4.2\% & 91.5\% & 2.724 & 25.3\% & 100.0\% \\
+\texttt{CIFAR100} & 5000 & 24.0\% & 0.210 & 23.3\% & 85.3\% & 0.218 & 24.0\% & 84.4\% \\
+\texttt{Cars} & 814 & 67.3\% & 0.107 & 66.4\% & 90.0\% & 0.029 & 25.8\% & 44.1\% \\
+\texttt{DTD} & 376 & 19.1\% & 0.345 & 17.1\% & 47.4\% & 0.424 & 20.6\% & 71.1\% \\
+\texttt{EMNIST} & 5000 & 40.2\% & 0.459 & 41.0\% & 92.6\% & 0.261 & 24.9\% & 73.9\% \\
+\texttt{EuroSAT} & 2160 & 3.4\% & 0.761 & 3.0\% & 75.0\% & 2.729 & 26.6\% & 100.0\% \\
+\texttt{FER2013} & 2870 & 18.7\% & 0.303 & 18.6\% & 43.4\% & 0.410 & 24.2\% & 73.6\% \\
+\texttt{FashionMNIST} & 5000 & 8.4\% & 0.509 & 8.1\% & 71.9\% & 1.455 & 25.4\% & 100.0\% \\
+\texttt{Food101} & 5000 & 27.9\% & 0.186 & 26.1\% & 91.1\% & 0.162 & 23.3\% & 86.5\% \\
+\texttt{GTSRB} & 2664 & 6.3\% & 0.542 & 7.5\% & 86.4\% & 1.701 & 27.1\% & 100.0\% \\
+\texttt{KMNIST} & 5000 & 15.9\% & 1.049 & 31.6\% & 88.7\% & 1.582 & 44.2\% & 98.4\% \\
+\texttt{MNIST} & 5000 & 13.8\% & 1.695 & 12.3\% & 96.2\% & 2.204 & 24.2\% & 99.2\% \\
+\texttt{PCAM} & 5000 & 6.8\% & 0.911 & 10.7\% & 152.7\% & 2.439 & 34.5\% & 98.6\% \\
+\texttt{RESISC45} & 1890 & 14.8\% & 0.430 & 15.6\% & 82.0\% & 0.739 & 25.8\% & 93.4\% \\
+\texttt{RenderedSST2} & 692 & 13.4\% & 0.024 & 16.4\% & -50.0\% & 0.039 & 28.6\% & -150.0\% \\
+\texttt{SUN397} & 1985 & 50.7\% & 0.116 & 50.1\% & 90.1\% & 0.043 & 23.6\% & 53.4\% \\
+\texttt{SVHN} & 5000 & 8.5\% & 0.450 & 7.7\% & 71.2\% & 1.448 & 25.6\% & 98.5\% \\
+\texttt{TinyImageNet} & 5000 & 31.6\% & 0.192 & 31.9\% & 92.0\% & 0.147 & 26.3\% & 82.8\% \\
+\midrule
+\textbf{Mean (18 tasks)} & --- & 20.8\% & --- & 21.8\% & 77.6\% & --- & 26.7\% & 72.7\% \\
+\bottomrule \end{tabular} \end{table}
+
+\begin{table}[t]
+\centering
+\caption{Per-task online thresholds on \textbf{ViT-L/16} at W4-channel, comparing the two deployable recipes side-by-side. One W4-eligible task (where the val \fp$\to$\ptq{} gap is degenerate) is omitted. For \texttt{val\_x90} (label-aware, per-task), the val routing fraction is the val \xat{90}; for \texttt{val\_pct} (label-free, global 25\%), the val routing fraction is fixed at 25\% by construction. Both recipes set $\tau$ on val and apply it to the unseen test set. Test recovery $<$ 90\% on a task reflects honest val$\to$test transfer slack; recoveries $>$ 100\% occur when the test score distribution happens to be tighter than the val one. Bottom row: mean across listed tasks.}
+\label{tab:per_task_taus_vit_l}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lr|rrrr|rrr}
+\toprule
+ & & \multicolumn{4}{c|}{\texttt{val\_x90} (val labels, per-task)} & \multicolumn{3}{c}{\texttt{val\_pct} (label-free, 25\%)} \\
+\cmidrule(lr){3-6} \cmidrule(lr){7-9}
+Task & $n_{\text{val}}$ & val \xat{90} & $\tau$ & test frac & test rec & $\tau$ & test frac & test rec \\
+\midrule
+\texttt{CIFAR10} & 5000 & 1.3\% & 1.291 & 1.5\% & 68.4\% & 5.351 & 25.1\% & 100.0\% \\
+\texttt{CIFAR100} & 5000 & 13.8\% & 1.065 & 14.1\% & 86.9\% & 1.857 & 24.9\% & 98.8\% \\
+\texttt{Cars} & 814 & 37.0\% & 0.434 & 36.2\% & 85.9\% & 0.271 & 24.8\% & 67.7\% \\
+\texttt{DTD} & 376 & 33.5\% & 2.657 & 32.9\% & 95.7\% & 1.909 & 25.4\% & 87.2\% \\
+\texttt{EMNIST} & 5000 & 28.1\% & 1.273 & 28.9\% & 91.6\% & 1.143 & 26.2\% & 89.7\% \\
+\texttt{FER2013} & 2870 & 6.8\% & 0.125 & 6.2\% & 22.2\% & 0.499 & 24.1\% & 82.5\% \\
+\texttt{FashionMNIST} & 5000 & 12.2\% & 1.412 & 11.7\% & 88.7\% & 2.779 & 24.0\% & 100.0\% \\
+\texttt{Food101} & 5000 & 19.7\% & 0.704 & 15.8\% & 83.6\% & 0.961 & 20.6\% & 92.9\% \\
+\texttt{KMNIST} & 5000 & 5.6\% & 1.802 & 13.2\% & 92.3\% & 4.068 & 41.9\% & 100.0\% \\
+\texttt{MNIST} & 5000 & 3.3\% & 1.970 & 2.7\% & 94.4\% & 5.237 & 24.0\% & 100.0\% \\
+\texttt{PCAM} & 5000 & 1.3\% & 0.304 & 2.4\% & 40.2\% & 3.289 & 35.8\% & 100.0\% \\
+\texttt{RESISC45} & 1890 & 7.7\% & 1.139 & 7.9\% & 92.8\% & 3.141 & 26.4\% & 101.2\% \\
+\texttt{SUN397} & 1985 & 37.2\% & 0.354 & 36.3\% & 85.2\% & 0.195 & 22.8\% & 65.5\% \\
+\texttt{SVHN} & 5000 & 10.6\% & 1.553 & 9.5\% & 94.5\% & 3.315 & 24.9\% & 99.7\% \\
+\texttt{TinyImageNet} & 5000 & 22.0\% & 0.850 & 22.4\% & 88.6\% & 0.987 & 25.1\% & 89.6\% \\
+\midrule
+\textbf{Mean (15 tasks)} & --- & 16.0\% & --- & 16.1\% & 80.7\% & --- & 26.4\% & 91.7\% \\
+\bottomrule \end{tabular} \end{table}
+
+\begin{table}[t]
+\centering
+\caption{Per-task online thresholds on \textbf{Qwen3-Embedding-0.6B} at W4-channel, comparing the two deployable recipes side-by-side. One W4-eligible task (where the val \fp$\to$\ptq{} gap is degenerate) is omitted. For \texttt{val\_x90} (label-aware, per-task), the val routing fraction is the val \xat{90}; for \texttt{val\_pct} (label-free, global 25\%), the val routing fraction is fixed at 25\% by construction. Both recipes set $\tau$ on val and apply it to the unseen test set. Test recovery $<$ 90\% on a task reflects honest val$\to$test transfer slack; recoveries $>$ 100\% occur when the test score distribution happens to be tighter than the val one. Bottom row: mean across listed tasks.}
+\label{tab:per_task_taus_qwen3}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lr|rrrr|rrr}
+\toprule
+ & & \multicolumn{4}{c|}{\texttt{val\_x90} (val labels, per-task)} & \multicolumn{3}{c}{\texttt{val\_pct} (label-free, 25\%)} \\
+\cmidrule(lr){3-6} \cmidrule(lr){7-9}
+Task & $n_{\text{val}}$ & val \xat{90} & $\tau$ & test frac & test rec & $\tau$ & test frac & test rec \\
+\midrule
+\texttt{Banking77} & 999 & 21.1\% & 3.326 & 22.8\% & 95.6\% & 3.820 & 26.2\% & 95.6\% \\
+\texttt{Emotion} & 1595 & 7.6\% & 2.769 & 7.4\% & 85.7\% & 9.417 & 25.2\% & 107.1\% \\
+\texttt{IMDB} & 2490 & 23.2\% & 10.310 & 24.8\% & 70.6\% & 10.804 & 27.3\% & 72.3\% \\
+\texttt{MTOPIntent} & 1566 & 13.9\% & 4.242 & 14.2\% & 105.6\% & 6.245 & 24.0\% & 102.8\% \\
+\texttt{MassiveIntent} & 1151 & 19.9\% & 2.261 & 18.0\% & 86.0\% & 3.221 & 22.8\% & 92.5\% \\
+\texttt{MassiveScenario} & 1151 & 13.2\% & 2.210 & 10.8\% & 96.3\% & 5.724 & 25.8\% & 100.0\% \\
+\texttt{ToxicConversations} & 5000 & 8.8\% & 7.758 & 8.8\% & 107.4\% & 11.940 & 25.3\% & 103.3\% \\
+\texttt{TweetSentimentExtraction} & 2673 & 21.5\% & 4.956 & 20.5\% & 67.2\% & 5.693 & 24.0\% & 76.1\% \\
+\midrule
+\textbf{Mean (8 tasks)} & --- & 16.2\% & --- & 15.9\% & 89.3\% & --- & 25.1\% & 93.7\% \\
+\bottomrule \end{tabular} \end{table}

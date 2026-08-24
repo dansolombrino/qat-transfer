@@ -1,0 +1,27 @@
+% Per-task statistics for Qwen3-Embedding-0.6B at W4-channel and W3-channel.
+\begin{table}[t]
+\centering
+\caption{Per-task dataset statistics and FP/PTQ test accuracy \textbf{for Qwen3-Embedding-0.6B} at W4-channel and W3-channel. $n_{\text{bad}}^{\text{val}}$ and $n_{\text{bad}}^{\text{test}}$ count val and test inputs that FP gets right and PTQ flips. $\Delta$ is the FP$\to$PTQ test-accuracy gap (positive $=$ PTQ drop). Tasks marked $\dagger$ are excluded from the analysis at that regime because $n_{\text{bad}}^{\text{val}} < 10$ or $n_{\text{bad}}^{\text{test}} < 10$ (PTQ barely degrades them); the dagger marks the row at the regime where eligibility fails.}
+\label{tab:task_stats_qwen3}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrrrrrrrrrr}
+\toprule
+& & & \multicolumn{5}{c}{W4-channel} & \multicolumn{5}{c}{W3-channel} \\
+\cmidrule(lr){4-8} \cmidrule(lr){9-13}
+Task & $n_{\text{val}}$ & $n_{\text{test}}$ & $n_{\text{bad}}^{\text{val}}$ & $n_{\text{bad}}^{\text{test}}$ & FP & PTQ & $\Delta$ & $n_{\text{bad}}^{\text{val}}$ & $n_{\text{bad}}^{\text{test}}$ & FP & PTQ & $\Delta$ \\
+\midrule
+AmazonCounterfactual & 401 & 335 & 4 & 4$^{\dagger}$ & 94.6\% & 94.3\% & +0.30 & 98 & 92 & 94.6\% & 69.3\% & +25.37 \\
+AmazonReviewsClassification & 5,000 & 5,000 & 339 & 382 & 64.1\% & 63.2\% & +0.92 & 1,874 & 1,911 & 64.1\% & 35.4\% & +28.74 \\
+Banking77 & 999 & 3,076 & 37 & 157 & 94.1\% & 89.7\% & +4.45 & 918 & 2,828 & 94.1\% & 2.3\% & +91.87 \\
+Emotion & 1,595 & 1,986 & 35 & 38 & 93.2\% & 92.4\% & +0.70 & 1,095 & 1,335 & 93.2\% & 27.5\% & +65.66 \\
+IMDB & 2,490 & 24,678 & 110 & 1,217 & 90.9\% & 88.3\% & +2.56 & 1,043 & 10,224 & 90.9\% & 53.9\% & +36.94 \\
+MTOPDomain & 1,566 & 4,386 & 8 & 22$^{\dagger}$ & 99.1\% & 98.7\% & +0.39 & 1,030 & 2,911 & 99.1\% & 32.9\% & +66.21 \\
+MTOPIntent & 1,566 & 4,386 & 34 & 104 & 96.6\% & 94.9\% & +1.62 & 1,466 & 4,153 & 96.6\% & 2.0\% & +94.60 \\
+MassiveIntent & 1,151 & 2,974 & 56 & 145 & 88.2\% & 85.1\% & +3.13 & 966 & 2,482 & 88.2\% & 5.3\% & +82.89 \\
+MassiveScenario & 1,151 & 2,974 & 42 & 96 & 91.2\% & 89.3\% & +1.82 & 912 & 2,333 & 91.2\% & 13.7\% & +77.47 \\
+ToxicConversations & 5,000 & 50,000 & 55 & 650 & 94.5\% & 94.1\% & +0.43 & 349 & 3,483 & 94.5\% & 89.3\% & +5.17 \\
+TweetSentimentExtraction & 2,673 & 3,432 & 198 & 238 & 78.0\% & 76.0\% & +1.95 & 1,205 & 1,533 & 78.0\% & 42.0\% & +35.93 \\
+\bottomrule
+\end{tabular}
+\end{table}

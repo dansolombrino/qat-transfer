@@ -1,8 +1,18 @@
 # References
 references/
 
-# Paper draft
-paper/
+# Paper: sources, figures and generated tables ARE tracked.
+# LaTeX build artifacts are not.
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.bbl
+paper/*.blg
+paper/*.toc
+paper/*.fls
+paper/*.fdb_latexmk
+paper/*.synctex.gz
+paper/*.pdf
 
 # Visual Studio Code
 .vscode/
