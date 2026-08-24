@@ -1,18 +1,12 @@
 # References
 references/
 
-# Paper: sources, figures and generated tables ARE tracked.
-# LaTeX build artifacts are not.
-paper/*.aux
-paper/*.log
-paper/*.out
-paper/*.bbl
-paper/*.blg
-paper/*.toc
-paper/*.fls
-paper/*.fdb_latexmk
-paper/*.synctex.gz
-paper/*.pdf
+# Paper draft — kept local, never pushed
+paper/
+
+# Project log and any local Claude state — kept local, never pushed
+INPUT_FRAGILITY_LOG.md
+.claude/
 
 # Visual Studio Code
 .vscode/
