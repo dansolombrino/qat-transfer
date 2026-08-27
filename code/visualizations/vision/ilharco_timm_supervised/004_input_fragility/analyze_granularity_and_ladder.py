@@ -14,6 +14,7 @@ Produces F18 / MATERIAL.md 2.8: group_128 is the practical recommendation (certi
 always-W4 plus routing).
 """
 import os
+import zlib
 import sys
 from pathlib import Path
 
@@ -30,6 +31,8 @@ from src.vision.utils import sanitize_hf_model_name, sanitize_timm_model_name
 _CBP = Path(os.environ["CHECKPOINT_BASE_PATH"])
 VB = ("vision", "ilharco_timm_supervised", "vit_base_patch16_224.orig_in21k",
       "optim=adamw_lr=1e-05_wd=0.1_ls=0.0_wl=500_mgn=1.0_bs=128", "head")
+VL = ("vision", "ilharco_timm_supervised", "vit_large_patch16_224.orig_in21k",
+      "optim=adamw_lr=1e-05_wd=0.1_ls=0.0_wl=500_mgn=1.0_bs=64", "head")
 QW = ("text", "ilharco_automodelforsequenceclassification", "Qwen/Qwen3-Embedding-0.6B",
       "optim=adamw_lr=1e-05_wd=0.1_ls=0.0_mgn=1.0_bs=32_ml=128", "score")
 
@@ -74,10 +77,12 @@ def certify(cal, tst, alpha):
 print("=" * 94)
 print("A. DOES group_128 RESTORE CERTIFIABILITY?  (channel vs group_128, same bits)")
 print("=" * 94)
-rng = np.random.default_rng(0)
-for name, cfg in (("ViT-B", VB), ("Qwen3", QW)):
+# NOTE: seed per (backbone, bits, granularity) below, NOT once at module level -- a
+# single rng consumed inside the loops makes each cell depend on the loop order.
+for name, cfg in (("ViT-B", VB), ("ViT-L", VL), ("Qwen3", QW)):
     for bits in (4, 3):
         for gran in ("channel", "group_128"):
+            rng = np.random.default_rng(zlib.crc32(f"{name}|{bits}|{gran}".encode()))
             tasks = load(cfg, bits, gran)
             if not tasks:
                 print(f"  {name} W{bits}-{gran:9s}: no data")
@@ -110,9 +115,10 @@ print("=" * 94)
 print("B. THE ~10x TOP-1/TOP-2 SEPARATION RATIO — does it survive group_128?")
 print("=" * 94)
 print("  median (z_(k) - z_(k+1)) / 2 eps.  >= 1 means the k-cut is certifiable.\n")
-for name, cfg in (("ViT-B", VB), ("Qwen3", QW)):
+for name, cfg in (("ViT-B", VB), ("ViT-L", VL), ("Qwen3", QW)):
     for bits in (4, 3):
         for gran in ("channel", "group_128"):
+            rng = np.random.default_rng(zlib.crc32(f"{name}|{bits}|{gran}".encode()))
             tasks = load(cfg, bits, gran)
             if not tasks:
                 continue
@@ -140,7 +146,8 @@ print("  Rung cost proxy = bits/16 of an FP pass (weight-bound), FP = 1.0.")
 print("  A rung settles an input if the certificate fires there at alpha=0.10.")
 print("  'errors' = top-1 differs from FP on inputs the ladder settled early.\n")
 COST = {3: 3/16, 4: 4/16, "fp": 1.0}
-for name, cfg in (("ViT-B", VB), ("Qwen3", QW)):
+for name, cfg in (("ViT-B", VB), ("ViT-L", VL), ("Qwen3", QW)):
+    rng = np.random.default_rng(zlib.crc32(f"{name}|ladder".encode()))
     t3, t4 = load(cfg, 3, "group_128"), load(cfg, 4, "group_128")
     common = sorted(set(t3) & set(t4))
     if not common:

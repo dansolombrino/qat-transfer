@@ -3,7 +3,9 @@ F15 / 2.6 (the negative result on whether fragility onset tracks FP decision-rea
 
 import os,sys
 from pathlib import Path
-_R = Path(__file__).resolve().parents[5]   # repo root, derived not hardcoded; sys.path.insert(0,str(_R/"code")); os.chdir(_R)
+_R = Path(__file__).resolve().parents[5]   # repo root, derived not hardcoded
+sys.path.insert(0, str(_R / "code"))
+os.chdir(_R)
 from dotenv import load_dotenv; load_dotenv(_R/".env")
 import numpy as np, pandas as pd
 from sklearn.metrics import roc_auc_score
