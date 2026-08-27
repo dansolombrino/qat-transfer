@@ -1,0 +1,30 @@
+hydra:
+  searchpath:
+    - file://${oc.env:PWD}/config
+  sweep:
+    dir: logs/config/experiments/text/sentence_transformers/004_input_fragility/retrieval_gap_profile
+    subdir: ${sanitize_hf:${model_name}}/${dataset_name}/ml=${max_length}_bs=${batch_size}/ptq=bits=${ptq.bits}_gran=${ptq.granularity}/seed=${seed}
+
+model_name: ???
+dataset_name: ???
+batch_size: ???
+max_length: ???
+seed: ???
+gpu: ???
+
+# cap the query set so a dataset with many queries does not dominate the run;
+# null keeps all queries
+max_queries: 2000
+
+# corpus sizes at which to re-rank. Restricting the corpus is a scoring-time operation,
+# so every size below comes free from the same pair of encodings. Sizes larger than the
+# corpus are dropped and the full size is always included.
+corpus_sizes: [1000, 4000, 16000, 64000]
+
+# query-block size for the similarity matmul, to bound peak memory on large corpora
+sim_chunk: 512
+
+ptq:
+  skip_modules: ???  # list of child-module names to exclude from PTQ; [] for the bare encoder
+  bits: ???          # int
+  granularity: ???   # "tensor", "channel", or "group_128"

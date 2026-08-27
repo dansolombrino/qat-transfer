@@ -1,0 +1,25 @@
+hydra:
+  searchpath:
+    - file://${oc.env:PWD}/config
+  sweep:
+    dir: logs/config/experiments/text/ilharco_automodelforsequenceclassification/004_input_fragility/gap_profile
+    subdir: ${sanitize_hf:${model_name}}/${dataset_name}/optim=adamw_lr=${lr}_wd=${wd}_ls=${ls}_mgn=${max_grad_norm}_bs=${batch_size}_ml=${max_length}/ptq=bits=${ptq.bits}_gran=${ptq.granularity}/seed=${seed}
+
+model_name: ???
+dataset_name: ???
+batch_size: ???
+lr: ???
+wd: ???
+ls: ???
+max_grad_norm: ???
+max_length: ???
+seed: ???
+gpu: ???
+limit_num_epochs: null
+limit_num_batches: null
+log_to_file: false
+
+ptq:
+  skip_modules: ???  # list of child-module names to exclude from PTQ, e.g. [score]
+  bits: ???          # int
+  granularity: ???   # "tensor" or "channel"

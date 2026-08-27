@@ -1,0 +1,37 @@
+hydra:
+  searchpath:
+    - file://${oc.env:PWD}/config
+  sweep:
+    dir: logs/config/experiments/vision/ilharco_timm_supervised/004_input_fragility/retrieval_gap_profile
+    subdir: ${model_name}/${dataset_name}/optim=adamw_lr=${lr}_wd=${wd}_ls=${ls}_wl=${wl}_mgn=${max_grad_norm}_bs=${batch_size}/ptq=bits=${ptq.bits}_gran=${ptq.granularity}/seed=${seed}
+
+model_name: ???
+dataset_name: ???
+batch_size: ???
+lr: ???
+wd: ???
+ls: ???
+wl: ???
+max_grad_norm: ???
+seed: ???
+gpu: ???
+limit_num_epochs: null
+limit_num_batches: null
+log_to_file: false
+
+# queries are drawn from the test set; the corpus is the test set, self-match masked out
+max_queries: 2000
+
+# corpus sizes at which to re-rank. Restricting the corpus is a scoring-time operation, so
+# every size below comes free from the same pair of embeddings. Sizes larger than the test
+# set are dropped and the full size is always included.
+corpus_sizes: [1000, 4000, 16000]
+
+# query-block size for the similarity matmul, to bound peak memory
+sim_chunk: 512
+
+ptq:
+  skip_modules: ???  # list of child-module attribute names to exclude from PTQ;
+                     # the classification head is unused here, so [] is the honest setting
+  bits: ???          # int (e.g. 4 or 3)
+  granularity: ???   # "tensor", "channel", or "group_128"

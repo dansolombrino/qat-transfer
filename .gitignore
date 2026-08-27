@@ -123,4 +123,9 @@ plots/
 shitpads/
 .github/
 
+# scratch dir — ignored wholesale, as before
 misc/
+
+# project log / task state — kept local, never pushed
+RESEARCH_QUEUE.md
+EXPERIMENTS.md
