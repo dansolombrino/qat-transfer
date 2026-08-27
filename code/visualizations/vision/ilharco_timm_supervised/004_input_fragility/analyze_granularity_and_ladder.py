@@ -8,12 +8,16 @@ rung cannot certify. Rungs by real cost are W3 < W4 < FP (channel vs group_128 a
 costs the same MACs -- only the dequant scales differ -- so group_128 is not a rung, it is
 strictly better at equal cost). So the ladder is W3-g128 -> W4-g128 -> FP, and the question is
 what expected cost it achieves against always-W4 plus routing.
+
+Produces F18 / MATERIAL.md 2.8: group_128 is the practical recommendation (certified coverage
+~79% at W4 for free), and the precision ladder is dead (35-36% MORE expensive than
+always-W4 plus routing).
 """
 import os
 import sys
 from pathlib import Path
 
-_R = Path("/home/lzhou/qat-transfer")
+_R = Path(__file__).resolve().parents[5]   # repo root, derived not hardcoded
 sys.path.insert(0, str(_R / "code"))
 os.chdir(_R)
 from dotenv import load_dotenv
