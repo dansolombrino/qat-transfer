@@ -1,0 +1,21 @@
+hydra:
+  searchpath:
+    - file://${oc.env:PWD}/config
+  sweep:
+    dir: logs/config/experiments/vision/ilharco_hf_clip/004_input_fragility/crossmodal_gap_profile
+    subdir: ${model_name}/ptq=bits=${ptq.bits}_gran=${ptq.granularity}/seed=${seed}
+
+model_name: ViT-B-32
+pretrained: openai
+dataset_path: nlphuji/flickr30k
+split: test
+caption_field: caption
+max_images: 4000
+max_queries: 2000
+batch_size: 64
+seed: 2038
+gpu: ???
+ptq:
+  skip_modules: []
+  bits: ???
+  granularity: group_128
