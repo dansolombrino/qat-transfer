@@ -81,9 +81,11 @@ def main(cfg: DictConfig):
     d_q, q_q = _encode(model, docs, cfg.batch_size, False), _encode(model, qs, cfg.batch_size, True)
 
     res = {}
+    orders = {}
     for tag, Q, D in (("fp", q_fp, d_fp), ("ptq", q_q, d_q)):
         sims = np.asarray(Q) @ np.asarray(D).T
         order = np.argsort(-sims, axis=1)[:, :10]
+        orders[tag] = order
         nd, m = _ndcg_at_k(order, rel)
         res[tag] = dict(ndcg10=nd, n_scored=m)
         rprint(f"  nDCG@10 [{tag}] = {nd:.4f}  (n={m})")
@@ -92,6 +94,26 @@ def main(cfg: DictConfig):
     o_q = np.argsort(-(np.asarray(q_q) @ np.asarray(d_q).T), axis=1)[:, 0]
     res["top1_flip"] = float((o_fp != o_q).mean())
     res["delta_ndcg"] = res["ptq"]["ndcg10"] - res["fp"]["ndcg10"]
+
+    # Per-query damage that a mean nDCG hides: a query is HARMED at k if a document that was
+    # both relevant and inside the FP top-k is no longer inside the PTQ top-k.
+    for k in (1, 5, 10):
+        harmed, affected = 0, 0
+        for qi in range(len(orders["fp"])):
+            g = set(d for d, sc in rel.get(qi, {}).items() if sc > 0)
+            if not g:
+                continue
+            fp_k, q_k = set(orders["fp"][qi][:k].tolist()), set(orders["ptq"][qi][:k].tolist())
+            kept_fp = g & fp_k
+            if not kept_fp:
+                continue
+            affected += 1
+            if kept_fp - q_k:
+                harmed += 1
+        res[f"gold_lost_at_{k}"] = harmed / affected if affected else float("nan")
+        res[f"n_with_gold_at_{k}"] = affected
+    rprint("  gold documents dropped from the top-k: "
+           + "  ".join(f"k={k}: {res[f'gold_lost_at_{k}']:.1%}" for k in (1, 5, 10)))
     rprint(f"  top-1 flip = {res['top1_flip']:.1%}   delta nDCG@10 = {res['delta_ndcg']:+.4f}")
 
     out = Path(os.environ["CHECKPOINT_BASE_PATH"]) / "text" / "sentence_transformers" / \
