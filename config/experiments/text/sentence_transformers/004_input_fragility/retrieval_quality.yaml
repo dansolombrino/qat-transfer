@@ -1,0 +1,18 @@
+hydra:
+  searchpath:
+    - file://${oc.env:PWD}/config
+  sweep:
+    dir: logs/config/experiments/text/sentence_transformers/004_input_fragility/retrieval_quality
+    subdir: ${model_name}/${dataset_name}/ptq=bits=${ptq.bits}_gran=${ptq.granularity}/seed=${seed}
+model_name: ???
+dataset_name: ???
+batch_size: 32
+max_length: 128
+seed: 2038
+gpu: ???
+max_queries: 2000
+qrels_split: test
+ptq:
+  skip_modules: []
+  bits: ???
+  granularity: group_128
