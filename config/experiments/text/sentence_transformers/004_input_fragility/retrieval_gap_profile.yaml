@@ -28,3 +28,8 @@ ptq:
   skip_modules: ???  # list of child-module names to exclude from PTQ; [] for the bare encoder
   bits: ???          # int
   granularity: ???   # "tensor", "channel", or "group_128"
+  method: rtn
+  calib_batches: 4
+  percdamp: 0.01
+
+k_gaps: 10

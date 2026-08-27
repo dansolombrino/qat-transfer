@@ -54,6 +54,8 @@ from src.vision.utils import (
     set_seed,
 )
 from src.quantization import apply_ptq_
+from src.gptq import apply_gptq_
+from src.awq import apply_awq_
 
 import hydra
 from omegaconf import DictConfig
@@ -175,9 +177,31 @@ def main(cfg: DictConfig):
     d_fp, labels = _embed(model, dataset.test_loader, device, cfg.limit_num_batches, "FP")
 
     skip_modules = frozenset(cfg.ptq.skip_modules)
-    qn = apply_ptq_(model=model, bits=cfg.ptq.bits,
-                    granularity=cfg.ptq.granularity, skip_modules=skip_modules)
-    print(f"\nPTQ: bits={cfg.ptq.bits}, gran={cfg.ptq.granularity}; quantised {len(qn)} layers")
+    method = str(getattr(cfg.ptq, "method", "rtn")).lower()
+    if method == "rtn":
+        qn = apply_ptq_(model=model, bits=cfg.ptq.bits,
+                        granularity=cfg.ptq.granularity, skip_modules=skip_modules)
+    elif method in ("gptq", "awq"):
+        # Error-minimizing alternative to RTN. Calibration images come from the TRAIN split so
+        # nothing the retrieval/eval measurement touches is used to fit the quantizer.
+        calib = []
+        for bi, batch in enumerate(dataset.train_loader):
+            if bi >= int(getattr(cfg.ptq, "calib_batches", 4)):
+                break
+            calib.append(batch[0] if isinstance(batch, (list, tuple)) else batch)
+        if not calib:
+            raise RuntimeError("gptq: no calibration batches available from the train split")
+        _fn = apply_gptq_ if method == "gptq" else apply_awq_
+        qn = _fn(
+            model=model, bits=cfg.ptq.bits, granularity=cfg.ptq.granularity,
+            skip_modules=skip_modules, calib_batches=calib,
+            forward_fn=lambda m, x: m(x.to(device)),
+            **({"percdamp": float(getattr(cfg.ptq, "percdamp", 0.01))} if method == "gptq"
+               else {"n_grid": int(getattr(cfg.ptq, "awq_grid", 20))}),
+        )
+    else:
+        raise ValueError(f"ptq.method expected 'rtn', 'gptq' or 'awq', got '{method}'")
+    print(f"\nPTQ[{method}]: bits={cfg.ptq.bits}, gran={cfg.ptq.granularity}; quantised {len(qn)} layers")
 
     print("\nPTQ embedding — test:")
     d_q, labels2 = _embed(model, dataset.test_loader, device, cfg.limit_num_batches, "Q")
@@ -201,7 +225,9 @@ def main(cfg: DictConfig):
     q_sel = rng.choice(n_docs, size=n_q, replace=False)
     perm = rng.permutation(n_docs)
     sizes = sorted({s for s in cfg.corpus_sizes if s < n_docs} | {n_docs})
-    k = min(K_GAPS, min(sizes) - 1)
+    # depth of the dumped gap profile; must exceed the semiorder width or |C_eps| is
+    # censored at k and the width-conditioned analysis is confounded (F30).
+    k = min(int(getattr(cfg, 'k_gaps', K_GAPS)), min(sizes) - 1)
 
     frames = []
     for size in sizes:
@@ -277,7 +303,8 @@ def main(cfg: DictConfig):
         sanitize_timm_model_name(cfg.model_name), cfg.dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}_wl={cfg.wl}"
         f"_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}",
-        f"ptq=bits={cfg.ptq.bits}_gran={cfg.ptq.granularity}_skip={skip_tag}",
+        f"ptq=bits={cfg.ptq.bits}_gran={cfg.ptq.granularity}_skip={skip_tag}"
+        + ("" if method == "rtn" else f"_m={method}"),
         f"seed={cfg.seed}",
     )
     os.makedirs(out_dir, exist_ok=True)

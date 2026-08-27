@@ -60,6 +60,8 @@ from datasets import load_dataset
 from sentence_transformers import SentenceTransformer
 
 from src.quantization import apply_ptq_
+from src.gptq import apply_gptq_
+from src.awq import apply_awq_
 from src.vision.utils import sanitize_hf_model_name, set_seed
 
 
@@ -185,9 +187,34 @@ def main(cfg: DictConfig):
 
     inner = model[0].auto_model
     skip_modules = frozenset(cfg.ptq.skip_modules)
-    quantized = apply_ptq_(model=inner, bits=cfg.ptq.bits,
-                           granularity=cfg.ptq.granularity, skip_modules=skip_modules)
-    print(f"\nPTQ: bits={cfg.ptq.bits}, gran={cfg.ptq.granularity}; "
+    method = str(getattr(cfg.ptq, "method", "rtn")).lower()
+    if method == "rtn":
+        quantized = apply_ptq_(model=inner, bits=cfg.ptq.bits,
+                               granularity=cfg.ptq.granularity, skip_modules=skip_modules)
+    elif method in ("gptq", "awq"):
+        # No train split exists for a retrieval corpus, so GPTQ is calibrated on a random
+        # sample of corpus documents. This is what a real deployment would do (calibration is
+        # unlabeled), but it does mean the quantizer has seen corpus text — state it in the
+        # writeup rather than implying a held-out calibration set.
+        n_cal = int(getattr(cfg.ptq, "calib_batches", 4)) * cfg.batch_size
+        rng_c = np.random.default_rng(cfg.seed + 1)
+        idx_c = rng_c.choice(len(docs), size=min(n_cal, len(docs)), replace=False)
+        cal_texts = [docs[i] for i in idx_c]
+        calib = [cal_texts[i:i + cfg.batch_size]
+                 for i in range(0, len(cal_texts), cfg.batch_size)]
+        # Hooks sit on `inner`'s Linears; the forward must go through the outer
+        # SentenceTransformer so tokenization and pooling happen as normal.
+        _fn = apply_gptq_ if method == "gptq" else apply_awq_
+        quantized = _fn(
+            model=inner, bits=cfg.ptq.bits, granularity=cfg.ptq.granularity,
+            skip_modules=skip_modules, calib_batches=calib,
+            forward_fn=lambda _m, batch: _encode(model, batch, cfg.batch_size, is_query=False),
+            **({"percdamp": float(getattr(cfg.ptq, "percdamp", 0.01))} if method == "gptq"
+               else {"n_grid": int(getattr(cfg.ptq, "awq_grid", 20))}),
+        )
+    else:
+        raise ValueError(f"ptq.method expected 'rtn', 'gptq' or 'awq', got '{method}'")
+    print(f"\nPTQ[{method}]: bits={cfg.ptq.bits}, gran={cfg.ptq.granularity}; "
           f"quantised {len(quantized)} layers")
 
     print("\nPTQ encoding:")
@@ -208,7 +235,7 @@ def main(cfg: DictConfig):
     sizes = sorted({s for s in cfg.corpus_sizes if s < n_docs} | {n_docs})
     rng = np.random.default_rng(cfg.seed)
     perm = rng.permutation(n_docs)          # fixed nested subsets across sizes
-    k = min(K_GAPS, min(sizes))
+    k = min(int(getattr(cfg,'k_gaps',K_GAPS)), min(sizes))
 
     frames = []
     for size in sizes:
@@ -256,7 +283,8 @@ def main(cfg: DictConfig):
         os.environ["CHECKPOINT_BASE_PATH"], "text", "sentence_transformers",
         "retrieval_gap_profile", sanitize_hf_model_name(cfg.model_name), cfg.dataset_name,
         f"ml={cfg.max_length}_bs={cfg.batch_size}",
-        f"ptq=bits={cfg.ptq.bits}_gran={cfg.ptq.granularity}_skip={skip_tag}",
+        f"ptq=bits={cfg.ptq.bits}_gran={cfg.ptq.granularity}_skip={skip_tag}"
+        + ("" if method == "rtn" else f"_m={method}"),
         f"seed={cfg.seed}",
     )
     os.makedirs(out_dir, exist_ok=True)

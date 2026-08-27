@@ -23,3 +23,7 @@ ptq:
   skip_modules: ???  # list of child-module attribute names to exclude from PTQ
   bits: ???          # int (e.g. 4 or 3)
   granularity: ???   # "tensor" or "channel"
+  method: rtn        # "rtn" (round-to-nearest, the default and what all prior results used)
+                     # or "gptq" (error-minimizing; writes to a separate _m=gptq output dir)
+  calib_batches: 4   # gptq only: calibration batches drawn from the TRAIN split
+  percdamp: 0.01     # gptq only: Hessian damping as a fraction of mean(diag(H))

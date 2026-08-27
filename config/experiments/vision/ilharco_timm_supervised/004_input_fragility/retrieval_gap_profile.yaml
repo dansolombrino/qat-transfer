@@ -35,3 +35,11 @@ ptq:
                      # the classification head is unused here, so [] is the honest setting
   bits: ???          # int (e.g. 4 or 3)
   granularity: ???   # "tensor", "channel", or "group_128"
+  method: rtn        # "rtn" (round-to-nearest, the default and what all prior results used)
+                     # or "gptq" (error-minimizing; writes to a separate _m=gptq output dir)
+  calib_batches: 4   # gptq only: calibration batches drawn from the TRAIN split
+  percdamp: 0.01     # gptq only: Hessian damping as a fraction of mean(diag(H))
+
+# gap-profile depth. 10 censors |C_eps| in retrieval (100% of inputs hit the cap);
+# raise it to measure the semiorder width directly.
+k_gaps: 10

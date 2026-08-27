@@ -23,3 +23,6 @@ ptq:
   skip_modules: ???  # list of child-module names to exclude from PTQ, e.g. [score]
   bits: ???          # int
   granularity: ???   # "tensor" or "channel"
+  method: rtn
+  calib_batches: 4
+  percdamp: 0.01

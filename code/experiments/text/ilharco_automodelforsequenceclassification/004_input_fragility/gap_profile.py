@@ -58,6 +58,8 @@ import pandas as pd
 import torch
 
 from src.quantization import apply_ptq_
+from src.gptq import apply_gptq_
+from src.awq import apply_awq_
 from src.text.data.common import DATASET_NAME_TO_EPOCHS
 from src.text.data.registry import get_dataset
 from src.vision.utils import random_tqdm_color, sanitize_hf_model_name, set_seed
@@ -224,11 +226,38 @@ def main(cfg: DictConfig):
     )
 
     skip_modules = frozenset(cfg.ptq.skip_modules)
-    quantized_names = apply_ptq_(
-        model=model, bits=cfg.ptq.bits,
-        granularity=cfg.ptq.granularity, skip_modules=skip_modules,
-    )
-    print(f"\nPTQ: bits={cfg.ptq.bits}, gran={cfg.ptq.granularity}; "
+    method = str(getattr(cfg.ptq, "method", "rtn")).lower()
+    if method == "rtn":
+        quantized_names = apply_ptq_(
+            model=model, bits=cfg.ptq.bits,
+            granularity=cfg.ptq.granularity, skip_modules=skip_modules,
+        )
+    elif method in ("gptq", "awq"):
+        # Calibration from the TRAIN split, so nothing the measurement touches fits the quantizer.
+        calib = []
+        for bi, batch in enumerate(dataset.train_loader):
+            if bi >= int(getattr(cfg.ptq, "calib_batches", 4)):
+                break
+            calib.append(batch[0])
+        if not calib:
+            raise RuntimeError("gptq: no calibration batches from the train split")
+
+        def _fwd(_m, texts):
+            enc = tokenizer(list(texts), padding=True, truncation=True,
+                            max_length=cfg.max_length, return_tensors="pt")
+            return model(input_ids=enc["input_ids"].to(device),
+                         attention_mask=enc["attention_mask"].to(device))
+
+        _fn = apply_gptq_ if method == "gptq" else apply_awq_
+        quantized_names = _fn(
+            model=model, bits=cfg.ptq.bits, granularity=cfg.ptq.granularity,
+            skip_modules=skip_modules, calib_batches=calib, forward_fn=_fwd,
+            **({"percdamp": float(getattr(cfg.ptq, "percdamp", 0.01))} if method == "gptq"
+               else {"n_grid": int(getattr(cfg.ptq, "awq_grid", 20))}),
+        )
+    else:
+        raise ValueError(f"ptq.method expected 'rtn', 'gptq' or 'awq', got '{method}'")
+    print(f"\nPTQ[{method}]: bits={cfg.ptq.bits}, gran={cfg.ptq.granularity}; "
           f"quantised {len(quantized_names)} layers")
 
     print("\nPTQ pass — test:")
@@ -280,7 +309,8 @@ def main(cfg: DictConfig):
         "gap_profile", sanitize_hf_model_name(cfg.model_name), cfg.dataset_name,
         f"optim=adamw_lr={cfg.lr}_wd={cfg.wd}_ls={cfg.ls}"
         f"_mgn={cfg.max_grad_norm}_bs={cfg.batch_size}_ml={cfg.max_length}",
-        f"ptq=bits={cfg.ptq.bits}_gran={cfg.ptq.granularity}_skip={skip_tag}",
+        f"ptq=bits={cfg.ptq.bits}_gran={cfg.ptq.granularity}_skip={skip_tag}"
+        + ("" if method == "rtn" else f"_m={method}"),
         f"seed={cfg.seed}",
     )
     os.makedirs(out_dir, exist_ok=True)
