@@ -130,3 +130,6 @@ misc/
 RESEARCH_QUEUE.md
 EXPERIMENTS.md
 HANDOFF.md
+make_handoff.sh
+install_handoff.sh
+qat-handoff.zip
