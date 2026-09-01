@@ -1,0 +1,14 @@
+D_vitL_ImageNet bash run_clsf_alloc.sh {GPU} D_vitL_ImageNet vit_large_patch16_224.orig_in21k ImageNet 3.5
+G_vitB_ImageNet_s101 bash run_clsf_alloc.sh {GPU} G_vitB_ImageNet_s101 vit_base_patch16_224.orig_in21k ImageNet 3.5 101 rtn
+G_vitB_ImageNet_s202 bash run_clsf_alloc.sh {GPU} G_vitB_ImageNet_s202 vit_base_patch16_224.orig_in21k ImageNet 3.5 202 rtn
+G_vitB_ImageNet_b325 bash run_clsf_alloc.sh {GPU} G_vitB_ImageNet_b325 vit_base_patch16_224.orig_in21k ImageNet 3.25 2038 rtn
+G_vitB_ImageNet_b375 bash run_clsf_alloc.sh {GPU} G_vitB_ImageNet_b375 vit_base_patch16_224.orig_in21k ImageNet 3.75 2038 rtn
+G_vitL_ImageNet_s101 bash run_clsf_alloc.sh {GPU} G_vitL_ImageNet_s101 vit_large_patch16_224.orig_in21k ImageNet 3.5 101 rtn
+G_vitL_ImageNet_s202 bash run_clsf_alloc.sh {GPU} G_vitL_ImageNet_s202 vit_large_patch16_224.orig_in21k ImageNet 3.5 202 rtn
+G_vitL_ImageNet_b325 bash run_clsf_alloc.sh {GPU} G_vitL_ImageNet_b325 vit_large_patch16_224.orig_in21k ImageNet 3.25 2038 rtn
+G_vitL_ImageNet_b375 bash run_clsf_alloc.sh {GPU} G_vitL_ImageNet_b375 vit_large_patch16_224.orig_in21k ImageNet 3.75 2038 rtn
+H_vitB_ImageNet_gptq bash run_clsf_alloc.sh {GPU} H_vitB_ImageNet_gptq vit_base_patch16_224.orig_in21k ImageNet 3.5 2038 gptq
+H_vitB_ImageNet_awq bash run_clsf_alloc.sh {GPU} H_vitB_ImageNet_awq vit_base_patch16_224.orig_in21k ImageNet 3.5 2038 awq
+H_vitL_ImageNet_gptq bash run_clsf_alloc.sh {GPU} H_vitL_ImageNet_gptq vit_large_patch16_224.orig_in21k ImageNet 3.5 2038 gptq
+H_vitL_ImageNet_awq bash run_clsf_alloc.sh {GPU} H_vitL_ImageNet_awq vit_large_patch16_224.orig_in21k ImageNet 3.5 2038 awq
+D_vitB_ImageNet bash run_clsf_alloc.sh {GPU} D_vitB_ImageNet vit_base_patch16_224.orig_in21k ImageNet 3.5
