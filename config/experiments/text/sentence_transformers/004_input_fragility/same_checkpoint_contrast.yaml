@@ -1,0 +1,19 @@
+hydra:
+  searchpath:
+    - file://${oc.env:PWD}/config
+  run:
+    dir: logs/config/experiments/text/sentence_transformers/004_input_fragility/same_checkpoint_contrast/${dataset_name}/bits=${ptq.bits}/seed=${seed}
+
+model_name: Qwen/Qwen3-Embedding-0.6B
+dataset_name: ???
+batch_size: 32
+max_length: 128
+seed: 2038
+gpu: ???
+limit_train_batches: 160   # ~5k train samples for the probe
+limit_test_batches: null
+
+ptq:
+  skip_modules: []
+  bits: ???
+  granularity: group_128

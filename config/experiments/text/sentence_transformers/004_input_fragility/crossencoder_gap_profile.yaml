@@ -1,0 +1,22 @@
+hydra:
+  searchpath:
+    - file://${oc.env:PWD}/config
+  run:
+    dir: logs/config/experiments/text/sentence_transformers/004_input_fragility/crossencoder_gap_profile/${dataset_name}/bits=${ptq.bits}/seed=${seed}
+
+model_name: cross-encoder/ms-marco-MiniLM-L-6-v2
+biencoder_name: BAAI/bge-large-en-v1.5
+dataset_name: ???
+top_k: 100
+max_docs: 8000
+max_queries: 500
+batch_size: 64
+max_length: 256
+seed: 2038
+gpu: ???
+
+ptq:
+  skip_modules: [classifier]
+  bits: ???
+  granularity: group_128
+  method: rtn

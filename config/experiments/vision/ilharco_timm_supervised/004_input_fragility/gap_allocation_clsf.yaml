@@ -1,0 +1,35 @@
+hydra:
+  searchpath:
+    - file://${oc.env:PWD}/config
+  sweep:
+    dir: logs/config/experiments/vision/ilharco_timm_supervised/004_input_fragility/gap_allocation_clsf
+    subdir: ${model_name}/${dataset_name}/ptq=bits=${ptq.bits}_gran=${ptq.granularity}/avg=${avg_bits}/seed=${seed}
+
+model_name: ???
+dataset_name: ???
+batch_size: ???
+lr: ???
+wd: ???
+ls: ???
+wl: ???
+max_grad_norm: ???
+seed: ???
+ckpt_seed: 2038   # the fine-tuning seed baked into the checkpoint path; never varies
+gpu: ???
+limit_num_epochs: null
+limit_num_batches: null
+log_to_file: false
+
+# allocation
+avg_bits: 3.5          # fractional budget; at an integer average uniform is the only allocation
+bit_choices: [3, 4]
+n_random: 3            # random splits at the same budget, the honest control
+calib_batches: 8       # train batches used to measure gap sensitivity (test is never used)
+tail_frac: 0.25       # gap_tail policy: sensitivity from the lowest-gap quantile only
+
+ptq:
+  skip_modules: []
+  bits: 3
+  granularity: group_128
+  method: rtn
+add_hawq: false

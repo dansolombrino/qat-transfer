@@ -1,0 +1,30 @@
+hydra:
+  searchpath:
+    - file://${oc.env:PWD}/config
+  sweep:
+    dir: logs/config/experiments/text/sentence_transformers/004_input_fragility/gap_allocation
+    subdir: ${model_name}/${dataset_name}/bits=${ptq.bits}_base=${base_group}/seed=${seed}
+
+model_name: ???
+dataset_name: ???
+batch_size: 32
+max_length: 128
+seed: 2038
+gpu: ???
+max_docs: 8000
+max_queries: 1000
+calib_queries: 128
+calib_docs: 512
+base_group: 128
+group_sizes: [64, 128, 256]
+ptq:
+  skip_modules: []
+  method: rtn
+  calib_batches: 4
+  bits: ???
+bit_choices: [3, 4]
+avg_bits: 3.5
+n_random: 3
+add_hawq: false      # HAWQ-style Fisher-trace baseline policy (curvature-weighted output error)
+add_baselines: false  # extra published allocation criteria (GPTQ-Hessian, AWQ-salience, SQNR, depth)
+baselines_lite: false  # only Fisher-no-noise, for the expensive big-model cross

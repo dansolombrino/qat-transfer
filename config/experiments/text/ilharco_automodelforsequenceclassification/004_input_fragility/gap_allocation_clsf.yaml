@@ -1,0 +1,35 @@
+hydra:
+  searchpath:
+    - file://${oc.env:PWD}/config
+  sweep:
+    dir: logs/config/experiments/text/ilharco_automodelforsequenceclassification/004_input_fragility/gap_allocation_clsf
+    subdir: ${sanitize_hf:${model_name}}/${dataset_name}/optim=adamw_lr=${lr}_wd=${wd}_ls=${ls}_mgn=${max_grad_norm}_bs=${batch_size}_ml=${max_length}/ptq=bits=${ptq.bits}_gran=${ptq.granularity}/seed=${seed}
+
+model_name: ???
+dataset_name: ???
+batch_size: ???
+lr: ???
+wd: ???
+ls: ???
+max_grad_norm: ???
+max_length: ???
+seed: ???
+ckpt_seed: 2038   # the fine-tuning seed baked into the checkpoint path; never varies
+gpu: ???
+limit_num_epochs: null
+limit_num_batches: null
+log_to_file: false
+
+avg_bits: 3.5          # fractional budget; at an integer average uniform is the only allocation
+bit_choices: [3, 4]
+n_random: 3            # random splits at the same budget, the honest control
+calib_batches: 8       # train batches used to measure gap sensitivity (test is never used)
+
+ptq:
+  skip_modules: [score]
+  bits: 3
+  granularity: group_128
+  method: rtn
+  calib_batches: 4
+  percdamp: 0.01
+add_hawq: false
