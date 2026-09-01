@@ -134,3 +134,16 @@ make_handoff.sh
 install_handoff.sh
 qat-handoff.zip
 RESUME_ON_BEHEMOTH.md
+
+# HuggingFace dataset caches pulled into the experiment dirs (hundreds of MB, regenerable)
+code/experiments/**/mteb___*/
+code/experiments/**/downloads/
+
+# Job-queue state and completion markers from the dispatcher (ephemeral, session-local)
+*_jobs.tsv
+study_jobs*.tsv
+recalib_jobs.tsv
+.jobq.done.bak*
+BAKEOFF_COMPLETE.md
+DEFERRED_COMPLETE.md
+NIGHT_REPORT.md

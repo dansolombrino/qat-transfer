@@ -99,6 +99,7 @@ def apply_awq_(
     skip_modules: frozenset,
     calib_batches: List,
     forward_fn,
+    only: frozenset | None = None,
     n_grid: int = 20,
     verbose: bool = True,
 ) -> List[str]:
@@ -108,6 +109,10 @@ def apply_awq_(
     the two differ only in the quantization rule and the comparison is clean.
     """
     targets = _target_linears(model, skip_modules)
+    if only is not None:
+        # `skip_modules` is matched against LOCAL child names; a per-layer bit allocation is
+        # keyed by full dotted paths, so it cannot be expressed through it. Filter explicitly.
+        targets = [(n, m) for n, m in targets if n in only]
     if not targets:
         return []
 

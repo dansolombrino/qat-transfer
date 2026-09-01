@@ -156,6 +156,7 @@ def apply_gptq_(
     skip_modules: frozenset[str],
     calib_batches: List,
     forward_fn,
+    only: frozenset | None = None,
     blocksize: int = 128,
     percdamp: float = 0.01,
     verbose: bool = True,
@@ -170,6 +171,10 @@ def apply_gptq_(
     that function accepts.
     """
     targets = _target_linears(model, skip_modules)
+    if only is not None:
+        # `skip_modules` is matched against LOCAL child names; a per-layer bit allocation is
+        # keyed by full dotted paths, so it cannot be expressed through it. Filter explicitly.
+        targets = [(n, m) for n, m in targets if n in only]
     if not targets:
         return []
 
