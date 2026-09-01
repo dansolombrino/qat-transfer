@@ -28,3 +28,4 @@ n_random: 3
 add_hawq: false      # HAWQ-style Fisher-trace baseline policy (curvature-weighted output error)
 add_baselines: false  # extra published allocation criteria (GPTQ-Hessian, AWQ-salience, SQNR, depth)
 baselines_lite: false  # only Fisher-no-noise, for the expensive big-model cross
+sens_only: false  # compute sensitivities and allocations only, skip policy evaluation

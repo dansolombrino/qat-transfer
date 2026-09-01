@@ -201,7 +201,12 @@ def main(cfg: DictConfig):
     if h_sens is not None:
         allocs["hawq"] = allocate_bits(h_sens, numel, choices, target)
     res = {}
-    for name, alloc in allocs.items():
+    if bool(cfg.get("sens_only", False)):
+        rprint("sens_only: skipping policy evaluation, recording allocations only")
+        allocs_iter = []
+    else:
+        allocs_iter = list(allocs.items())
+    for name, alloc in allocs_iter:
         inner.load_state_dict(fp_state)
         method = str(getattr(cfg.ptq, "method", "rtn")).lower()
         if method == "rtn":
@@ -258,7 +263,10 @@ def main(cfg: DictConfig):
              n_docs=len(docs), n_calib_docs=int(min(cfg.calib_docs, len(docs))),
              eval_query_idx=[int(i) for i in eval_idx],
              layer_rho=float(rho), results=res,
-             alloc_gap={k: int(v) for k, v in allocs["gap"].items()}), indent=2))
+             alloc_gap={k: int(v) for k, v in allocs["gap"].items()},
+             # every criterion's layer assignment, so agreement between criteria can be
+             # measured later without recomputing any sensitivity
+             allocs={n: {k: int(v) for k, v in a.items()} for n, a in allocs.items()}), indent=2))
     rprint(f"\nSaved: {out}")
 
 
