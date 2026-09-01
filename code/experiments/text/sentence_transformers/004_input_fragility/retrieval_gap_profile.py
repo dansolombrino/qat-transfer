@@ -81,7 +81,7 @@ DATASET_TO_HF_PATH = {
 }
 
 
-def _load_corpus_and_queries(dataset_name, max_queries, seed):
+def _load_corpus_and_queries(dataset_name, max_queries, seed, return_index=False):
     hf_path = DATASET_TO_HF_PATH[dataset_name]
     token = os.environ.get("HF_TOKEN")
     cache = os.environ.get("HF_DATASETS_CACHE")
@@ -95,11 +95,14 @@ def _load_corpus_and_queries(dataset_name, max_queries, seed):
             for t, x in zip(corpus["title"], corpus["text"])]
     qs = [q or "" for q in queries["text"]]
 
+    sel = np.arange(len(qs))
     if max_queries is not None and len(qs) > max_queries:
         rng = np.random.default_rng(seed)
         sel = rng.choice(len(qs), size=max_queries, replace=False)
         qs = [qs[i] for i in sel]
 
+    if return_index:
+        return docs, qs, sel
     return docs, qs
 
 
