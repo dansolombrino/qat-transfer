@@ -137,3 +137,7 @@ scripts/dispatch/budget_axis/waves/*/*/tmp/
 scripts/dispatch/budget_axis/waves/*/*/stale/
 scripts/dispatch/budget_axis/**/__pycache__/
 scripts/dispatch/budget_axis/waves/*/*/*.lock
+
+# agent session scratch
+.codex/task-state/
+orchestration-artifacts/
